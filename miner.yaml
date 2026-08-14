@@ -1,0 +1,45 @@
+# Telegraph Protocol miner config — schema verified against the cached
+# docs.telegraphprotocol.com/docs/miners/yaml-config reference (2026-08-14).
+#
+# TODO before registering on-chain (same open question as Miner #1's
+# miner.yaml — see docs/miners/miner-registration):
+#   - id: the docs list this as required and used in API paths
+#     (/miner-dispatcher/v1/{id}/...), but registerMiner() on the Diamond
+#     contract assigns a `registrationId` via the MinerRegistered event —
+#     it isn't chosen up front. Left as 0 until that's resolved, same as
+#     Miner #1.
+#   - This file itself must be hosted at a public URL (IPFS recommended)
+#     and its SHA-256 hash committed on-chain — see miner-registration docs.
+
+version: "1"
+kind: miner
+id: 0
+slug: telegraph-onchain-tx-lookup
+protocol: generic
+name: On-Chain Transaction Lookup
+description: >
+  Looks up a single EVM transaction by hash and reports its status
+  (confirmed / reverted / pending / not_found) with structured fields
+  (from, to, value_wei, block_number) and a confidence score that reflects
+  confirmation depth — lower for shallow/reorg-sensitive confirmations,
+  full confidence once past the configured confirmation depth.
+base_url: https://telegraph-onchain-tx-lookup-miner.onrender.com
+
+auth:
+  type: none
+
+endpoints:
+  - path: /check-tx
+    external_path: /check-tx
+    method: GET
+    description: >
+      Looks up an EVM transaction by hash. Query param: tx_hash
+      (0x-prefixed, 64 hex characters, required).
+
+semantics:
+  signal_mapping:
+    label_field: status
+    reason_field: summary
+    confidence_field: confidence
+  supported_intents:
+    - ONCHAIN_TX_LOOKUP

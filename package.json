@@ -1,0 +1,17 @@
+{
+  "name": "telegraph-onchain-tx-lookup-miner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Telegraph Protocol Miner (protocol: generic) — single-transaction lookup via standard eth_ JSON-RPC, registered under the ONCHAIN_TX_LOOKUP intent.",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node --watch --env-file-if-exists=.env src/index.js",
+    "start": "node --env-file-if-exists=.env src/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "express-rate-limit": "^8.5.2"
+  }
+}

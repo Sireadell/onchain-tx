@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: telegraph-onchain-tx-lookup-miner
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: node --use-system-ca src/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 3000
+      - key: CHAIN
+        value: eth
+      - key: CONFIRMATION_DEPTH
+        value: 12
+      - key: ANKR_API_KEY
+        sync: false
