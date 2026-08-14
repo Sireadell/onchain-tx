@@ -12,7 +12,6 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-const CHAIN = process.env.CHAIN || 'eth';
 const ANKR_CALL_TIMEOUT_MS = Number(process.env.ANKR_CALL_TIMEOUT_MS) || 8_000;
 
 export class ApiKeyMissingError extends Error {
@@ -107,21 +106,25 @@ function waitForRateLimitSlot() {
   return claim;
 }
 
-// RUN-SCOPED CACHE — keyed on (method, ...params) rather than
+// RUN-SCOPED CACHE — keyed on (chain, method, ...params) rather than
 // (method, address, pageSize, pageToken) like walletActivity.js, since
-// there's no pagination here. A tx lookup and its receipt lookup made
-// twice in the same short window (e.g. status + confidence both reading
-// the receipt) hit this instead of Ankr twice.
+// there's no pagination here. `chain` is part of the key (not just method
+// + params) because eth_blockNumber's params are always `[]` — without the
+// chain segment, every chain would collide on one shared cached block
+// height, which is a real cross-chain correctness bug, not just an
+// inefficiency. A tx lookup and its receipt lookup made twice in the same
+// short window (e.g. status + confidence both reading the receipt) hit
+// this instead of Ankr twice.
 const CACHE_TTL_MS = Number(process.env.RPC_CACHE_TTL_MS) || 30_000;
 const MAX_CACHE_ENTRIES = 500;
 const cache = new Map();
 
-function cacheKey(method, params) {
-  return `${method}:${JSON.stringify(params)}`;
+function cacheKey(chainSegment, method, params) {
+  return `${chainSegment}:${method}:${JSON.stringify(params)}`;
 }
 
-async function cachedFetch(method, params, fetcher) {
-  const key = cacheKey(method, params);
+async function cachedFetch(chainSegment, method, params, fetcher) {
+  const key = cacheKey(chainSegment, method, params);
   const hit = cache.get(key);
   if (hit && Date.now() - hit.storedAt < CACHE_TTL_MS) {
     return hit.value;
@@ -138,7 +141,7 @@ export function resetRpcCache() {
   cache.clear();
 }
 
-async function fetchAnkrRpc(method, params) {
+async function fetchAnkrRpc(chainSegment, method, params) {
   const apiKey = requireApiKey();
 
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
@@ -152,7 +155,7 @@ async function fetchAnkrRpc(method, params) {
     let errName;
     let networkErr;
     try {
-      res = await fetch(`https://rpc.ankr.com/${CHAIN}/${apiKey}`, {
+      res = await fetch(`https://rpc.ankr.com/${chainSegment}/${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
@@ -192,18 +195,18 @@ async function fetchAnkrRpc(method, params) {
   }
 }
 
-export async function getTransactionByHash(txHash) {
-  return cachedFetch('eth_getTransactionByHash', [txHash], () =>
-    fetchAnkrRpc('eth_getTransactionByHash', [txHash])
+export async function getTransactionByHash(chainSegment, txHash) {
+  return cachedFetch(chainSegment, 'eth_getTransactionByHash', [txHash], () =>
+    fetchAnkrRpc(chainSegment, 'eth_getTransactionByHash', [txHash])
   );
 }
 
-export async function getTransactionReceipt(txHash) {
-  return cachedFetch('eth_getTransactionReceipt', [txHash], () =>
-    fetchAnkrRpc('eth_getTransactionReceipt', [txHash])
+export async function getTransactionReceipt(chainSegment, txHash) {
+  return cachedFetch(chainSegment, 'eth_getTransactionReceipt', [txHash], () =>
+    fetchAnkrRpc(chainSegment, 'eth_getTransactionReceipt', [txHash])
   );
 }
 
-export async function getBlockNumber() {
-  return cachedFetch('eth_blockNumber', [], () => fetchAnkrRpc('eth_blockNumber', []));
+export async function getBlockNumber(chainSegment) {
+  return cachedFetch(chainSegment, 'eth_blockNumber', [], () => fetchAnkrRpc(chainSegment, 'eth_blockNumber', []));
 }

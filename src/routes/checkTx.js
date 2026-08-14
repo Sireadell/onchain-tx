@@ -12,13 +12,19 @@ import {
   ApiKeyMissingError,
 } from '../lib/ankrRpc.js';
 import { evaluateTransaction } from '../lib/txStatus.js';
+import { CHAINS, DEFAULT_CHAIN, resolveChain } from '../lib/chains.js';
 
 const router = Router();
 
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 
 async function handleCheckTx(req, res) {
-  const txHash = req.method === 'GET' ? req.query?.tx_hash : req.body?.tx_hash;
+  const params = req.method === 'GET' ? req.query : req.body;
+  const txHash = params?.tx_hash;
+  // No chain param at all -> DEFAULT_CHAIN, preserving pre-multi-chain
+  // behavior for existing callers. An explicit but unrecognized chain is a
+  // validation error, not a silent fallback.
+  const chainParam = params?.chain ?? DEFAULT_CHAIN;
 
   if (!txHash || !TX_HASH_RE.test(txHash)) {
     return res.status(400).json({
@@ -32,18 +38,30 @@ async function handleCheckTx(req, res) {
     });
   }
 
+  const chain = resolveChain(chainParam);
+  if (!chain) {
+    return res.status(400).json({
+      status: 'error',
+      summary: `unsupported chain '${chainParam}' — must be one of: ${Object.keys(CHAINS).join(', ')}`,
+      confidence: 1.0,
+      error: 'unsupported `chain` parameter',
+    });
+  }
+
   let tx;
   let receipt;
   let currentBlockNumberHex;
   try {
-    [tx, receipt] = await Promise.all([getTransactionByHash(txHash), getTransactionReceipt(txHash)]);
-    // Best-effort — used only to compute confirmation depth for confidence.
-    // A failure here shouldn't take down an otherwise-successful lookup.
-    try {
-      currentBlockNumberHex = await getBlockNumber();
-    } catch {
-      currentBlockNumberHex = null;
-    }
+    // All three run concurrently — blockNumber doesn't depend on tx/receipt,
+    // and previously ran sequentially after them, adding a full unnecessary
+    // RTT to every request. It stays best-effort: its own failure is caught
+    // here and degrades to null, without rejecting the whole Promise.all
+    // (which would otherwise also fail the tx/receipt lookups).
+    [tx, receipt, currentBlockNumberHex] = await Promise.all([
+      getTransactionByHash(chain.segment, txHash),
+      getTransactionReceipt(chain.segment, txHash),
+      getBlockNumber(chain.segment).catch(() => null),
+    ]);
   } catch (err) {
     if (err instanceof ApiKeyMissingError) {
       return res.status(503).json({
@@ -73,6 +91,7 @@ async function handleCheckTx(req, res) {
 
   res.json({
     tx_hash: txHash,
+    chain: chainParam,
     status: result.status,
     summary: result.summary,
     confidence: result.confidence,

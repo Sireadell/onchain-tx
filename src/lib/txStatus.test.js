@@ -108,3 +108,12 @@ test('missing current block number still returns a confirmed answer, non-1.0 con
   assert.equal(r.status, 'confirmed');
   assert.equal(r.confidence, 0.8);
 });
+
+test('current block behind the transaction block (negative depth) — capped at 0.8, never negative', () => {
+  // tx at 0x100 (256), "current" block 0xf0 (240) — a stale/lagging RPC
+  // response, shouldn't happen but must degrade safely instead of
+  // producing a negative or >1 confidence value.
+  const r = evaluateTransaction(txAtDepth('0x100', '0xf0'));
+  assert.equal(r.status, 'confirmed');
+  assert.equal(r.confidence, 0.8);
+});

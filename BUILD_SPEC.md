@@ -1,17 +1,20 @@
-# ONCHAIN_TX_LOOKUP Miner — Frozen Build Spec
+# ONCHAIN_TX_LOOKUP Miner — Build Spec
 
-Status: frozen for implementation. One item downgraded from blocker to
-first-implementation-step verification (see Transport section). One
-requested field rejected as invalid against the actual schema (see
-Signal Mapping section) — flagging that explicitly since it contradicts
-the last adversarial-review pass.
+Status: v2 — five-chain. Originally frozen single-chain (one instance = one
+chain, no `chain` param, matching Miner #1's pattern); revised 2026-08-14
+after confirming via live docs + a competing registered miner's own
+declared schema that `chain` is a miner-level API design choice, not a
+protocol requirement — see `docs.telegraphprotocol.com/docs/miners/yaml-config`
+(`input_schema`/`output_schema` are optional, caller-facing discovery
+metadata only). One deployed instance now serves five allowlisted chains
+behind one Ankr API key, selected via an explicit `chain` query param that
+defaults to `eth` for backward compatibility with the original single-chain
+callers.
 
 ## Identity
 
 - kind: miner, protocol: generic
-- Separate repo/deployment from Miner #1 (telegraph-forensics-fraud-detection) —
-  same reasoning as that miner's chain-per-instance rule: one deployed
-  instance answers for one chain, no per-request chain branching.
+- Separate repo/deployment from Miner #1 (telegraph-forensics-fraud-detection).
 - supported_intents: [ONCHAIN_TX_LOOKUP]
 - Tier A — deterministic WASM exact-match scoring (per docs/using-telegraph/intents).
   This matters for design: the graded contract is the structured fields, not
@@ -20,9 +23,18 @@ the last adversarial-review pass.
 
 ## Endpoint
 
-- `GET /check-tx?tx_hash=0x...` — single required param, EVM tx hash.
-- No `chain` param — chain is fixed per deployed instance (env var), same
-  pattern as Miner #1's `CHAIN`.
+- `GET /check-tx?tx_hash=0x...&chain=<chain>` — `tx_hash` required.
+  `chain` optional, one of `eth` (default), `base`, `arbitrum`, `optimism`,
+  `polygon`; an unrecognized value is a 400 validation error, never used to
+  construct an RPC URL directly (static allowlist in `src/lib/chains.js`).
+- Ankr per-chain URL segments live-verified 2026-08-14: `eth`, `base`,
+  `arbitrum`, `polygon` all resolved real block numbers with the current
+  key. `optimism` resolves to a real chain (identical response whether
+  tried as `optimism`, `optimism_mainnet`, `op`, or `op_mainnet`) but the
+  current `ANKR_API_KEY` isn't plan-enabled for it yet — a key-permission
+  gap, not a URL-naming or architecture problem. Left in the allowlist;
+  it 502s like any other transient upstream failure until access is
+  granted, no special-casing needed in code.
 
 ## Signal Mapping — CORRECTED
 
@@ -90,6 +102,14 @@ language) — it's simply out of scope, not a gap being flagged.
   to this chain/node right now — not confident about *why*).
 - Malformed hash (wrong length/format): reject before any RPC call,
   `status: error`, `confidence: 1.0`.
+- Current block number unavailable (the best-effort `eth_blockNumber` call
+  failed) OR current block is behind the transaction's block (negative
+  depth — a stale/lagging RPC response, shouldn't happen but must degrade
+  safely): `confidence: 0.8` exactly, `status` stays `confirmed`. Both are
+  "we know it's confirmed, we just can't score how deep" cases, not
+  something to phrase as a disclosed limitation in `summary`. Implemented
+  in `confidenceForDepth()` (`src/lib/txStatus.js`), covered by
+  `txStatus.test.js`.
 
 ## Transport — RPC Endpoint Design
 
@@ -107,23 +127,36 @@ pagination).
 JSON-RPC (`eth_getTransactionByHash`, `eth_getTransactionReceipt`), which
 is a different Ankr product line.
 
-**Design decision:** add a sibling `fetchAnkrRpc(method, params)` posting
-to `https://rpc.ankr.com/{chain}/{apiKey}` (per-chain standard endpoint),
-reusing the same retry/rate-limit/budget/cache wrapper logic as
-`fetchAnkr`. This is based on Ankr's documented product split (Advanced
-API multichain convenience endpoint vs. per-chain standard JSON-RPC
-endpoint) — high confidence, but **not** live-verified this session the
-way the 50/min rate limit figure was (that one's a comment in
-`walletActivity.js` citing a direct docs check on 2026-08-12; this one
-isn't, the docs page returned client-rendered boilerplate via curl and I
-didn't push further without checking first).
+**Design decision, live-verified 2026-08-14:** `fetchAnkrRpc(chainSegment,
+method, params)` posts to `https://rpc.ankr.com/{chainSegment}/{apiKey}`
+(per-chain standard endpoint), reusing the same retry/rate-limit/budget/
+cache wrapper logic as `fetchAnkr`. Confirmed live for all five target
+chains — see chain allowlist note under Endpoint above.
 
-Downgraded from hard blocker to first implementation step: before writing
-anything downstream of it, fire one real `eth_getTransactionByHash` call
-against `rpc.ankr.com/{chain}/{key}` with the real key. Fails fast, costs
-one request, resolves this with certainty instead of docs-guessing. Flag
-if you want me to run that smoke test myself once you're ready — it needs
-`ANKR_API_KEY`, which I won't touch without you saying so.
+**Multi-chain additions to the transport layer:**
+
+- `src/lib/chains.js` — static `CHAINS` allowlist (slug -> Ankr URL
+  segment). The route layer resolves `chain` through this map only; an
+  unrecognized value never reaches `fetch()`.
+- Cache key changed from `method:params` to `chain:method:params`.
+  `eth_blockNumber`'s params are always `[]`, so without the chain segment
+  in the key every chain would read one shared cached block height — a
+  real cross-chain correctness bug, not just an inefficiency. Covered by a
+  test in `ankrRpc.test.js`.
+- Rate limiter and RPC budget stay process-wide, not per-chain — Ankr's
+  free-tier limit is per API key, and all five chains share one key here,
+  so a shared token bucket is the correct model, not an oversight.
+- `getTransactionByHash`/`getTransactionReceipt`/`getBlockNumber` in
+  `checkTx.js` now run concurrently via one `Promise.all` (previously
+  `blockNumber` ran sequentially after the other two, adding an
+  unnecessary full RTT to every request). `blockNumber` keeps its
+  independent `.catch(() => null)` so its failure can't reject the tx/
+  receipt lookups too.
+- Startup check (`index.js`) probes all five chains with a live
+  `eth_blockNumber` call and only refuses to start if *every* chain is
+  unreachable (a genuinely broken deployment, e.g. bad API key). A single
+  chain being unreachable — e.g. Optimism pending Ankr plan access — logs
+  a warning and the other four still serve traffic.
 
 ## Test Cases
 
@@ -134,7 +167,7 @@ if you want me to run that smoke test myself once you're ready — it needs
 5. Nonexistent transaction hash
 6. Malformed transaction hash
 7. Wrong-chain hash (valid format, not found on the configured chain)
-8. Unsupported chain (miner instance misconfigured/chain not covered)
+8. Unsupported/unrecognized `chain` param — rejected before any RPC call
 9. RPC timeout / failure
 10. Rate-limit / budget exhaustion
 11. Recent / reorg-sensitive transaction (shallow confirmation depth)
@@ -142,6 +175,8 @@ if you want me to run that smoke test myself once you're ready — it needs
 13. Zero-value transaction
 14. Contract call (non-transfer `input` data)
 15. Transaction types 0, 1, and 2 (EIP-4844 where relevant to the chain)
+16. Same tx hash on two different chains does not cross-contaminate
+    responses (cache isolation)
 
 ## Explicitly Out of Scope for This Pass
 
@@ -149,3 +184,8 @@ if you want me to run that smoke test myself once you're ready — it needs
 - Intent decision (ONCHAIN_TX_LOOKUP) not reopened.
 - No `canonical` field unless a concrete on_chain mapping requirement
   surfaces later.
+- No chains beyond the five target chains (eth, base, arbitrum, optimism,
+  polygon).
+- No second RPC provider — Optimism's current gap is a key-permission
+  issue to resolve on Ankr's dashboard, not a reason to add a new
+  provider.
