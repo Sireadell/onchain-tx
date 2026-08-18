@@ -28,9 +28,9 @@
 version: "1"
 kind: miner
 id: 0
-slug: telegraph-onchain-tx-lookup
+slug: txlens
 protocol: generic
-name: On-Chain Transaction Lookup
+name: TxLens
 description: >
   Looks up a single EVM transaction by hash across five chains (Ethereum,
   Base, Arbitrum, Optimism, Polygon) and reports its status (confirmed /
