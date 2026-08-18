@@ -1,0 +1,21 @@
+name: Keep miner warm
+
+# Render free tier spins the service down after 15 minutes of no inbound
+# traffic, then takes ~13s to wake back up on the next request. This pings
+# /health every 10 minutes so it never goes idle long enough to sleep.
+# See LEARNINGS.md (global, ~/.claude/LEARNINGS.md) for why this exists.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: |
+          curl -sw "\nHTTP:%{http_code} TIME:%{time_total}s\n" \
+            --max-time 30 \
+            "https://telegraph-onchain-tx-lookup-miner.onrender.com/health"

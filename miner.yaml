@@ -81,11 +81,6 @@ endpoints:
         block_number:
           type: [number, "null"]
           description: Null while pending / no receipt yet.
-    limitations: >
-      Reports only top-level transaction + receipt data, not internal
-      (trace-level) transfers. One deployed instance serves all five
-      allowlisted chains via a shared Ankr API key.
-
 semantics:
   signal_mapping:
     label_field: status
@@ -93,3 +88,11 @@ semantics:
     confidence_field: confidence
   supported_intents:
     - ONCHAIN_TX_LOOKUP
+
+limitations:
+  - code: MAX_PARAM_VALUE
+    message: tx_hash must be exactly 66 characters (0x-prefixed, 64 hex characters).
+    param: tx_hash
+    property: length
+    value_num: 66
+    operator: eq
