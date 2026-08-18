@@ -10,13 +10,24 @@ import {
   CoinNotFoundError,
 } from './defiLlamaApi.js';
 
-function mockFetch(t, handler) {
+// Stricter than a loose URL-substring matcher — asserts the exact host, so a function
+// silently calling the wrong DefiLlama host (api.llama.fi vs
+// coins.llama.fi are different products) fails the test loudly instead of
+// the mock quietly intercepting whatever URL shows up. Caught a real bug
+// this way 2026-08-18: getCoinPrice was hardcoded to api.llama.fi (copied
+// from getProtocolTvl/getChainTvl) when prices actually live on
+// coins.llama.fi — passed every test under the old loose matcher because
+// it matched both hosts, only surfaced testing the real deployment.
+function mockFetchHost(t, expectedHost, handler) {
   const original = globalThis.fetch;
   globalThis.fetch = (url, ...rest) => {
-    if (typeof url === 'string' && url.includes('api.llama.fi')) {
-      return handler(url, ...rest);
+    if (typeof url !== 'string' || !url.includes('llama.fi')) {
+      return original(url, ...rest);
     }
-    return original(url, ...rest);
+    if (!url.startsWith(`https://${expectedHost}/`)) {
+      throw new Error(`expected DefiLlama call to https://${expectedHost}/..., got ${url}`);
+    }
+    return handler(url, ...rest);
   };
   t.after(() => {
     globalThis.fetch = original;
@@ -25,7 +36,7 @@ function mockFetch(t, handler) {
 
 test('getProtocolTvl: returns numeric TVL on success', async (t) => {
   resetDefiLlamaCache();
-  mockFetch(t, async () => ({
+  mockFetchHost(t, 'api.llama.fi', async () => ({
     status: 200,
     text: async () => '2948648103.30746',
   }));
@@ -36,7 +47,7 @@ test('getProtocolTvl: returns numeric TVL on success', async (t) => {
 
 test('getProtocolTvl: unknown protocol throws ProtocolNotFoundError', async (t) => {
   resetDefiLlamaCache();
-  mockFetch(t, async () => ({
+  mockFetchHost(t, 'api.llama.fi', async () => ({
     status: 400,
     text: async () => 'Protocol not found',
   }));
@@ -50,7 +61,7 @@ test('getProtocolTvl: unknown protocol throws ProtocolNotFoundError', async (t) 
 test('getProtocolTvl: caches repeat lookups for the same slug', async (t) => {
   resetDefiLlamaCache();
   let callCount = 0;
-  mockFetch(t, async () => {
+  mockFetchHost(t, 'api.llama.fi', async () => {
     callCount += 1;
     return { status: 200, text: async () => '100' };
   });
@@ -62,7 +73,7 @@ test('getProtocolTvl: caches repeat lookups for the same slug', async (t) => {
 
 test('getChainTvl: returns TVL for a matching chain name, case-insensitive', async (t) => {
   resetDefiLlamaCache();
-  mockFetch(t, async () => ({
+  mockFetchHost(t, 'api.llama.fi', async () => ({
     status: 200,
     json: async () => [
       { name: 'Ethereum', tvl: 41775106260.45556 },
@@ -76,7 +87,7 @@ test('getChainTvl: returns TVL for a matching chain name, case-insensitive', asy
 
 test('getChainTvl: unknown chain throws ChainNotFoundError', async (t) => {
   resetDefiLlamaCache();
-  mockFetch(t, async () => ({
+  mockFetchHost(t, 'api.llama.fi', async () => ({
     status: 200,
     json: async () => [{ name: 'Ethereum', tvl: 100 }],
   }));
@@ -90,7 +101,7 @@ test('getChainTvl: unknown chain throws ChainNotFoundError', async (t) => {
 test('getChainTvl: one /v2/chains call covers repeat lookups of different chains', async (t) => {
   resetDefiLlamaCache();
   let callCount = 0;
-  mockFetch(t, async () => {
+  mockFetchHost(t, 'api.llama.fi', async () => {
     callCount += 1;
     return {
       status: 200,
@@ -108,7 +119,7 @@ test('getChainTvl: one /v2/chains call covers repeat lookups of different chains
 
 test('getCoinPrice: returns price/symbol for a known coin key', async (t) => {
   resetDefiLlamaCache();
-  mockFetch(t, async () => ({
+  mockFetchHost(t, 'coins.llama.fi', async () => ({
     status: 200,
     json: async () => ({
       coins: { 'coingecko:bitcoin': { price: 64549.31, symbol: 'BTC', timestamp: 1787090150 } },
@@ -122,7 +133,7 @@ test('getCoinPrice: returns price/symbol for a known coin key', async (t) => {
 
 test('getCoinPrice: key absent from response coins throws CoinNotFoundError', async (t) => {
   resetDefiLlamaCache();
-  mockFetch(t, async () => ({ status: 200, json: async () => ({ coins: {} }) }));
+  mockFetchHost(t, 'coins.llama.fi', async () => ({ status: 200, json: async () => ({ coins: {} }) }));
 
   await assert.rejects(
     () => getCoinPrice('coingecko:not-a-real-coin'),
@@ -133,7 +144,7 @@ test('getCoinPrice: key absent from response coins throws CoinNotFoundError', as
 test('getCoinPrice: caches repeat lookups for the same key', async (t) => {
   resetDefiLlamaCache();
   let callCount = 0;
-  mockFetch(t, async () => {
+  mockFetchHost(t, 'coins.llama.fi', async () => {
     callCount += 1;
     return { status: 200, json: async () => ({ coins: { 'coingecko:bitcoin': { price: 100, symbol: 'BTC', timestamp: 1 } } }) };
   });

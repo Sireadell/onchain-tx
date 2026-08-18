@@ -13,13 +13,21 @@ function startServer(t) {
   return `http://127.0.0.1:${port}`;
 }
 
+// /crypto-price only ever calls coins.llama.fi (prices live on a
+// different DefiLlama host than TVL) — asserting the exact host here
+// would have caught the 2026-08-18 host-mismatch bug (code was hardcoded
+// to api.llama.fi, which 404s for /prices/current/*) without needing a
+// live deploy to surface it.
 function mockFetch(t, handler) {
   const original = globalThis.fetch;
   globalThis.fetch = (url, ...rest) => {
-    if (typeof url === 'string' && url.includes('api.llama.fi')) {
-      return handler(url, ...rest);
+    if (typeof url !== 'string' || !url.includes('llama.fi')) {
+      return original(url, ...rest);
     }
-    return original(url, ...rest);
+    if (!url.startsWith('https://coins.llama.fi/')) {
+      throw new Error(`expected /crypto-price to call coins.llama.fi, got ${url}`);
+    }
+    return handler(url, ...rest);
   };
   t.after(() => {
     globalThis.fetch = original;

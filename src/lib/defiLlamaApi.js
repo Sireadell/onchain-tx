@@ -53,7 +53,13 @@ export function resetDefiLlamaCache() {
   priceCache.clear();
 }
 
-async function fetchDefiLlama(path) {
+// DefiLlama splits its public API across multiple hosts by product —
+// api.llama.fi for TVL/protocols, coins.llama.fi for prices. Confirmed
+// live 2026-08-18 against production: calling /prices/current/* on
+// api.llama.fi 404s (silently treated as "not found" by this transport's
+// own retry logic, not a loud failure), so getting the host right per
+// call matters, not just the path.
+async function fetchDefiLlama(host, path) {
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
     checkBudget();
     const controller = new AbortController();
@@ -64,7 +70,7 @@ async function fetchDefiLlama(path) {
     let errName;
     let networkErr;
     try {
-      res = await fetch(`https://api.llama.fi${path}`, { signal: controller.signal });
+      res = await fetch(`https://${host}${path}`, { signal: controller.signal });
       statusCode = res.status;
       ok = res.status === 200;
     } catch (err) {
@@ -109,7 +115,7 @@ export async function getProtocolTvl(slug) {
     return hit.value;
   }
 
-  const res = await fetchDefiLlama(`/tvl/${encodeURIComponent(slug)}`);
+  const res = await fetchDefiLlama('api.llama.fi', `/tvl/${encodeURIComponent(slug)}`);
   if (res.status !== 200) {
     throw new ProtocolNotFoundError(`no DefiLlama protocol found for slug '${slug}'`);
   }
@@ -132,7 +138,7 @@ export async function getProtocolTvl(slug) {
 // asked for.
 export async function getChainTvl(chainName) {
   if (!chainListCache || Date.now() - chainListCache.storedAt >= CHAIN_LIST_CACHE_TTL_MS) {
-    const res = await fetchDefiLlama('/v2/chains');
+    const res = await fetchDefiLlama('api.llama.fi', '/v2/chains');
     if (res.status !== 200) {
       throw new Error(`DefiLlama /v2/chains request failed: ${res.status}`);
     }
@@ -162,7 +168,7 @@ export async function getCoinPrice(coinKey) {
     return hit.value;
   }
 
-  const res = await fetchDefiLlama(`/prices/current/${encodeURIComponent(coinKey)}`);
+  const res = await fetchDefiLlama('coins.llama.fi', `/prices/current/${encodeURIComponent(coinKey)}`);
   if (res.status !== 200) {
     throw new CoinNotFoundError(`no DefiLlama price found for '${coinKey}'`);
   }
