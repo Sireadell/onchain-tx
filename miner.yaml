@@ -39,9 +39,11 @@ description: >
   fields (from, to, value_wei, block_number, block_hash, receipt_status)
   and a confidence score reflecting confirmation depth. /gas-price,
   /wallet-balance, and /token-holders are live reads (current gas price,
-  native token balance, ERC-20 holder count) with no confirmation-depth
-  concept, so confidence is always 1.0 on success. /tvl looks up current
-  total value locked for a DefiLlama protocol slug or chain name.
+  native or ERC-20 token balance, ERC-20 holder count) with no
+  confirmation-depth concept, so confidence is always 1.0 on success. /tvl
+  looks up current total value locked for a DefiLlama protocol slug or
+  chain name. /crypto-price looks up current USD price for a CoinGecko id
+  or a specific on-chain token.
 base_url: https://telegraph-onchain-tx-lookup-miner.onrender.com
 
 auth:
@@ -65,9 +67,12 @@ endpoints:
     external_path: /wallet-balance
     method: GET
     description: >
-      Native token balance for an EVM address. Query params: address
-      (0x-prefixed, 40 hex characters, required), chain (one of eth, base,
-      arbitrum, optimism, polygon — optional, defaults to eth).
+      Native or ERC-20 token balance for an EVM address. Query params:
+      address (0x-prefixed, 40 hex characters, required), chain (one of
+      eth, base, arbitrum, optimism, polygon — optional, defaults to eth),
+      token (0x-prefixed, 40 hex characters, optional — an ERC-20 contract
+      address; when supplied, returns that token's balance instead of the
+      chain's native token).
   - path: /token-holders
     external_path: /token-holders
     method: GET
@@ -84,6 +89,15 @@ endpoints:
       e.g. "uniswap") or tvl_chain (a free-text DefiLlama chain name, e.g.
       "Ethereum" — not limited to the five EVM chains above, DefiLlama
       covers ~460 chains, hence the separate param name from `chain`).
+  - path: /crypto-price
+    external_path: /crypto-price
+    method: GET
+    description: >
+      Current USD price for a coin or on-chain token. Query params:
+      either coin_id (a CoinGecko id, e.g. "bitcoin") alone, or both
+      price_chain (a free-text DefiLlama chain name, e.g. "ethereum") and
+      token (0x-prefixed, 40 hex characters — the token's contract
+      address) together. Exactly one of these two modes.
 
 # input_schema/output_schema are top-level-only fields, documentation
 # surfaced to callers rather than a per-endpoint validator (confirmed
@@ -105,7 +119,11 @@ input_schema:
     token:
       type: string
       pattern: "^0x[0-9a-fA-F]{40}$"
-      description: ERC-20 token contract address. Used by /token-holders only.
+      description: >
+        ERC-20 token contract address. Required on /token-holders.
+        Optional on /wallet-balance (switches to ERC-20 balance instead of
+        native). Required alongside price_chain on /crypto-price's
+        chain_token mode.
     chain:
       type: string
       enum: [eth, base, arbitrum, optimism, polygon]
@@ -113,7 +131,8 @@ input_schema:
       description: >
         Which chain to query. Defaults to eth if omitted. Used by
         /check-tx, /gas-price, /wallet-balance, /token-holders only —
-        not used by /tvl, which takes tvl_chain instead (see below).
+        not used by /tvl or /crypto-price, which take tvl_chain /
+        price_chain instead (see below).
     protocol:
       type: string
       description: DefiLlama protocol slug, e.g. "uniswap". Used by /tvl only. Exactly one of protocol/tvl_chain required for /tvl.
@@ -123,6 +142,19 @@ input_schema:
         Free-text DefiLlama chain name, e.g. "Ethereum" (not restricted to
         the `chain` enum above — DefiLlama covers ~460 chains). Used by
         /tvl only. Exactly one of protocol/tvl_chain required for /tvl.
+    coin_id:
+      type: string
+      description: >
+        CoinGecko coin id, e.g. "bitcoin". Used by /crypto-price only.
+        Exactly one of coin_id / (price_chain+token) required for
+        /crypto-price.
+    price_chain:
+      type: string
+      description: >
+        Free-text DefiLlama chain name for an on-chain token price lookup,
+        e.g. "ethereum" (same namespace as tvl_chain, separate field since
+        it's paired with `token` rather than used alone). Used by
+        /crypto-price only, together with `token`.
 output_schema:
   type: object
   properties:
@@ -134,16 +166,20 @@ output_schema:
       description: /wallet-balance only.
     token:
       type: string
-      description: /token-holders only.
+      description: /token-holders always; /wallet-balance only when the token param was supplied.
     chain:
       type: string
     query_type:
       type: string
-      enum: [protocol, chain]
-      description: /tvl only. Which of protocol/tvl_chain the request supplied.
+      enum: [protocol, chain, coin_id, chain_token]
+      description: >
+        /tvl and /crypto-price only. Which query mode the request used
+        (protocol/chain for /tvl, coin_id/chain_token for /crypto-price).
     query:
       type: string
-      description: /tvl only. Echoes back the protocol slug or chain name that was looked up.
+      description: >
+        /tvl and /crypto-price only. Echoes back the protocol slug, chain
+        name, coin id, or chain:token pair that was looked up.
     status:
       type: string
       enum: [confirmed, reverted, pending, not_found, error, ok]
@@ -195,22 +231,31 @@ output_schema:
       description: /gas-price only.
     balance_wei:
       type: string
-      description: /wallet-balance only.
+      description: /wallet-balance only. Raw integer amount, native wei or the ERC-20's smallest unit depending on whether token was supplied.
     balance_native:
-      type: number
-      description: /wallet-balance only.
+      type: [number, "null"]
+      description: >
+        /wallet-balance only. Human-normalized amount. Always present for
+        native balance; null for an ERC-20 balance if Blockscout didn't
+        recognize the token (decimals unknown, balance_wei still valid).
     holders_count:
       type: [integer, "null"]
       description: /token-holders only. Null when status is not_found.
     token_name:
       type: [string, "null"]
-      description: /token-holders only.
+      description: /token-holders always; /wallet-balance only when token was supplied.
     token_symbol:
       type: [string, "null"]
-      description: /token-holders only.
+      description: /token-holders always; /wallet-balance and /crypto-price only when applicable.
+    token_decimals:
+      type: [integer, "null"]
+      description: /wallet-balance only, when token was supplied. Null if Blockscout didn't recognize the token.
     tvl_usd:
       type: [number, "null"]
       description: /tvl only. Null when status is not_found.
+    price_usd:
+      type: [number, "null"]
+      description: /crypto-price only. Null when status is not_found.
 
 semantics:
   signal_mapping:
@@ -223,6 +268,7 @@ semantics:
     - WALLET_BALANCE_CHECK
     - TOKEN_HOLDER_COUNT
     - TVL_LOOKUP
+    - CRYPTO_PRICE
 
 limitations:
   - code: MAX_PARAM_VALUE

@@ -2,39 +2,33 @@
 // intent yet (checked live against /groundtruths/WALLET_BALANCE_CHECK,
 // 2026-08-18) — speculative on Telegraph adding grading before Track 1
 // closes, same caveat as checkGasPrice.js.
+//
+// Optional `token` param switches from native balance to ERC-20 balance:
+// raw amount via Ankr eth_call (getTokenBalance), decimals/symbol/name via
+// Blockscout's already-built getTokenInfo (same source /token-holders
+// uses) so the response can report a human-normalized amount too, not
+// just the raw integer. If Blockscout doesn't recognize the token but the
+// eth_call still succeeded (some valid ERC-20s aren't indexed), the raw
+// balance is still returned with decimals/symbol/name left null rather
+// than failing the whole request.
 
 import { Router } from 'express';
-import { getBalance, getBlockNumber, withRpcBudget, RpcBudgetExceededError, ApiKeyMissingError } from '../lib/ankrRpc.js';
+import {
+  getBalance,
+  getTokenBalance,
+  getBlockNumber,
+  withRpcBudget,
+  RpcBudgetExceededError,
+  ApiKeyMissingError,
+} from '../lib/ankrRpc.js';
+import { getTokenInfo, TokenNotFoundError } from '../lib/blockscoutApi.js';
 import { CHAINS, DEFAULT_CHAIN, resolveChain } from '../lib/chains.js';
 
 const router = Router();
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
-async function handleWalletBalance(req, res) {
-  const params = req.method === 'GET' ? req.query : req.body;
-  const address = params?.address;
-  const chainParam = params?.chain ?? DEFAULT_CHAIN;
-
-  if (!address || !ADDRESS_RE.test(address)) {
-    return res.status(400).json({
-      status: 'error',
-      summary: 'must include a valid `address` query parameter (0x-prefixed, 40 hex characters)',
-      confidence: 1.0,
-      error: req.method === 'GET' ? 'must include valid `address` query parameter' : 'body must include valid `address`',
-    });
-  }
-
-  const chain = resolveChain(chainParam);
-  if (!chain) {
-    return res.status(400).json({
-      status: 'error',
-      summary: `unsupported chain '${chainParam}' — must be one of: ${Object.keys(CHAINS).join(', ')}`,
-      confidence: 1.0,
-      error: 'unsupported `chain` parameter',
-    });
-  }
-
+async function handleNativeBalance(req, res, address, chainParam, chain) {
   let balanceHex;
   let blockNumberHex;
   try {
@@ -71,6 +65,97 @@ async function handleWalletBalance(req, res) {
     block_number,
     as_of,
   });
+}
+
+async function handleTokenBalance(req, res, address, chainParam, chain, token) {
+  let balanceHex;
+  try {
+    balanceHex = await getTokenBalance(chain.segment, token, address);
+  } catch (err) {
+    if (err instanceof ApiKeyMissingError) {
+      return res.status(503).json({ status: 'error', summary: 'wallet balance signal unavailable', confidence: 1.0, error: err.message });
+    }
+    if (err instanceof RpcBudgetExceededError) {
+      return res.status(503).json({ status: 'error', summary: 'wallet balance lookup could not complete within budget', confidence: 1.0, error: err.message });
+    }
+    return res.status(502).json({ status: 'error', summary: 'upstream RPC call failed', confidence: 1.0, error: err.message });
+  }
+
+  const balance_wei = BigInt(balanceHex ?? '0x0').toString();
+
+  let decimals = null;
+  let token_symbol = null;
+  let token_name = null;
+  try {
+    const info = await getTokenInfo(chain.blockscoutHost, token);
+    decimals = info.decimals != null ? Number(info.decimals) : null;
+    token_symbol = info.symbol;
+    token_name = info.name;
+  } catch (err) {
+    if (!(err instanceof TokenNotFoundError)) throw err;
+  }
+
+  const balance_native = decimals != null ? Number(balance_wei) / 10 ** decimals : null;
+  const as_of = new Date().toISOString();
+  const canonical = [chainParam, address, token, balance_wei].join(':');
+
+  res.json({
+    chain: chainParam,
+    address,
+    token,
+    status: 'ok',
+    summary:
+      balance_native != null
+        ? `${address} holds ${balance_native.toLocaleString('en-US', { maximumFractionDigits: 6 })} ${token_symbol ?? token} on ${chain.label}`
+        : `${address} holds ${balance_wei} (raw, unknown decimals) of ${token} on ${chain.label}`,
+    confidence: 1.0,
+    canonical,
+    balance_wei,
+    balance_native,
+    token_decimals: decimals,
+    token_symbol,
+    token_name,
+    as_of,
+  });
+}
+
+async function handleWalletBalance(req, res) {
+  const params = req.method === 'GET' ? req.query : req.body;
+  const address = params?.address;
+  const chainParam = params?.chain ?? DEFAULT_CHAIN;
+  const token = params?.token;
+
+  if (!address || !ADDRESS_RE.test(address)) {
+    return res.status(400).json({
+      status: 'error',
+      summary: 'must include a valid `address` query parameter (0x-prefixed, 40 hex characters)',
+      confidence: 1.0,
+      error: req.method === 'GET' ? 'must include valid `address` query parameter' : 'body must include valid `address`',
+    });
+  }
+  if (token && !ADDRESS_RE.test(token)) {
+    return res.status(400).json({
+      status: 'error',
+      summary: 'if supplied, `token` must be a valid 0x-prefixed, 40 hex character address',
+      confidence: 1.0,
+      error: 'malformed `token` parameter',
+    });
+  }
+
+  const chain = resolveChain(chainParam);
+  if (!chain) {
+    return res.status(400).json({
+      status: 'error',
+      summary: `unsupported chain '${chainParam}' — must be one of: ${Object.keys(CHAINS).join(', ')}`,
+      confidence: 1.0,
+      error: 'unsupported `chain` parameter',
+    });
+  }
+
+  if (token) {
+    return handleTokenBalance(req, res, address, chainParam, chain, token);
+  }
+  return handleNativeBalance(req, res, address, chainParam, chain);
 }
 
 router.get('/', (req, res) => withRpcBudget(() => handleWalletBalance(req, res)));

@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import {
   getProtocolTvl,
   getChainTvl,
+  getCoinPrice,
   resetDefiLlamaCache,
   ProtocolNotFoundError,
   ChainNotFoundError,
+  CoinNotFoundError,
 } from './defiLlamaApi.js';
 
 function mockFetch(t, handler) {
@@ -101,5 +103,42 @@ test('getChainTvl: one /v2/chains call covers repeat lookups of different chains
 
   await getChainTvl('Ethereum');
   await getChainTvl('Base');
+  assert.equal(callCount, 1);
+});
+
+test('getCoinPrice: returns price/symbol for a known coin key', async (t) => {
+  resetDefiLlamaCache();
+  mockFetch(t, async () => ({
+    status: 200,
+    json: async () => ({
+      coins: { 'coingecko:bitcoin': { price: 64549.31, symbol: 'BTC', timestamp: 1787090150 } },
+    }),
+  }));
+
+  const info = await getCoinPrice('coingecko:bitcoin');
+  assert.equal(info.priceUsd, 64549.31);
+  assert.equal(info.symbol, 'BTC');
+});
+
+test('getCoinPrice: key absent from response coins throws CoinNotFoundError', async (t) => {
+  resetDefiLlamaCache();
+  mockFetch(t, async () => ({ status: 200, json: async () => ({ coins: {} }) }));
+
+  await assert.rejects(
+    () => getCoinPrice('coingecko:not-a-real-coin'),
+    (err) => err instanceof CoinNotFoundError
+  );
+});
+
+test('getCoinPrice: caches repeat lookups for the same key', async (t) => {
+  resetDefiLlamaCache();
+  let callCount = 0;
+  mockFetch(t, async () => {
+    callCount += 1;
+    return { status: 200, json: async () => ({ coins: { 'coingecko:bitcoin': { price: 100, symbol: 'BTC', timestamp: 1 } } }) };
+  });
+
+  await getCoinPrice('coingecko:bitcoin');
+  await getCoinPrice('coingecko:bitcoin');
   assert.equal(callCount, 1);
 });

@@ -233,3 +233,16 @@ export async function getBalance(chainSegment, address) {
     fetchAnkrRpc(chainSegment, 'eth_getBalance', [address, 'latest'])
   );
 }
+
+// ERC-20 balance via eth_call to balanceOf(address) — standard ABI
+// function selector 0x70a08231, single left-padded 32-byte address arg.
+// Same eth_call params shape as any other JSON-RPC call, so it flows
+// through the same cachedFetch/retry/rate-limit/budget machinery as
+// getBalance above with no extra plumbing.
+export async function getTokenBalance(chainSegment, tokenAddress, walletAddress) {
+  const data = `0x70a08231000000000000000000000000${walletAddress.slice(2).toLowerCase()}`;
+  const callParams = [{ to: tokenAddress, data }, 'latest'];
+  return cachedFetch(chainSegment, 'eth_call_balanceOf', [tokenAddress, walletAddress], () =>
+    fetchAnkrRpc(chainSegment, 'eth_call', callParams)
+  );
+}

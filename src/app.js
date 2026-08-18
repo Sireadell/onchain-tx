@@ -12,8 +12,9 @@ import checkGasPriceRouter from './routes/checkGasPrice.js';
 import checkWalletBalanceRouter from './routes/checkWalletBalance.js';
 import checkTokenHoldersRouter from './routes/checkTokenHolders.js';
 import checkTvlRouter from './routes/checkTvl.js';
+import checkCryptoPriceRouter from './routes/checkCryptoPrice.js';
 
-// Same limit/window on all five signal routes — each spends its own
+// Same limit/window on all six signal routes — each spends its own
 // upstream quota (Ankr, Blockscout, or DefiLlama), no reason to size them
 // differently.
 function signalRateLimit() {
@@ -31,6 +32,7 @@ const checkGasPriceRateLimit = signalRateLimit();
 const checkWalletBalanceRateLimit = signalRateLimit();
 const checkTokenHoldersRateLimit = signalRateLimit();
 const checkTvlRateLimit = signalRateLimit();
+const checkCryptoPriceRateLimit = signalRateLimit();
 
 const corsMiddleware = (req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -58,6 +60,7 @@ export function buildApp() {
   app.use('/wallet-balance', checkWalletBalanceRateLimit, checkWalletBalanceRouter);
   app.use('/token-holders', checkTokenHoldersRateLimit, checkTokenHoldersRouter);
   app.use('/tvl', checkTvlRateLimit, checkTvlRouter);
+  app.use('/crypto-price', checkCryptoPriceRateLimit, checkCryptoPriceRouter);
 
   return app;
 }

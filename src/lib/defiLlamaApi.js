@@ -1,9 +1,10 @@
-// DefiLlama public API transport for TVL_LOOKUP — a third data source
-// alongside ankrRpc.js (live chain reads) and blockscoutApi.js (indexed
-// token data). No API key required. Retry/cache policy mirrors
-// blockscoutApi.js for the same reason (transient 429/5xx/timeout worth a
-// bounded retry); reuses ankrRpc.js's checkBudget() so a slow TVL call
-// still counts against the same per-request wall-clock budget.
+// DefiLlama public API transport for TVL_LOOKUP and CRYPTO_PRICE — a
+// third data source alongside ankrRpc.js (live chain reads) and
+// blockscoutApi.js (indexed token data). No API key required. Retry/cache
+// policy mirrors blockscoutApi.js for the same reason (transient
+// 429/5xx/timeout worth a bounded retry); reuses ankrRpc.js's
+// checkBudget() so a slow call still counts against the same per-request
+// wall-clock budget.
 
 import { checkBudget } from './ankrRpc.js';
 
@@ -15,6 +16,8 @@ const MAX_CACHE_ENTRIES = 500;
 
 const protocolCache = new Map();
 let chainListCache = null;
+const priceCache = new Map();
+const PRICE_CACHE_TTL_MS = Number(process.env.DEFILLAMA_PRICE_CACHE_TTL_MS) || 15_000;
 
 export class ProtocolNotFoundError extends Error {
   constructor(message) {
@@ -30,6 +33,13 @@ export class ChainNotFoundError extends Error {
   }
 }
 
+export class CoinNotFoundError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'CoinNotFoundError';
+  }
+}
+
 function isRetryableFailure(statusCode, errName) {
   if (errName === 'AbortError') return true;
   if (statusCode === 429) return true;
@@ -40,6 +50,7 @@ function isRetryableFailure(statusCode, errName) {
 export function resetDefiLlamaCache() {
   protocolCache.clear();
   chainListCache = null;
+  priceCache.clear();
 }
 
 async function fetchDefiLlama(path) {
@@ -136,4 +147,39 @@ export async function getChainTvl(chainName) {
     throw new ChainNotFoundError(`no DefiLlama chain found for name '${chainName}'`);
   }
   return match.tvl;
+}
+
+// Returns { priceUsd, symbol, asOfUnix } for a DefiLlama coin key, e.g.
+// "coingecko:bitcoin" or "ethereum:0xA0b8...eB48" (chain:tokenAddress),
+// or throws CoinNotFoundError. /prices/current/{key} omits the key
+// entirely from the response `coins` object when it doesn't recognize it
+// (200 status either way, not a 404) — that's the actual not-found signal
+// here, not an HTTP status code.
+export async function getCoinPrice(coinKey) {
+  const cacheKeyStr = `price:${coinKey}`;
+  const hit = priceCache.get(cacheKeyStr);
+  if (hit && Date.now() - hit.storedAt < PRICE_CACHE_TTL_MS) {
+    return hit.value;
+  }
+
+  const res = await fetchDefiLlama(`/prices/current/${encodeURIComponent(coinKey)}`);
+  if (res.status !== 200) {
+    throw new CoinNotFoundError(`no DefiLlama price found for '${coinKey}'`);
+  }
+  const body = await res.json();
+  const entry = body?.coins?.[coinKey];
+  if (!entry || typeof entry.price !== 'number') {
+    throw new CoinNotFoundError(`no DefiLlama price found for '${coinKey}'`);
+  }
+
+  const value = {
+    priceUsd: entry.price,
+    symbol: entry.symbol ?? null,
+    asOfUnix: entry.timestamp ?? null,
+  };
+  priceCache.set(cacheKeyStr, { value, storedAt: Date.now() });
+  if (priceCache.size > MAX_CACHE_ENTRIES) {
+    priceCache.delete(priceCache.keys().next().value);
+  }
+  return value;
 }
