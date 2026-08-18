@@ -3,9 +3,9 @@ import { ethers } from 'ethers';
 const DIAMOND = '0x5a2324aA18613FAD4e44bDF0d6c73Ec1f6D87ff8';
 const RPC = 'https://sepolia.base.org';
 
-const OLD_REGISTRATION_ID = 84;
-const YAML_URL = 'https://lavender-acceptable-goldfish-613.mypinata.cloud/ipfs/QmXRGtEeGTHoF2oH3ewrfYpwH92SrGDFugUbTe5jS6SPwX';
-const YAML_HASH = '0x6bed85a96565d5572797241aba47c6e0756e7ff71a93fe6b11b6812ca373bc26';
+const OLD_REGISTRATION_ID = 111;
+const YAML_URL = 'https://lavender-acceptable-goldfish-613.mypinata.cloud/ipfs/QmXvTuSod6tbcM3Ftqq4MPZ3HBUkXMKYQbvB3abT3ogBbE';
+const YAML_HASH = '0x72eadad87b881257dc789f09ed008d57c39dd4f0ae06626aae5c55cfc9169bc2';
 const FEE_ADDRESS = '0x6f477610A93C5B255C29c489760045272BCeDa99';
 const MIN_PRICE_USDC = 10000;
 const SUPPORTED_INTENTS = ['ONCHAIN_TX_LOOKUP'];

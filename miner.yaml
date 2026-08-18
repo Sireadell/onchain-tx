@@ -1,5 +1,14 @@
-# Telegraph Protocol miner config — schema verified against the cached
-# docs.telegraphprotocol.com/docs/miners/yaml-config reference (2026-08-14).
+# Telegraph Protocol miner config.
+#
+# registrationId 111 (2026-08-18) was rejected on-chain: "endpoints.0:
+# Additional property input_schema is not allowed" / same for output_schema.
+# Confirmed against the real docs.telegraphprotocol.com/docs/miners/
+# yaml-config page (not the 2026-08-14 cached read, which missed this):
+# the endpoints[] schema is a closed set (path, external_path, method,
+# description, endpoint_base_url, content_type, multipart_fields,
+# param_map only, additionalProperties: false) — input_schema/output_schema
+# are top-level-only fields, not per-endpoint. Fixed below by moving them
+# to the top level.
 #
 # `id: 0` below is intentionally left as-is, not a placeholder pending
 # resolution. Confirmed directly against docs.telegraphprotocol.com/docs/
@@ -42,45 +51,51 @@ endpoints:
       Looks up an EVM transaction by hash. Query params: tx_hash
       (0x-prefixed, 64 hex characters, required), chain (one of eth, base,
       arbitrum, optimism, polygon — optional, defaults to eth).
-    input_schema:
-      type: object
-      properties:
-        tx_hash:
-          type: string
-          pattern: "^0x[0-9a-fA-F]{64}$"
-          description: EVM transaction hash to look up.
-        chain:
-          type: string
-          enum: [eth, base, arbitrum, optimism, polygon]
-          default: eth
-          description: Which chain to query. Defaults to eth if omitted.
-      required: [tx_hash]
-    output_schema:
-      type: object
-      properties:
-        tx_hash:
-          type: string
-        chain:
-          type: string
-        status:
-          type: string
-          enum: [confirmed, reverted, pending, not_found, error]
-        summary:
-          type: string
-        confidence:
-          type: number
-          minimum: 0
-          maximum: 1
-        from:
-          type: [string, "null"]
-        to:
-          type: [string, "null"]
-          description: Null for contract-creation transactions.
-        value_wei:
-          type: [string, "null"]
-        block_number:
-          type: [number, "null"]
-          description: Null while pending / no receipt yet.
+
+# input_schema/output_schema are top-level-only fields (schema has
+# additionalProperties: false inside endpoints[] too) — confirmed against
+# docs.telegraphprotocol.com/docs/miners/yaml-config 2026-08-18, after
+# registrationId 111 was rejected for nesting these under the endpoint.
+input_schema:
+  type: object
+  properties:
+    tx_hash:
+      type: string
+      pattern: "^0x[0-9a-fA-F]{64}$"
+      description: EVM transaction hash to look up.
+    chain:
+      type: string
+      enum: [eth, base, arbitrum, optimism, polygon]
+      default: eth
+      description: Which chain to query. Defaults to eth if omitted.
+  required: [tx_hash]
+output_schema:
+  type: object
+  properties:
+    tx_hash:
+      type: string
+    chain:
+      type: string
+    status:
+      type: string
+      enum: [confirmed, reverted, pending, not_found, error]
+    summary:
+      type: string
+    confidence:
+      type: number
+      minimum: 0
+      maximum: 1
+    from:
+      type: [string, "null"]
+    to:
+      type: [string, "null"]
+      description: Null for contract-creation transactions.
+    value_wei:
+      type: [string, "null"]
+    block_number:
+      type: [number, "null"]
+      description: Null while pending / no receipt yet.
+
 semantics:
   signal_mapping:
     label_field: status
