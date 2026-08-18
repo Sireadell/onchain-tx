@@ -1,0 +1,139 @@
+// DefiLlama public API transport for TVL_LOOKUP — a third data source
+// alongside ankrRpc.js (live chain reads) and blockscoutApi.js (indexed
+// token data). No API key required. Retry/cache policy mirrors
+// blockscoutApi.js for the same reason (transient 429/5xx/timeout worth a
+// bounded retry); reuses ankrRpc.js's checkBudget() so a slow TVL call
+// still counts against the same per-request wall-clock budget.
+
+import { checkBudget } from './ankrRpc.js';
+
+const DEFILLAMA_CALL_TIMEOUT_MS = Number(process.env.DEFILLAMA_CALL_TIMEOUT_MS) || 8_000;
+const RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
+const PROTOCOL_CACHE_TTL_MS = Number(process.env.DEFILLAMA_PROTOCOL_CACHE_TTL_MS) || 30_000;
+const CHAIN_LIST_CACHE_TTL_MS = Number(process.env.DEFILLAMA_CHAIN_CACHE_TTL_MS) || 30_000;
+const MAX_CACHE_ENTRIES = 500;
+
+const protocolCache = new Map();
+let chainListCache = null;
+
+export class ProtocolNotFoundError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ProtocolNotFoundError';
+  }
+}
+
+export class ChainNotFoundError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ChainNotFoundError';
+  }
+}
+
+function isRetryableFailure(statusCode, errName) {
+  if (errName === 'AbortError') return true;
+  if (statusCode === 429) return true;
+  if (typeof statusCode === 'number' && statusCode >= 500) return true;
+  return false;
+}
+
+export function resetDefiLlamaCache() {
+  protocolCache.clear();
+  chainListCache = null;
+}
+
+async function fetchDefiLlama(path) {
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    checkBudget();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DEFILLAMA_CALL_TIMEOUT_MS);
+    let res;
+    let ok = true;
+    let statusCode;
+    let errName;
+    let networkErr;
+    try {
+      res = await fetch(`https://api.llama.fi${path}`, { signal: controller.signal });
+      statusCode = res.status;
+      ok = res.status === 200;
+    } catch (err) {
+      ok = false;
+      errName = err.name;
+      networkErr = err;
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (ok) {
+      return res;
+    }
+
+    if (statusCode === 400 || statusCode === 404) {
+      return res;
+    }
+
+    const retryable = isRetryableFailure(statusCode, errName);
+    const attemptsLeft = attempt < RETRY_DELAYS_MS.length;
+    if (!retryable || !attemptsLeft) {
+      if (errName === 'AbortError') {
+        throw new Error(`DefiLlama request timed out after ${DEFILLAMA_CALL_TIMEOUT_MS}ms (${attempt + 1} attempt(s))`);
+      }
+      if (networkErr) throw networkErr;
+      throw new Error(`DefiLlama request failed: ${statusCode} ${res.statusText} (${attempt + 1} attempt(s))`);
+    }
+
+    const base = RETRY_DELAYS_MS[attempt];
+    const jitteredDelay = base * (0.7 + Math.random() * 0.6);
+    await new Promise((r) => setTimeout(r, jitteredDelay));
+  }
+}
+
+// Returns current TVL in USD for a DefiLlama protocol slug (e.g.
+// "uniswap"), or throws ProtocolNotFoundError. /tvl/{slug} returns a bare
+// number on success, plain text "Protocol not found" on failure.
+export async function getProtocolTvl(slug) {
+  const key = `protocol:${slug}`;
+  const hit = protocolCache.get(key);
+  if (hit && Date.now() - hit.storedAt < PROTOCOL_CACHE_TTL_MS) {
+    return hit.value;
+  }
+
+  const res = await fetchDefiLlama(`/tvl/${encodeURIComponent(slug)}`);
+  if (res.status !== 200) {
+    throw new ProtocolNotFoundError(`no DefiLlama protocol found for slug '${slug}'`);
+  }
+  const text = await res.text();
+  const tvl = Number(text);
+  if (!Number.isFinite(tvl)) {
+    throw new ProtocolNotFoundError(`no DefiLlama protocol found for slug '${slug}'`);
+  }
+
+  protocolCache.set(key, { value: tvl, storedAt: Date.now() });
+  if (protocolCache.size > MAX_CACHE_ENTRIES) {
+    protocolCache.delete(protocolCache.keys().next().value);
+  }
+  return tvl;
+}
+
+// Returns current TVL in USD for a chain name (e.g. "Ethereum", matched
+// case-insensitively), or throws ChainNotFoundError. Whole /v2/chains list
+// is cached together since it's one call regardless of which chain is
+// asked for.
+export async function getChainTvl(chainName) {
+  if (!chainListCache || Date.now() - chainListCache.storedAt >= CHAIN_LIST_CACHE_TTL_MS) {
+    const res = await fetchDefiLlama('/v2/chains');
+    if (res.status !== 200) {
+      throw new Error(`DefiLlama /v2/chains request failed: ${res.status}`);
+    }
+    const list = await res.json();
+    chainListCache = { value: list, storedAt: Date.now() };
+  }
+
+  const match = chainListCache.value.find(
+    (c) => typeof c.name === 'string' && c.name.toLowerCase() === chainName.toLowerCase()
+  );
+  if (!match || typeof match.tvl !== 'number') {
+    throw new ChainNotFoundError(`no DefiLlama chain found for name '${chainName}'`);
+  }
+  return match.tvl;
+}

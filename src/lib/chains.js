@@ -12,12 +12,20 @@
 // error. Left enabled here since it's a key-permission issue, not an
 // architectural one — it'll 502 like any other transient upstream failure
 // until Ankr access is granted, no special-casing needed.
+// `blockscoutHost` is the live Blockscout instance for each chain, used by
+// the TOKEN_HOLDER_COUNT endpoint (Blockscout's REST API, not Ankr's
+// JSON-RPC — no API key needed). Live-verified 2026-08-18 by hitting
+// /api/v2/tokens/{address} for USDC on each chain. `optimism.blockscout.com`
+// 301-redirects to `explorer.optimism.io` (Optimism's own Blockscout
+// deployment, not the shared blockscout.com domain the other four use) —
+// hardcoded to the real host directly rather than following a redirect on
+// every request.
 export const CHAINS = {
-  eth: { segment: 'eth', label: 'Ethereum' },
-  base: { segment: 'base', label: 'Base' },
-  arbitrum: { segment: 'arbitrum', label: 'Arbitrum' },
-  optimism: { segment: 'optimism', label: 'Optimism' },
-  polygon: { segment: 'polygon', label: 'Polygon' },
+  eth: { segment: 'eth', label: 'Ethereum', blockscoutHost: 'eth.blockscout.com' },
+  base: { segment: 'base', label: 'Base', blockscoutHost: 'base.blockscout.com' },
+  arbitrum: { segment: 'arbitrum', label: 'Arbitrum', blockscoutHost: 'arbitrum.blockscout.com' },
+  optimism: { segment: 'optimism', label: 'Optimism', blockscoutHost: 'explorer.optimism.io' },
+  polygon: { segment: 'polygon', label: 'Polygon', blockscoutHost: 'polygon.blockscout.com' },
 };
 
 export const DEFAULT_CHAIN = process.env.CHAIN || 'eth';

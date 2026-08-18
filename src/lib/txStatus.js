@@ -20,6 +20,8 @@ export function evaluateTransaction({ tx, receipt, currentBlockNumberHex }) {
       to: null,
       value_wei: null,
       block_number: null,
+      block_hash: null,
+      receipt_status: null,
     };
   }
 
@@ -36,10 +38,13 @@ export function evaluateTransaction({ tx, receipt, currentBlockNumberHex }) {
       to,
       value_wei,
       block_number: null,
+      block_hash: null,
+      receipt_status: null,
     };
   }
 
   const block_number = Number(hexToBigInt(tx.blockNumber));
+  const block_hash = receipt.blockHash ?? null;
   const reverted = receipt.status === '0x0';
 
   if (reverted) {
@@ -51,6 +56,8 @@ export function evaluateTransaction({ tx, receipt, currentBlockNumberHex }) {
       to,
       value_wei,
       block_number,
+      block_hash,
+      receipt_status: 'failed',
     };
   }
 
@@ -68,6 +75,8 @@ export function evaluateTransaction({ tx, receipt, currentBlockNumberHex }) {
     to,
     value_wei,
     block_number,
+    block_hash,
+    receipt_status: 'success',
   };
 }
 

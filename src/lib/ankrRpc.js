@@ -52,7 +52,7 @@ export function withRpcBudget(fn) {
   return budgetContext.run({ attemptsUsed: 0, deadlineAt: Date.now() + MAX_ANALYSIS_TIME_MS }, fn);
 }
 
-function checkBudget() {
+export function checkBudget() {
   const budget = budgetContext.getStore();
   if (!budget) return;
   if (Date.now() >= budget.deadlineAt) throw new RpcBudgetExceededError('max analysis time exceeded');
@@ -209,4 +209,27 @@ export async function getTransactionReceipt(chainSegment, txHash) {
 
 export async function getBlockNumber(chainSegment) {
   return cachedFetch(chainSegment, 'eth_blockNumber', [], () => fetchAnkrRpc(chainSegment, 'eth_blockNumber', []));
+}
+
+// Short TTL relative to CACHE_TTL_MS's default (30s) — gas price moves
+// block-to-block and a stale cached price is a wrong answer, not just a
+// slightly-late one, unlike tx/receipt lookups which are immutable once
+// mined.
+const GAS_PRICE_CACHE_TTL_MS = Number(process.env.GAS_PRICE_CACHE_TTL_MS) || 5_000;
+
+export async function getGasPrice(chainSegment) {
+  const key = cacheKey(chainSegment, 'eth_gasPrice', []);
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.storedAt < GAS_PRICE_CACHE_TTL_MS) {
+    return hit.value;
+  }
+  const value = await fetchAnkrRpc(chainSegment, 'eth_gasPrice', []);
+  cache.set(key, { value, storedAt: Date.now() });
+  return value;
+}
+
+export async function getBalance(chainSegment, address) {
+  return cachedFetch(chainSegment, 'eth_getBalance', [address, 'latest'], () =>
+    fetchAnkrRpc(chainSegment, 'eth_getBalance', [address, 'latest'])
+  );
 }

@@ -32,12 +32,16 @@ slug: txlens
 protocol: generic
 name: TxLens
 description: >
-  Looks up a single EVM transaction by hash across five chains (Ethereum,
-  Base, Arbitrum, Optimism, Polygon) and reports its status (confirmed /
-  reverted / pending / not_found) with structured fields (from, to,
-  value_wei, block_number) and a confidence score that reflects
-  confirmation depth — lower for shallow/reorg-sensitive confirmations,
-  full confidence once past the configured confirmation depth.
+  On-chain read signals across five EVM chains (Ethereum, Base, Arbitrum,
+  Optimism, Polygon), backed by shared retry/rate-limit/cache/RPC-budget
+  infrastructure. /check-tx looks up a transaction by hash and reports its
+  status (confirmed / reverted / pending / not_found) with structured
+  fields (from, to, value_wei, block_number, block_hash, receipt_status)
+  and a confidence score reflecting confirmation depth. /gas-price,
+  /wallet-balance, and /token-holders are live reads (current gas price,
+  native token balance, ERC-20 holder count) with no confirmation-depth
+  concept, so confidence is always 1.0 on success. /tvl looks up current
+  total value locked for a DefiLlama protocol slug or chain name.
 base_url: https://telegraph-onchain-tx-lookup-miner.onrender.com
 
 auth:
@@ -51,50 +55,162 @@ endpoints:
       Looks up an EVM transaction by hash. Query params: tx_hash
       (0x-prefixed, 64 hex characters, required), chain (one of eth, base,
       arbitrum, optimism, polygon — optional, defaults to eth).
+  - path: /gas-price
+    external_path: /gas-price
+    method: GET
+    description: >
+      Current gas price for a chain. Query params: chain (one of eth,
+      base, arbitrum, optimism, polygon — optional, defaults to eth).
+  - path: /wallet-balance
+    external_path: /wallet-balance
+    method: GET
+    description: >
+      Native token balance for an EVM address. Query params: address
+      (0x-prefixed, 40 hex characters, required), chain (one of eth, base,
+      arbitrum, optimism, polygon — optional, defaults to eth).
+  - path: /token-holders
+    external_path: /token-holders
+    method: GET
+    description: >
+      Holder count for an ERC-20 token. Query params: token (0x-prefixed,
+      40 hex characters, required), chain (one of eth, base, arbitrum,
+      optimism, polygon — optional, defaults to eth).
+  - path: /tvl
+    external_path: /tvl
+    method: GET
+    description: >
+      Current total value locked (USD) for a DefiLlama protocol or chain.
+      Query params: exactly one of protocol (a DefiLlama protocol slug,
+      e.g. "uniswap") or tvl_chain (a free-text DefiLlama chain name, e.g.
+      "Ethereum" — not limited to the five EVM chains above, DefiLlama
+      covers ~460 chains, hence the separate param name from `chain`).
 
-# input_schema/output_schema are top-level-only fields (schema has
-# additionalProperties: false inside endpoints[] too) — confirmed against
-# docs.telegraphprotocol.com/docs/miners/yaml-config 2026-08-18, after
-# registrationId 111 was rejected for nesting these under the endpoint.
+# input_schema/output_schema are top-level-only fields, documentation
+# surfaced to callers rather than a per-endpoint validator (confirmed
+# against docs.telegraphprotocol.com/docs/miners/yaml-config). One shared
+# object across all four endpoints below — fields not relevant to a given
+# endpoint (e.g. tx_hash on /gas-price) are simply absent from that
+# endpoint's actual response, not present-but-null.
 input_schema:
   type: object
   properties:
     tx_hash:
       type: string
       pattern: "^0x[0-9a-fA-F]{64}$"
-      description: EVM transaction hash to look up.
+      description: EVM transaction hash to look up. Used by /check-tx only.
+    address:
+      type: string
+      pattern: "^0x[0-9a-fA-F]{40}$"
+      description: EVM address to check. Used by /wallet-balance only.
+    token:
+      type: string
+      pattern: "^0x[0-9a-fA-F]{40}$"
+      description: ERC-20 token contract address. Used by /token-holders only.
     chain:
       type: string
       enum: [eth, base, arbitrum, optimism, polygon]
       default: eth
-      description: Which chain to query. Defaults to eth if omitted.
-  required: [tx_hash]
+      description: >
+        Which chain to query. Defaults to eth if omitted. Used by
+        /check-tx, /gas-price, /wallet-balance, /token-holders only —
+        not used by /tvl, which takes tvl_chain instead (see below).
+    protocol:
+      type: string
+      description: DefiLlama protocol slug, e.g. "uniswap". Used by /tvl only. Exactly one of protocol/tvl_chain required for /tvl.
+    tvl_chain:
+      type: string
+      description: >
+        Free-text DefiLlama chain name, e.g. "Ethereum" (not restricted to
+        the `chain` enum above — DefiLlama covers ~460 chains). Used by
+        /tvl only. Exactly one of protocol/tvl_chain required for /tvl.
 output_schema:
   type: object
   properties:
     tx_hash:
       type: string
+      description: /check-tx only.
+    address:
+      type: string
+      description: /wallet-balance only.
+    token:
+      type: string
+      description: /token-holders only.
     chain:
       type: string
+    query_type:
+      type: string
+      enum: [protocol, chain]
+      description: /tvl only. Which of protocol/tvl_chain the request supplied.
+    query:
+      type: string
+      description: /tvl only. Echoes back the protocol slug or chain name that was looked up.
     status:
       type: string
-      enum: [confirmed, reverted, pending, not_found, error]
+      enum: [confirmed, reverted, pending, not_found, error, ok]
+      description: >
+        confirmed/reverted/pending/not_found/error on /check-tx; ok/error
+        on /gas-price and /wallet-balance (live reads have no confirmation
+        states); ok/not_found/error on /token-holders (not_found means the
+        address isn't a known ERC-20 token on that chain, not a failure).
     summary:
       type: string
     confidence:
       type: number
       minimum: 0
       maximum: 1
+    canonical:
+      type: string
+      description: >
+        Compact deterministic one-line verdict summary, shape varies per
+        endpoint (documented in each route's description).
+    as_of:
+      type: string
+      description: ISO timestamp of the read. /gas-price, /wallet-balance, and /tvl only.
     from:
       type: [string, "null"]
+      description: /check-tx only.
     to:
       type: [string, "null"]
-      description: Null for contract-creation transactions.
+      description: /check-tx only. Null for contract-creation transactions.
     value_wei:
       type: [string, "null"]
+      description: /check-tx only.
     block_number:
       type: [number, "null"]
-      description: Null while pending / no receipt yet.
+      description: Null while pending / no receipt yet, or if the block-number read failed best-effort.
+    block_hash:
+      type: [string, "null"]
+      description: /check-tx only. Null while pending / no receipt yet.
+    receipt_status:
+      type: [string, "null"]
+      enum: [success, failed, null]
+      description: >
+        /check-tx only. Explicit receipt outcome, independent of `status`.
+        Null while pending / not found (no receipt exists yet).
+    gas_price_wei:
+      type: string
+      description: /gas-price only.
+    gas_price_gwei:
+      type: number
+      description: /gas-price only.
+    balance_wei:
+      type: string
+      description: /wallet-balance only.
+    balance_native:
+      type: number
+      description: /wallet-balance only.
+    holders_count:
+      type: [integer, "null"]
+      description: /token-holders only. Null when status is not_found.
+    token_name:
+      type: [string, "null"]
+      description: /token-holders only.
+    token_symbol:
+      type: [string, "null"]
+      description: /token-holders only.
+    tvl_usd:
+      type: [number, "null"]
+      description: /tvl only. Null when status is not_found.
 
 semantics:
   signal_mapping:
@@ -103,6 +219,10 @@ semantics:
     confidence_field: confidence
   supported_intents:
     - ONCHAIN_TX_LOOKUP
+    - GAS_PRICE
+    - WALLET_BALANCE_CHECK
+    - TOKEN_HOLDER_COUNT
+    - TVL_LOOKUP
 
 limitations:
   - code: MAX_PARAM_VALUE
@@ -110,4 +230,16 @@ limitations:
     param: tx_hash
     property: length
     value_num: 66
+    operator: eq
+  - code: MAX_PARAM_VALUE
+    message: address must be exactly 42 characters (0x-prefixed, 40 hex characters).
+    param: address
+    property: length
+    value_num: 42
+    operator: eq
+  - code: MAX_PARAM_VALUE
+    message: token must be exactly 42 characters (0x-prefixed, 40 hex characters).
+    param: token
+    property: length
+    value_num: 42
     operator: eq

@@ -89,16 +89,32 @@ async function handleCheckTx(req, res) {
 
   const result = evaluateTransaction({ tx, receipt, currentBlockNumberHex });
 
+  // Compact, deterministic one-line summary of the verdict — chain:tx_hash:
+  // status:block_number:block_hash:receipt_status, `-` standing in for any
+  // field that's null (not_found/pending never have a block). Matches the
+  // convergent pattern used by other registered ONCHAIN_TX_LOOKUP miners.
+  const canonical = [
+    chainParam,
+    txHash,
+    result.status,
+    result.block_number ?? '-',
+    result.block_hash ?? '-',
+    result.receipt_status ?? '-',
+  ].join(':');
+
   res.json({
     tx_hash: txHash,
     chain: chainParam,
     status: result.status,
     summary: result.summary,
     confidence: result.confidence,
+    canonical,
     from: result.from,
     to: result.to,
     value_wei: result.value_wei,
     block_number: result.block_number,
+    block_hash: result.block_hash,
+    receipt_status: result.receipt_status,
   });
 }
 

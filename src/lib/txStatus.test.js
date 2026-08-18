@@ -9,7 +9,7 @@ const deepBlock = '0x100'; // 256
 function txAtDepth(blockNumberHex, currentHex, overrides = {}) {
   return {
     tx: { from: FROM, to: TO, value: '0x0', blockNumber: blockNumberHex, ...overrides.tx },
-    receipt: { status: '0x1', ...overrides.receipt },
+    receipt: { status: '0x1', blockHash: '0xblockhash', ...overrides.receipt },
     currentBlockNumberHex: currentHex,
   };
 }
@@ -18,12 +18,14 @@ test('1. successful confirmed transaction, deep — full confidence', () => {
   const r = evaluateTransaction(txAtDepth('0xf0', deepBlock)); // depth 16 >= CONFIRMATION_DEPTH(12)
   assert.equal(r.status, 'confirmed');
   assert.equal(r.confidence, 1.0);
+  assert.equal(r.receipt_status, 'success');
 });
 
 test('2. reverted transaction', () => {
   const r = evaluateTransaction(txAtDepth('0xf0', deepBlock, { receipt: { status: '0x0' } }));
   assert.equal(r.status, 'reverted');
   assert.ok(r.confidence > 0);
+  assert.equal(r.receipt_status, 'failed');
 });
 
 test('3. contract creation — to is null, confidence unaffected', () => {
@@ -38,6 +40,8 @@ test('4. pending transaction — no receipt', () => {
   const r = evaluateTransaction({ tx: { from: FROM, to: TO, value: '0x0', blockNumber: null }, receipt: null, currentBlockNumberHex: deepBlock });
   assert.equal(r.status, 'pending');
   assert.equal(r.block_number, null);
+  assert.equal(r.block_hash, null);
+  assert.equal(r.receipt_status, null);
   assert.ok(r.confidence < 0.5);
 });
 
@@ -46,6 +50,8 @@ test('5. nonexistent transaction — tx is null', () => {
   assert.equal(r.status, 'not_found');
   assert.equal(r.confidence, 1.0);
   assert.equal(r.from, null);
+  assert.equal(r.block_hash, null);
+  assert.equal(r.receipt_status, null);
 });
 
 // Cases 6 (malformed hash), 7 (wrong-chain hash), 8 (unsupported chain) are
