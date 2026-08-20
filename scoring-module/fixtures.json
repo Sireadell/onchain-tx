@@ -1,0 +1,49 @@
+{
+  "cases": [
+    {
+      "id": "confirmed-standard-tx",
+      "question": "What is the status of transaction 0xaaaa000000000000000000000000000000000000000000000000000000000001 on eth?",
+      "ground_truth": "Transaction confirmed in block 20123456, from 0x1111111111111111111111111111111111111111 to 0x2222222222222222222222222222222222222222, value 1500000000000000000 wei (1.5 ETH).",
+      "good_answer": "This transaction is confirmed. It was included in block 20123456, sending 1.5 ETH from 0x1111111111111111111111111111111111111111 to 0x2222222222222222222222222222222222222222.",
+      "good_answer_reworded": "Confirmed: block 20123456. Sender 0x1111111111111111111111111111111111111111, recipient 0x2222222222222222222222222222222222222222, amount 1.5 ETH.",
+      "bad_answer": "Transaction not found on eth."
+    },
+    {
+      "id": "reverted-tx",
+      "question": "What is the status of transaction 0xbbbb000000000000000000000000000000000000000000000000000000000002 on eth?",
+      "ground_truth": "Transaction reverted in block 19876543, from 0x3333333333333333333333333333333333333333 to 0x4444444444444444444444444444444444444444, value 0 wei.",
+      "good_answer": "This transaction reverted at block 19876543. Sender 0x3333333333333333333333333333333333333333, recipient 0x4444444444444444444444444444444444444444, no value transferred.",
+      "good_answer_reworded": "Reverted. Block 19876543, from 0x3333333333333333333333333333333333333333 to 0x4444444444444444444444444444444444444444.",
+      "bad_answer": "Transaction confirmed successfully in block 19876543."
+    },
+    {
+      "id": "pending-tx",
+      "question": "What is the status of transaction 0xcccc000000000000000000000000000000000000000000000000000000000003 on base?",
+      "ground_truth": "Transaction pending, not yet mined, from 0x5555555555555555555555555555555555555555 to 0x6666666666666666666666666666666666666666.",
+      "good_answer": "Status: pending. This transaction has not been confirmed yet, from 0x5555555555555555555555555555555555555555 to 0x6666666666666666666666666666666666666666.",
+      "bad_answer": "Transaction confirmed in block 12345678."
+    },
+    {
+      "id": "not-found-tx",
+      "question": "What is the status of transaction 0xdddd000000000000000000000000000000000000000000000000000000000004 on base?",
+      "ground_truth": "No such transaction found on base for that hash.",
+      "good_answer": "Transaction not found on base.",
+      "good_answer_reworded": "Could not locate this transaction on base — it does not appear to exist.",
+      "bad_answer": "Transaction confirmed in block 9988776."
+    },
+    {
+      "id": "unconfirmed-edge-case",
+      "question": "What is the status of transaction 0xeeee000000000000000000000000000000000000000000000000000000000005 on arbitrum?",
+      "ground_truth": "Transaction unconfirmed, pending inclusion, from 0x8888888888888888888888888888888888888888 to 0x9999999999999999999999999999999999999999.",
+      "good_answer": "This tx remains unconfirmed and is still pending, sent from 0x8888888888888888888888888888888888888888 to 0x9999999999999999999999999999999999999999.",
+      "bad_answer": "Transaction confirmed at block 555555."
+    },
+    {
+      "id": "comma-formatted-block-number",
+      "question": "What is the status of transaction 0xffff000000000000000000000000000000000000000000000000000000000006 on eth?",
+      "ground_truth": "Transaction confirmed in block 20123456, from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, value 2000000000000000000 wei (2 ETH).",
+      "good_answer": "The transaction succeeded and was included in block 20,123,456, sent from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.",
+      "bad_answer": "Transaction reverted in block 20,123,456."
+    }
+  ]
+}

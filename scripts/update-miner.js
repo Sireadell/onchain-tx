@@ -3,12 +3,19 @@ import { ethers } from 'ethers';
 const DIAMOND = '0x5a2324aA18613FAD4e44bDF0d6c73Ec1f6D87ff8';
 const RPC = 'https://sepolia.base.org';
 
-const OLD_REGISTRATION_ID = 112;
-const YAML_URL = 'https://lavender-acceptable-goldfish-613.mypinata.cloud/ipfs/QmWLz9PuGU88AnGz7wDtyWDDym6jvyjDGPNpsgVyKyHvry';
-const YAML_HASH = '0x752807b35d41bfed77edd8026a971a9989748ed50f2cab13df85136e9e25f760';
+const OLD_REGISTRATION_ID = 113;
+const YAML_URL = 'https://lavender-acceptable-goldfish-613.mypinata.cloud/ipfs/QmdSymf3iTwckQcBgisDYkiX8S8n8mo2PYnWV8b74w29mk';
+const YAML_HASH = '0x96316761d88819f7a96e56db30baefcc6a731f187ec0beb6e5a5b408ae976f9a';
 const FEE_ADDRESS = '0x6f477610A93C5B255C29c489760045272BCeDa99';
 const MIN_PRICE_USDC = 10000;
-const SUPPORTED_INTENTS = ['ONCHAIN_TX_LOOKUP'];
+const SUPPORTED_INTENTS = [
+  'ONCHAIN_TX_LOOKUP',
+  'GAS_PRICE',
+  'WALLET_BALANCE_CHECK',
+  'TOKEN_HOLDER_COUNT',
+  'TVL_LOOKUP',
+  'CRYPTO_PRICE',
+];
 
 const abi = [
   'function updateMiner(uint256,string,bytes32,address,uint256,string[]) returns (uint256)',
