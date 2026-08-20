@@ -44,6 +44,41 @@
       "ground_truth": "Transaction confirmed in block 20123456, from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, value 2000000000000000000 wei (2 ETH).",
       "good_answer": "The transaction succeeded and was included in block 20,123,456, sent from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.",
       "bad_answer": "Transaction reverted in block 20,123,456."
+    },
+    {
+      "id": "right-status-fabricated-facts",
+      "question": "What is the status of transaction 0x1010000000000000000000000000000000000000000000000000000000001010 on eth?",
+      "ground_truth": "Transaction confirmed in block 21000111, from 0xcccc000000000000000000000000000000000000 to 0xdddd000000000000000000000000000000000000, value 3000000000000000000 wei (3 ETH).",
+      "good_answer": "Confirmed. Included in block 21000111, sent 3 ETH from 0xcccc000000000000000000000000000000000000 to 0xdddd000000000000000000000000000000000000.",
+      "bad_answer": "Confirmed. Included in block 19999999, sent 7 ETH from 0xeeee000000000000000000000000000000000000 to 0xffff000000000000000000000000000000000000."
+    },
+    {
+      "id": "address-role-swap",
+      "question": "What is the status of transaction 0x2020000000000000000000000000000000000000000000000000000000002020 on eth?",
+      "ground_truth": "Transaction confirmed in block 21000222, from 0x1212000000000000000000000000000000000012 to 0x3434000000000000000000000000000000000034, value 500000000000000000 wei (0.5 ETH).",
+      "good_answer": "Confirmed in block 21000222. Sender 0x1212000000000000000000000000000000000012, recipient 0x3434000000000000000000000000000000000034, amount 0.5 ETH.",
+      "bad_answer": "Confirmed in block 21000222. Sender 0x3434000000000000000000000000000000000034, recipient 0x1212000000000000000000000000000000000012, amount 0.5 ETH."
+    },
+    {
+      "id": "hallucinated-extra-address",
+      "question": "What is the status of transaction 0x3030000000000000000000000000000000000000000000000000000000003030 on eth?",
+      "ground_truth": "Transaction confirmed in block 21000333, from 0x5656000000000000000000000000000000000056 to 0x7878000000000000000000000000000000000078, value 250000000000000000 wei (0.25 ETH).",
+      "good_answer": "Confirmed in block 21000333, from 0x5656000000000000000000000000000000000056 to 0x7878000000000000000000000000000000000078, amount 0.25 ETH.",
+      "bad_answer": "Confirmed in block 21000333, from 0x5656000000000000000000000000000000000056 to 0x7878000000000000000000000000000000000078, amount 0.25 ETH, also related to 0x9999000000000000000000000000000000000099 and block 20500000."
+    },
+    {
+      "id": "echoed-query-hash-not-penalized",
+      "question": "What is the status of transaction 0x4040000000000000000000000000000000000000000000000000000000004040 on eth?",
+      "ground_truth": "Transaction pending, not yet mined, from 0x6767000000000000000000000000000000000067 to 0x8989000000000000000000000000000000000089.",
+      "good_answer": "Transaction 0x4040000000000000000000000000000000000000000000000000000000004040 is still pending and unconfirmed, from 0x6767000000000000000000000000000000000067 to 0x8989000000000000000000000000000000000089.",
+      "bad_answer": "Transaction confirmed at block 444444."
+    },
+    {
+      "id": "zero-value-vs-nonzero",
+      "question": "What is the status of transaction 0x5050000000000000000000000000000000000000000000000000000000005050 on eth?",
+      "ground_truth": "Transaction reverted in block 21000555, from 0xa1a1000000000000000000000000000000000a1a to 0xb2b2000000000000000000000000000000000b2b, value 0 wei.",
+      "good_answer": "Reverted in block 21000555. Sender 0xa1a1000000000000000000000000000000000a1a, recipient 0xb2b2000000000000000000000000000000000b2b, value 0 wei transferred.",
+      "bad_answer": "Reverted in block 21000555. Sender 0xa1a1000000000000000000000000000000000a1a, recipient 0xb2b2000000000000000000000000000000000b2b, value 9000000000000000000 wei transferred."
     }
   ]
 }

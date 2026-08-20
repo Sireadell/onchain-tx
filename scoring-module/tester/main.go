@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -120,6 +121,35 @@ func main() {
 	} else {
 		fmt.Println("  OK: whitespace-only answer -> 0")
 	}
+
+	// Spec requires surviving long/emoji/non-English input without crashing.
+	// A wazero Call returning an error means the module trapped.
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fail("emoji/non-English input panicked the harness: %v", r)
+			}
+		}()
+		emoji := rank(
+			"状態は何ですか？ 🚀🔥",
+			"Transaction confirmed in block 123, from 0xaaaa000000000000000000000000000000000000 to 0xbbbb000000000000000000000000000000000000, value 1 wei.",
+			"確認済み！🎉 block 123 から 0xaaaa000000000000000000000000000000000000 へ 0xbbbb000000000000000000000000000000000000 💰💰💰 not_a_real_word_あいうえお",
+		)
+		fmt.Printf("  OK: emoji/non-English answer survived, score=%.4f\n", emoji)
+	}()
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fail("very long input panicked the harness: %v", r)
+			}
+		}()
+		var long strings.Builder
+		for i := 0; i < 2000; i++ {
+			long.WriteString("filler word 12345 0xdeadbeef ")
+		}
+		longScore := rank("q", "ground truth text", long.String())
+		fmt.Printf("  OK: very long answer (%d bytes) survived, score=%.4f\n", long.Len(), longScore)
+	}()
 
 	fmt.Println("\n=== Fixture cases ===")
 	var scores []float32
