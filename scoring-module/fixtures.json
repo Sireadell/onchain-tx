@@ -12,8 +12,8 @@
       "id": "reverted-tx",
       "question": "What is the status of transaction 0xbbbb000000000000000000000000000000000000000000000000000000000002 on eth?",
       "ground_truth": "Transaction reverted in block 19876543, from 0x3333333333333333333333333333333333333333 to 0x4444444444444444444444444444444444444444, value 0 wei.",
-      "good_answer": "This transaction reverted at block 19876543. Sender 0x3333333333333333333333333333333333333333, recipient 0x4444444444444444444444444444444444444444, no value transferred.",
-      "good_answer_reworded": "Reverted. Block 19876543, from 0x3333333333333333333333333333333333333333 to 0x4444444444444444444444444444444444444444.",
+      "good_answer": "This transaction reverted at block 19876543. Sender 0x3333333333333333333333333333333333333333, recipient 0x4444444444444444444444444444444444444444, value 0 wei (no funds moved).",
+      "good_answer_reworded": "Reverted. Block 19876543, from 0x3333333333333333333333333333333333333333 to 0x4444444444444444444444444444444444444444, value 0 wei.",
       "bad_answer": "Transaction confirmed successfully in block 19876543."
     },
     {
@@ -42,7 +42,7 @@
       "id": "comma-formatted-block-number",
       "question": "What is the status of transaction 0xffff000000000000000000000000000000000000000000000000000000000006 on eth?",
       "ground_truth": "Transaction confirmed in block 20123456, from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, value 2000000000000000000 wei (2 ETH).",
-      "good_answer": "The transaction succeeded and was included in block 20,123,456, sent from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.",
+      "good_answer": "The transaction succeeded and was included in block 20,123,456, sending 2 ETH from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.",
       "bad_answer": "Transaction reverted in block 20,123,456."
     },
     {

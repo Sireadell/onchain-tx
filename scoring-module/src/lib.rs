@@ -195,20 +195,38 @@ fn phrase_status(s: &str) -> Option<TxStatus> {
 // opposite. Order matters: more specific/rarer words first so a text
 // containing several status words (e.g. a question echoing "confirmed OR
 // reverted?") resolves to the first genuine, non-negated hit.
-const STATUS_WORDS: [(&str, TxStatus); 13] = [
+// Kept as a superset of SYNONYM_GROUPS' status-related words (below), not
+// a separately-curated list — the two drifting apart is a real bug this
+// fixes: a comma-formatted-block-number fixture answer using "succeeded"
+// (present in SYNONYM_GROUPS' confirmed set, absent here) was classified
+// TxStatus::Unknown despite being a fully correct paraphrase, dropping it
+// into the worst scoring branch regardless of how many facts it got
+// right. "included"/"completed" deliberately stay out as bare words
+// (too generic/ambiguous alone — "included" shows up in unrelated
+// phrasing like fee breakdowns); the more specific phrase-level
+// "included in block"/"finalized in block" in phrase_status already
+// covers the safe version of those.
+const STATUS_WORDS: [(&str, TxStatus); 20] = [
     ("reverted", TxStatus::Reverted),
     ("revert", TxStatus::Reverted),
     ("failed", TxStatus::Reverted),
     ("failure", TxStatus::Reverted),
+    ("unsuccessful", TxStatus::Reverted),
     ("pending", TxStatus::Pending),
     ("queued", TxStatus::Pending),
     ("unmined", TxStatus::Pending),
+    ("mempool", TxStatus::Pending),
+    ("processing", TxStatus::Pending),
     ("confirmed", TxStatus::Confirmed),
     ("success", TxStatus::Confirmed),
     ("successful", TxStatus::Confirmed),
+    ("succeeded", TxStatus::Confirmed),
     ("mined", TxStatus::Confirmed),
     ("landed", TxStatus::Confirmed),
+    ("finalized", TxStatus::Confirmed),
     ("error", TxStatus::Error),
+    ("nonexistent", TxStatus::NotFound),
+    ("unrecorded", TxStatus::NotFound),
 ];
 
 fn word_status(s: &str) -> TxStatus {
@@ -312,6 +330,103 @@ fn tokens_eq_ignoring_commas(a: &str, b: &str) -> bool {
     an == bn && abuf[..an].eq_ignore_ascii_case(&bbuf[..bn])
 }
 
+fn strip_leading_zeros(bytes: &[u8]) -> &[u8] {
+    let mut i = 0usize;
+    while i + 1 < bytes.len() && bytes[i] == b'0' {
+        i += 1;
+    }
+    &bytes[i..]
+}
+
+const WEI_DECIMALS: usize = 18;
+
+// Converts a plain decimal token ("1.5", "2", "0.5") into its wei-integer
+// digit string (value * 10^18) so an ETH-denominated human phrasing and a
+// raw wei figure compare as the SAME fact. Ground truth for a tx-lookup
+// necessarily carries value_wei (the only amount field the API actually
+// returns, per BUILD_SPEC — there's no separate ETH field), but any
+// natural-language answer converting that to a readable "1.5 ETH" is
+// still factually correct; without this, that correct answer's amount
+// fact would always register as "missing" purely because of which unit
+// it's written in, not because it's wrong.
+fn decimal_to_wei_digits(token: &str) -> Option<([u8; 48], usize)> {
+    let bytes = token.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+    let mut dot_pos: Option<usize> = None;
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'.' {
+            if dot_pos.is_some() {
+                return None;
+            }
+            dot_pos = Some(i);
+        } else if !b.is_ascii_digit() {
+            return None;
+        }
+    }
+    let (int_part, frac_part): (&[u8], &[u8]) = match dot_pos {
+        Some(p) => (&bytes[..p], &bytes[p + 1..]),
+        None => (bytes, &[]),
+    };
+    if int_part.is_empty() && frac_part.is_empty() {
+        return None;
+    }
+    if frac_part.len() > WEI_DECIMALS {
+        return None;
+    }
+    let mut buf = [0u8; 48];
+    let mut n = 0usize;
+    let int_src: &[u8] = if int_part.is_empty() { b"0" } else { int_part };
+    for &b in int_src {
+        if n < buf.len() {
+            buf[n] = b;
+            n += 1;
+        }
+    }
+    for &b in frac_part {
+        if n < buf.len() {
+            buf[n] = b;
+            n += 1;
+        }
+    }
+    for _ in 0..(WEI_DECIMALS - frac_part.len()) {
+        if n < buf.len() {
+            buf[n] = b'0';
+            n += 1;
+        }
+    }
+    let stripped = strip_leading_zeros(&buf[..n]);
+    let mut out = [0u8; 48];
+    out[..stripped.len()].copy_from_slice(stripped);
+    Some((out, stripped.len()))
+}
+
+// True if a and b are the same amount either as literal text (via
+// tokens_eq_ignoring_commas) OR as a wei-integer vs. its ETH-decimal
+// equivalent, checked in both directions since either ground_truth or the
+// answer could plausibly be the one written in ETH.
+fn numeric_tokens_equivalent(a: &str, b: &str) -> bool {
+    if tokens_eq_ignoring_commas(a, b) {
+        return true;
+    }
+    let (abuf, an) = strip_commas(a);
+    let (bbuf, bn) = strip_commas(b);
+    if let Some((wbuf, wn)) = decimal_to_wei_digits(core::str::from_utf8(&abuf[..an]).unwrap_or("")) {
+        let b_stripped = strip_leading_zeros(&bbuf[..bn]);
+        if b_stripped == &wbuf[..wn] {
+            return true;
+        }
+    }
+    if let Some((wbuf, wn)) = decimal_to_wei_digits(core::str::from_utf8(&bbuf[..bn]).unwrap_or("")) {
+        let a_stripped = strip_leading_zeros(&abuf[..an]);
+        if a_stripped == &wbuf[..wn] {
+            return true;
+        }
+    }
+    false
+}
+
 // Tolerates a comma anywhere in the hex portion (most commonly a trailing
 // one from prose punctuation, e.g. "from 0xAB...12, to 0xCD...34") rather
 // than rejecting outright — this was a real bug in the shipped scorer: the
@@ -383,46 +498,87 @@ fn synonym_match(a: &str, b: &str) -> bool {
     false
 }
 
-// Recall-oriented: what fraction of ground_truth's real content (by weight)
-// shows up in the answer, exact or synonym match. Salient facts (hex
-// addresses, block numbers) count double and must match exactly (a
-// synonym for a block number doesn't exist); everything else can match by
-// synonym so paraphrasing isn't punished as a miss.
-fn content_overlap_parts(answer: &str, ground_truth: &str) -> (f32, f32) {
-    let mut total_weight = 0.0f32;
-    let mut matched_weight = 0.0f32;
+// Splits content matching into two SEPARATE ratios rather than one blended
+// average — this is the fix for the real Stage-2 result (average margin
+// 0.0841, needs >= 0.15): a single blended recall ratio dilutes one wrong
+// salient fact across however many total ground-truth words happen to
+// exist, so "confirmed, right block, WRONG address" and "confirmed, right
+// block, right address" could differ by only a few percent of a shared
+// average — nowhere near the 0.15 the benchmark demands, if their bad
+// answers are (realistically, for a good adversarial benchmark) a single
+// flipped fact rather than a wholesale wrong answer like our own fixtures
+// mostly modeled. Keeping salient recall as its own ratio lets score() give
+// it non-linear weight and an all-or-nothing bonus for having every
+// concrete fact right, instead of one wrong fact quietly blending into a
+// still-high overall average.
+struct ContentBreakdown {
+    salient_ratio: f32,
+    salient_total: u32,
+    salient_missing: u32,
+    other_ratio: f32,
+}
+
+fn content_breakdown(answer: &str, ground_truth: &str) -> ContentBreakdown {
+    let mut salient_total = 0u32;
+    let mut salient_matched = 0u32;
+    let mut other_total = 0u32;
+    let mut other_matched = 0u32;
     for word in ground_truth.split_whitespace() {
         if is_stopword(word) {
             continue;
         }
-        let salient = is_salient(word);
-        let weight = if salient { 2.0 } else { 1.0 };
-        total_weight += weight;
         let trimmed = word.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != ',');
-        let hit = if salient {
-            answer
+        // A number literally opening with '(' — "2000000000000000000 wei
+        // (2 ETH)" — is unambiguously a parenthetical restatement of the
+        // number just stated, not an independent fact, so it isn't its
+        // own requirement. Deliberately narrow (only the clear textual
+        // signal, not a blind numeric-equivalence dedup): the ambiguous
+        // general version of this — trying to canonicalize every bare
+        // number as wei-or-ETH to detect duplicates — can't tell an
+        // already-wei-scale number from an ETH-scale one without
+        // corrupting one of the two into the wrong canonical value, and
+        // risks silently merging two genuinely different facts (e.g. an
+        // unrelated confirmation count that happens to equal the ETH
+        // amount). The primary (non-parenthetical) number stays a full
+        // requirement, and numeric_tokens_equivalent below already lets
+        // an answer satisfy it in either wei or ETH form.
+        let salient = is_salient(word);
+        if salient && word.starts_with('(') {
+            continue;
+        }
+        if salient {
+            salient_total += 1;
+            let hit = answer
                 .split_whitespace()
                 .map(|w| w.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != ','))
-                .any(|w| tokens_eq_ignoring_commas(w, trimmed))
+                .any(|w| numeric_tokens_equivalent(w, trimmed));
+            if hit {
+                salient_matched += 1;
+            }
         } else {
-            answer
+            other_total += 1;
+            let hit = answer
                 .split_whitespace()
                 .map(|w| w.trim_matches(|c: char| !c.is_ascii_alphanumeric()))
-                .any(|w| synonym_match(w, trimmed))
-        };
-        if hit {
-            matched_weight += weight;
+                .any(|w| synonym_match(w, trimmed));
+            if hit {
+                other_matched += 1;
+            }
         }
     }
-    (total_weight, matched_weight)
-}
-
-fn content_overlap(answer: &str, ground_truth: &str) -> f32 {
-    let (total_weight, matched_weight) = content_overlap_parts(answer, ground_truth);
-    if total_weight == 0.0 {
-        0.0
-    } else {
-        matched_weight / total_weight
+    ContentBreakdown {
+        salient_ratio: if salient_total == 0 {
+            1.0
+        } else {
+            salient_matched as f32 / salient_total as f32
+        },
+        salient_total,
+        salient_missing: salient_total - salient_matched,
+        other_ratio: if other_total == 0 {
+            1.0
+        } else {
+            other_matched as f32 / other_total as f32
+        },
     }
 }
 
@@ -466,11 +622,11 @@ fn hallucination_ratio(answer: &str, ground_truth: &str, question: &str) -> f32 
         let in_gt = ground_truth
             .split_whitespace()
             .map(|w| w.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != ','))
-            .any(|w| tokens_eq_ignoring_commas(w, trimmed));
+            .any(|w| numeric_tokens_equivalent(w, trimmed));
         let in_q = question
             .split_whitespace()
             .map(|w| w.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != ','))
-            .any(|w| tokens_eq_ignoring_commas(w, trimmed));
+            .any(|w| numeric_tokens_equivalent(w, trimmed));
         if !in_gt && !in_q {
             extra += 1;
         }
@@ -573,35 +729,54 @@ fn score(question: &str, ground_truth: &str, miner_answer: &str) -> f32 {
 
     let gt_status = extract_status(ground_truth);
     let ma_status = extract_status(miner_answer);
-    let content = content_overlap(miner_answer, ground_truth);
+    let cb = content_breakdown(miner_answer, ground_truth);
 
     // The status verdict is still the single worst thing to get wrong (a
     // "confirmed" answer for a reverted tx is wrong no matter how many
     // correct details it cites), so a mismatch stays heavily penalized.
-    // But a *correct* verdict is necessary, not sufficient: two answers can
-    // both say "confirmed" while one names the real block/addresses and
-    // the other doesn't, so once the verdict matches, the score is
-    // dominated by content_overlap rather than a flat bonus for the right
-    // word. A flat bonus is what caused the previous rejection (eval
-    // margin 0.0219): near-identical status-word answers scored almost
-    // identically regardless of whether the underlying facts were right.
+    // But a *correct* verdict is necessary, not sufficient.
+    //
+    // salient_ratio is cubed rather than used linearly: a single wrong or
+    // missing concrete fact (address, block number, amount) should cost
+    // real, visible score, not get smoothed into a shared average with
+    // however many other words happen to be in the ground truth. Squaring
+    // or cubing a ratio close to 1.0 keeps it close to 1.0 (0.9^3 = 0.73),
+    // while a ratio that's already low collapses further — the direction
+    // that matters here. The flat all-facts-correct bonus below is the
+    // second half of this: rewards getting EVERY salient fact right as a
+    // qualitatively different outcome from "almost all of them," not just
+    // a few more percentage points on a shared average. This replaces the
+    // old blended content_overlap*0.65 term, which is what produced the
+    // rejected 0.0841 average margin — a benchmark built around single
+    // flipped facts barely moved a recall average over the whole sentence.
+    let salient_term = cb.salient_ratio * cb.salient_ratio * cb.salient_ratio;
+    let all_salient_correct = cb.salient_total > 0 && cb.salient_missing == 0;
+
     let mut base = if ma_status == TxStatus::Unknown {
-        0.10 + content * 0.10
+        0.05 + salient_term * 0.10 + cb.other_ratio * 0.05
     } else if ma_status == gt_status {
-        0.30 + content * 0.65
+        0.10
+            + salient_term * 0.45
+            + cb.other_ratio * 0.15
+            + if all_salient_correct { 0.15 } else { 0.0 }
     } else {
-        0.05 + content * 0.10
+        0.03 + salient_term * 0.07 + cb.other_ratio * 0.05
     };
 
     // Small secondary signal for close paraphrasing beyond salient facts.
     base += word_overlap(miner_answer, ground_truth) * 0.10;
 
-    // Precision penalties content_overlap structurally can't apply, since
-    // it only ever measures recall (ground_truth -> answer). A right
-    // status word plus fabricated or swapped facts is still a wrong
-    // answer.
+    // Precision penalties content_breakdown structurally can't apply on
+    // its own, since it only ever measures recall (ground_truth ->
+    // answer). A right status word plus fabricated or swapped facts is
+    // still a wrong answer.
     base -= hallucination_ratio(miner_answer, ground_truth, question) * 0.40;
     base -= role_violation_ratio(miner_answer, ground_truth) * 0.45;
+
+    // A fixed, non-dilutable cost per missing/wrong salient fact — the
+    // direct fix for the dilution problem: this doesn't shrink as
+    // ground_truth grows longer, unlike salient_ratio's denominator.
+    base -= (cb.salient_missing.min(3) as f32) * 0.14;
 
     if base < 0.0 {
         0.0
