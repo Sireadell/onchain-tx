@@ -1,5 +1,46 @@
 #![no_std]
+extern crate alloc;
 use core::panic::PanicInfo;
+
+mod minilm;
+
+// Backs `extern crate alloc` (Vec) for the MiniLM inference code in
+// src/minilm/ -- a separate memory region from this module's own
+// host-facing bump allocator below (used for the host to hand us
+// question/ground_truth/answer text), so the two don't conflict.
+//
+// A plain bump allocator that never frees is safe here specifically
+// because score() resets INTERNAL_OFFSET to 0 before each embed() call --
+// every Vec the MiniLM code allocates during one tokenize+embed pair is
+// logically dead by the time the next one starts, so there's no cross-call
+// leak despite dealloc() being a no-op. 64MB is generous headroom for one
+// call's worth of transformer intermediate matrices (6 layers, seq_len up
+// to 128). Ported verbatim from the sibling Telegraph Sentinel project,
+// which validated this sizing at Stage 2 in production.
+const INTERNAL_HEAP_SIZE: usize = 64 * 1024 * 1024;
+static mut INTERNAL_HEAP: [u8; INTERNAL_HEAP_SIZE] = [0u8; INTERNAL_HEAP_SIZE];
+static mut INTERNAL_OFFSET: usize = 0;
+
+struct BumpAllocator;
+
+unsafe impl core::alloc::GlobalAlloc for BumpAllocator {
+    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+        let align = layout.align().max(1);
+        let size = layout.size();
+        let base = core::ptr::addr_of_mut!(INTERNAL_OFFSET);
+        let current = *base;
+        let aligned = (current + align - 1) & !(align - 1);
+        if aligned + size > INTERNAL_HEAP_SIZE {
+            return core::ptr::null_mut();
+        }
+        *base = aligned + size;
+        core::ptr::addr_of_mut!(INTERNAL_HEAP).cast::<u8>().add(aligned)
+    }
+    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: core::alloc::Layout) {}
+}
+
+#[global_allocator]
+static ALLOCATOR: BumpAllocator = BumpAllocator;
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -731,6 +772,43 @@ fn score(question: &str, ground_truth: &str, miner_answer: &str) -> f32 {
     let ma_status = extract_status(miner_answer);
     let cb = content_breakdown(miner_answer, ground_truth);
 
+    // Real semantic similarity via an embedded MiniLM-L6-v2 encoder (see
+    // src/minilm/), not another hand-curated synonym list. Ported from the
+    // sibling Telegraph Sentinel project, which proved this exact
+    // technique at Stage 2 (32/32 wins against its champion) after an
+    // earlier GloVe-averaging attempt made things WORSE (word-vector
+    // averaging with no attention/context actually broke score ordering
+    // that pure lexical matching got right). Reset the internal bump
+    // allocator between the two embed() calls (not just once) so their
+    // transient transformer-layer allocations don't have to coexist --
+    // only the small fixed-size [f32; 384] outputs need to survive past
+    // each call.
+    unsafe {
+        *core::ptr::addr_of_mut!(INTERNAL_OFFSET) = 0;
+    }
+    let gt_enc = minilm::tokenizer::tokenize(ground_truth);
+    let gt_vec = minilm::embed::run(&gt_enc);
+    unsafe {
+        *core::ptr::addr_of_mut!(INTERNAL_OFFSET) = 0;
+    }
+    let ma_enc = minilm::tokenizer::tokenize(miner_answer);
+    let ma_vec = minilm::embed::run(&ma_enc);
+    let semantic_content = minilm::math::cosine(&gt_vec, &ma_vec);
+
+    // Deliberately scoped to the non-salient signal only, not blended into
+    // salient_term below: an embedding can tell you two sentences mean
+    // roughly the same thing, but it cannot verify that a specific 40-hex
+    // -character address or block number is the CORRECT one -- treating
+    // two different addresses as "similar" (they're both long hex
+    // strings) would be actively dangerous for the one part of this
+    // domain that must stay exact-match. What it's good for here is
+    // exactly what our own STATUS_WORDS gap just exposed: a real answer
+    // phrased with a synonym we never enumerated (e.g. "succeeded") still
+    // reads as equivalent to a human/embedding, so this is a robust
+    // backstop against the whack-a-mole nature of hand-written synonym
+    // lists, applied only to the "everything except the hard facts" slot.
+    let other_blended = cb.other_ratio * 0.5 + semantic_content * 0.5;
+
     // The status verdict is still the single worst thing to get wrong (a
     // "confirmed" answer for a reverted tx is wrong no matter how many
     // correct details it cites), so a mismatch stays heavily penalized.
@@ -753,14 +831,14 @@ fn score(question: &str, ground_truth: &str, miner_answer: &str) -> f32 {
     let all_salient_correct = cb.salient_total > 0 && cb.salient_missing == 0;
 
     let mut base = if ma_status == TxStatus::Unknown {
-        0.05 + salient_term * 0.10 + cb.other_ratio * 0.05
+        0.05 + salient_term * 0.10 + other_blended * 0.05
     } else if ma_status == gt_status {
         0.10
             + salient_term * 0.45
-            + cb.other_ratio * 0.15
+            + other_blended * 0.15
             + if all_salient_correct { 0.15 } else { 0.0 }
     } else {
-        0.03 + salient_term * 0.07 + cb.other_ratio * 0.05
+        0.03 + salient_term * 0.07 + other_blended * 0.05
     };
 
     // Small secondary signal for close paraphrasing beyond salient facts.
