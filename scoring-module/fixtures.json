@@ -79,6 +79,20 @@
       "ground_truth": "Transaction reverted in block 21000555, from 0xa1a1000000000000000000000000000000000a1a to 0xb2b2000000000000000000000000000000000b2b, value 0 wei.",
       "good_answer": "Reverted in block 21000555. Sender 0xa1a1000000000000000000000000000000000a1a, recipient 0xb2b2000000000000000000000000000000000b2b, value 0 wei transferred.",
       "bad_answer": "Reverted in block 21000555. Sender 0xa1a1000000000000000000000000000000000a1a, recipient 0xb2b2000000000000000000000000000000000b2b, value 9000000000000000000 wei transferred."
+    },
+    {
+      "id": "unrecognized-status-vocabulary-payment-verification",
+      "question": "Did transaction 0x6060000000000000000000000000000000000000000000000000000000006060 on base actually move the expected USDC payment?",
+      "ground_truth": "NO_SUPPORTED_TRANSFER: execution succeeded but no supported payment transfer was observed. This was an approval-only transaction, not a token transfer, from 0xc1c1000000000000000000000000000000000c1c to 0xd2d2000000000000000000000000000000000d2d.",
+      "good_answer": "NO_SUPPORTED_TRANSFER. The transaction executed without reverting, but it only granted a spending approval — no actual payment transfer happened. From 0xc1c1000000000000000000000000000000000c1c, approving spender 0xd2d2000000000000000000000000000000000d2d.",
+      "bad_answer": "OK: a supported payment transfer of the full expected amount was observed, from 0xc1c1000000000000000000000000000000000c1c to 0xd2d2000000000000000000000000000000000d2d."
+    },
+    {
+      "id": "unrecognized-status-vocabulary-security-audit",
+      "question": "What is the security risk rating for contract 0x7070000000000000000000000000000000000000000000000000000000007070 on eth?",
+      "ground_truth": "rating: critical. Reentrancy vulnerability detected in the withdraw function (high severity), plus 2 medium-severity findings around unchecked external calls. risk_score 92.",
+      "good_answer": "This contract is rated critical. Slither flagged a high-severity reentrancy vulnerability in withdraw, along with two medium-severity unchecked external call findings. Risk score: 92.",
+      "bad_answer": "This contract is rated clean, no significant findings. risk_score 4."
     }
   ]
 }

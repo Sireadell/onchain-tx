@@ -334,7 +334,7 @@ fn is_stopword(word: &str) -> bool {
         "transaction", "status", "included", "wei", "eth", "value",
         "block", "hash", "chain", "tx", "eth.", "was", "amount",
     ];
-    if is_numeric_token(word) {
+    if is_numeric_token(word) || is_enum_code(word) {
         return false;
     }
     let trimmed = word.trim_matches(|c: char| !c.is_ascii_alphanumeric());
@@ -495,19 +495,61 @@ fn is_hex_address(trimmed: &str) -> bool {
     hex_count >= 4
 }
 
-// A hex address/tx-hash or a number (block height, wei/token amount,
-// confirmation count): the concrete, checkable facts that separate a
-// genuinely correct answer from one that merely guessed the right status
-// word. Weighted higher in content_overlap below, and any digit count
-// counts — a 1-digit "0 wei" or a 3-digit confirmation count is just as
-// checkable a fact as a 9-digit block number, so there's no reason to
-// require >=4 digits before it counts as salient.
+// SCREAMING_SNAKE_CASE (or bare uppercase like "OK") tokens are the
+// machine-readable status-code convention this whole shared intent
+// actually converges on — confirmed by inspecting two other real
+// ONCHAIN_TX_LOOKUP miners: mystiquemide/veyctum's status vocabulary is
+// OK, NO_SUPPORTED_TRANSFER, RPC_DISAGREEMENT, AMBIGUOUS, UNSUPPORTED,
+// INVALID_INPUT, UPSTREAM_ERROR; Carlys17/vulnfeed's rating vocabulary is
+// clean/moderate/elevated/critical. A code shaped like this is never
+// incidental prose, so it's exactly as checkable a fact as an address or
+// block number, and needs the same non-dilutable exact-match treatment --
+// without this, "NO_SUPPORTED_TRANSFER" is just one word among a dozen
+// roughly-equal-weight "other" words, so a wrong answer that happens to
+// reuse enough of ground_truth's other vocabulary can match the same raw
+// count as a right answer that states the one word that actually matters.
+// Requires >=2 chars, no lowercase letters, only [A-Z0-9_] -- rejects
+// ordinary capitalized prose ("This", "Transaction") since those have
+// lowercase letters after the first, and rejects short ambiguous
+// all-caps abbreviations by requiring at least one letter present.
+fn is_enum_code(word: &str) -> bool {
+    let trimmed = word.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_');
+    if trimmed.len() < 2 || trimmed.len() > 40 {
+        return false;
+    }
+    let mut has_letter = false;
+    for b in trimmed.bytes() {
+        if b.is_ascii_lowercase() {
+            return false;
+        }
+        if b.is_ascii_uppercase() {
+            has_letter = true;
+        } else if b == b'_' || b.is_ascii_digit() {
+            // allowed, doesn't count as a letter
+        } else {
+            return false;
+        }
+    }
+    has_letter
+}
+
+// A hex address/tx-hash, a number (block height, wei/token amount,
+// confirmation count), or a SCREAMING_SNAKE_CASE status code: the
+// concrete, checkable facts that separate a genuinely correct answer
+// from one that merely guessed the right status word. Weighted higher in
+// content_overlap below, and any digit count counts — a 1-digit "0 wei"
+// or a 3-digit confirmation count is just as checkable a fact as a
+// 9-digit block number, so there's no reason to require >=4 digits
+// before it counts as salient.
 fn is_salient(word: &str) -> bool {
     let trimmed = word.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != ',');
     if is_hex_address(trimmed) {
         return true;
     }
-    is_numeric_token(trimmed)
+    if is_numeric_token(trimmed) {
+        return true;
+    }
+    is_enum_code(word)
 }
 
 // Status-word synonym groups so a real hidden-benchmark answer phrased
@@ -830,13 +872,38 @@ fn score(question: &str, ground_truth: &str, miner_answer: &str) -> f32 {
     let salient_term = cb.salient_ratio * cb.salient_ratio * cb.salient_ratio;
     let all_salient_correct = cb.salient_total > 0 && cb.salient_missing == 0;
 
-    let mut base = if ma_status == TxStatus::Unknown {
-        0.05 + salient_term * 0.10 + other_blended * 0.05
+    // ONCHAIN_TX_LOOKUP is a SHARED intent, not a private one -- confirmed
+    // by inspecting two other registered miners for this same intent
+    // (Carlys17/vulnfeed treats it as smart-contract security auditing,
+    // rating: clean/moderate/elevated/critical; mystiquemide/veyctum
+    // treats it as ERC-20 transfer verification with its own status
+    // vocabulary: OK, NO_SUPPORTED_TRANSFER, RPC_DISAGREEMENT, AMBIGUOUS,
+    // UNSUPPORTED, INVALID_INPUT, UPSTREAM_ERROR, and cites a third
+    // "incumbent" miner (Verity) with yet another canonical format). Real
+    // hidden-benchmark ground truth for this intent is not going to be
+    // confined to our own confirmed/reverted/pending/not_found/error
+    // vocabulary. The OLD single "ma_status == Unknown -> crushed 0.05-0.20
+    // band" branch punished ANY answer using unrecognized-but-consistent
+    // vocabulary regardless of correctness, which is exactly the bug
+    // Sentinel independently found and fixed for its own shared intent
+    // (registrationId 114/120): when NEITHER side commits to recognized
+    // status vocabulary, that's not evidence of a wrong answer, so trust
+    // content_breakdown fully instead of capping it. Four branches instead
+    // of three, matching Sentinel's own proven shape:
+    let mut base = if ma_status == TxStatus::Unknown && gt_status == TxStatus::Unknown {
+        0.12 + salient_term * 0.55 + other_blended * 0.20 + if all_salient_correct { 0.10 } else { 0.0 }
     } else if ma_status == gt_status {
         0.10
             + salient_term * 0.45
             + other_blended * 0.15
             + if all_salient_correct { 0.15 } else { 0.0 }
+    } else if ma_status == TxStatus::Unknown || gt_status == TxStatus::Unknown {
+        // Exactly one side used recognized vocabulary -- genuinely more
+        // ambiguous than "neither side did" (could be a real mismatch, or
+        // could be an answer phrased in a vocabulary we don't recognize
+        // while ground_truth happens to use ours), so a moderate ceiling,
+        // not the full trust the both-Unknown branch gets.
+        0.08 + salient_term * 0.30 + other_blended * 0.12
     } else {
         0.03 + salient_term * 0.07 + other_blended * 0.05
     };
