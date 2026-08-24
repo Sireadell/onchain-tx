@@ -93,6 +93,13 @@
       "ground_truth": "rating: critical. Reentrancy vulnerability detected in the withdraw function (high severity), plus 2 medium-severity findings around unchecked external calls. risk_score 92.",
       "good_answer": "This contract is rated critical. Slither flagged a high-severity reentrancy vulnerability in withdraw, along with two medium-severity unchecked external call findings. Risk score: 92.",
       "bad_answer": "This contract is rated clean, no significant findings. risk_score 4."
+    },
+    {
+      "id": "lowercase-rating-word-only-differentiator",
+      "question": "What is the security risk rating for contract 0x8080000000000000000000000000000000000000000000000000000000008080 on eth?",
+      "ground_truth": "rating: elevated. Static analysis found a reentrancy pattern in an external call path, along with unchecked return values in two token transfer helpers.",
+      "good_answer": "This contract's rating is elevated. Static analysis found a reentrancy pattern in an external call path, plus unchecked return values in two token transfer helpers.",
+      "bad_answer": "This contract's rating is clean. Static analysis found a reentrancy pattern in an external call path, plus unchecked return values in two token transfer helpers."
     }
   ]
 }

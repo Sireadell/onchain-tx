@@ -495,6 +495,18 @@ fn is_hex_address(trimmed: &str) -> bool {
     hex_count >= 4
 }
 
+// A short, purely-alphabetic word — the shape of a verdict/rating value
+// ("elevated", "clean", "confirmed"), not a sentence continuation. Used
+// only to recognize the word right after a colon-terminated label as
+// salient regardless of case (see is_label_value in content_breakdown).
+fn is_short_alpha_word(trimmed: &str) -> bool {
+    let len = trimmed.chars().count();
+    if !(2..=20).contains(&len) {
+        return false;
+    }
+    trimmed.chars().all(|c| c.is_ascii_alphabetic())
+}
+
 // SCREAMING_SNAKE_CASE (or bare uppercase like "OK") tokens are the
 // machine-readable status-code convention this whole shared intent
 // actually converges on — confirmed by inspecting two other real
@@ -606,11 +618,42 @@ fn content_breakdown(answer: &str, ground_truth: &str) -> ContentBreakdown {
     let mut salient_matched = 0u32;
     let mut other_total = 0u32;
     let mut other_matched = 0u32;
-    for word in ground_truth.split_whitespace() {
+
+    let mut tokens: [&str; 96] = [""; 96];
+    let mut tn = 0usize;
+    for w in ground_truth.split_whitespace() {
+        if tn >= tokens.len() {
+            break;
+        }
+        tokens[tn] = w;
+        tn += 1;
+    }
+
+    for i in 0..tn {
+        let word = tokens[i];
         if is_stopword(word) {
             continue;
         }
         let trimmed = word.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != ',');
+        let numeric_or_hex = is_salient(word);
+        // "label: value" structural detection: a short alphabetic word
+        // immediately after a colon-terminated label ("rating: elevated",
+        // "state: confirmed") is a verdict, whatever case it's written in
+        // — found this gap directly: a real ONCHAIN_TX_LOOKUP miner
+        // (Carlys17/vulnfeed) uses a LOWERCASE rating vocabulary (clean/
+        // moderate/elevated/critical), which is_enum_code deliberately
+        // doesn't catch (it requires uppercase, to avoid false-positiving
+        // on ordinary capitalized prose). Without this, "elevated" is just
+        // one word among a dozen roughly-equal-weight "other" words —
+        // isolating it as the ONLY difference between a good and bad
+        // answer (fixture lowercase-rating-word-only-differentiator)
+        // produced a real but wafer-thin 0.014 margin, the same dilution
+        // failure mode the enum-code fix solved for uppercase codes, just
+        // not severe enough to fully flip on that particular fixture.
+        // Structural position (right after a label) generalizes better
+        // than hardcoding this one observed vocabulary would.
+        let is_label_value = !numeric_or_hex && i > 0 && tokens[i - 1].ends_with(':') && is_short_alpha_word(trimmed);
+        let salient = numeric_or_hex || is_label_value;
         // A number literally opening with '(' — "2000000000000000000 wei
         // (2 ETH)" — is unambiguously a parenthetical restatement of the
         // number just stated, not an independent fact, so it isn't its
@@ -625,8 +668,7 @@ fn content_breakdown(answer: &str, ground_truth: &str) -> ContentBreakdown {
         // amount). The primary (non-parenthetical) number stays a full
         // requirement, and numeric_tokens_equivalent below already lets
         // an answer satisfy it in either wei or ETH form.
-        let salient = is_salient(word);
-        if salient && word.starts_with('(') {
+        if numeric_or_hex && word.starts_with('(') {
             continue;
         }
         if salient {
