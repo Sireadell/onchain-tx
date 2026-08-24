@@ -10,13 +10,13 @@
 # are top-level-only fields, not per-endpoint. Fixed below by moving them
 # to the top level.
 #
-# `id: 0` below is intentionally left as-is, not a placeholder pending
-# resolution. Confirmed directly against docs.telegraphprotocol.com/docs/
-# miners/miner-registration (2026-08-14): registerMiner(yamlUrl, yamlHash,
-# feeAddress, minPriceUsdc, supportedIntents) takes no `id`/registrationId
-# argument at all — the chain assigns registrationId on its own via the
-# MinerRegistered event, entirely independent of this file's `id` field.
-# Nothing to reconcile, no post-registration update needed on this account.
+# `id: 0` was WRONG — the 2026-08-14 read above conflated this field with
+# the on-chain registrationId. They are two different keys. This YAML `id`
+# is the routing key for /engine/v1/ask/{id} and must be globally unused;
+# `id: 0` collided with active miner "lacre-meteo" and caused registration
+# 125 to be REJECTED on 2026-08-20 (confirmed live on
+# explorer.telegraphprotocol.com/miners/125). Fixed 2026-08-24: id changed
+# to 9002 (checked unused against /miner-dispatcher/integrations).
 #
 # Still TODO before registering on-chain:
 #   - This file itself must be hosted at a public URL (IPFS recommended)
@@ -27,7 +27,7 @@
 
 version: "1"
 kind: miner
-id: 0
+id: 9002
 slug: txlens
 protocol: generic
 name: TxLens
