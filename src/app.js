@@ -34,6 +34,22 @@ const checkTokenHoldersRateLimit = signalRateLimit();
 const checkTvlRateLimit = signalRateLimit();
 const checkCryptoPriceRateLimit = signalRateLimit();
 
+// Logs every request as it arrives and again when it finishes, to stdout
+// (Render captures this in its dashboard logs, no extra infra needed). Added
+// 2026-08-25 after being unable to tell, after the fact, whether blank
+// grading answers (TVL/holders/price scored with an empty miner_answer) were
+// caused by the server never receiving the request, timing out mid-call, or
+// something else — the explorer's scoring history doesn't record that.
+// Placed before rate limiting so a rejected request still gets logged.
+const requestLogMiddleware = (req, res, next) => {
+  const start = Date.now();
+  console.log(`[req] ${new Date().toISOString()} ${req.method} ${req.originalUrl}`);
+  res.on('finish', () => {
+    console.log(`[res] ${new Date().toISOString()} ${req.method} ${req.originalUrl} -> ${res.statusCode} (${Date.now() - start}ms)`);
+  });
+  next();
+};
+
 const corsMiddleware = (req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
@@ -51,6 +67,7 @@ export function buildApp() {
   // `true` so a caller can't spoof X-Forwarded-For to collapse the rate
   // limiter into one shared bucket.
   app.set('trust proxy', 1);
+  app.use(requestLogMiddleware);
   app.use(corsMiddleware);
   app.use(express.json());
 

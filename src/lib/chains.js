@@ -20,12 +20,19 @@
 // deployment, not the shared blockscout.com domain the other four use) —
 // hardcoded to the real host directly rather than following a redirect on
 // every request.
+// `nativeCoingeckoId` is the CoinGecko id (as recognized by DefiLlama's
+// coins.llama.fi) for each chain's native gas token, used by /gas-price to
+// convert gwei into a USD fee estimate. eth/base/arbitrum/optimism all
+// settle gas in ETH. Polygon's native token is POL (post-MATIC rename);
+// live-checked 2026-08-25 against coins.llama.fi — `matic-network` returns
+// an empty `coins` object there, `polygon-ecosystem-token` is the id that
+// actually resolves.
 export const CHAINS = {
-  eth: { segment: 'eth', label: 'Ethereum', blockscoutHost: 'eth.blockscout.com' },
-  base: { segment: 'base', label: 'Base', blockscoutHost: 'base.blockscout.com' },
-  arbitrum: { segment: 'arbitrum', label: 'Arbitrum', blockscoutHost: 'arbitrum.blockscout.com' },
-  optimism: { segment: 'optimism', label: 'Optimism', blockscoutHost: 'explorer.optimism.io' },
-  polygon: { segment: 'polygon', label: 'Polygon', blockscoutHost: 'polygon.blockscout.com' },
+  eth: { segment: 'eth', label: 'Ethereum', blockscoutHost: 'eth.blockscout.com', nativeCoingeckoId: 'ethereum' },
+  base: { segment: 'base', label: 'Base', blockscoutHost: 'base.blockscout.com', nativeCoingeckoId: 'ethereum' },
+  arbitrum: { segment: 'arbitrum', label: 'Arbitrum', blockscoutHost: 'arbitrum.blockscout.com', nativeCoingeckoId: 'ethereum' },
+  optimism: { segment: 'optimism', label: 'Optimism', blockscoutHost: 'explorer.optimism.io', nativeCoingeckoId: 'ethereum' },
+  polygon: { segment: 'polygon', label: 'Polygon', blockscoutHost: 'polygon.blockscout.com', nativeCoingeckoId: 'polygon-ecosystem-token' },
 };
 
 export const DEFAULT_CHAIN = process.env.CHAIN || 'eth';

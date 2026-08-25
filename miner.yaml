@@ -61,7 +61,8 @@ endpoints:
     external_path: /gas-price
     method: GET
     description: >
-      Current gas price for a chain. Query params: chain (one of eth,
+      Current gas price for a chain, plus an estimated USD fee for a
+      standard 21,000-gas transfer. Query params: chain (one of eth,
       base, arbitrum, optimism, polygon — optional, defaults to eth).
   - path: /wallet-balance
     external_path: /wallet-balance
@@ -229,6 +230,16 @@ output_schema:
     gas_price_gwei:
       type: number
       description: /gas-price only.
+    fee_usd:
+      type: [number, "null"]
+      description: >
+        /gas-price only. Estimated USD cost of a standard 21,000-gas
+        transfer at the current gas price. Null if the native token's USD
+        price could not be looked up — gas_price_wei/gwei are still valid
+        in that case.
+    native_price_usd:
+      type: [number, "null"]
+      description: /gas-price only. USD price of the chain's native gas token used to compute fee_usd. Null under the same condition as fee_usd.
     balance_wei:
       type: string
       description: /wallet-balance only. Raw integer amount, native wei or the ERC-20's smallest unit depending on whether token was supplied.
