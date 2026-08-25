@@ -1,14 +1,20 @@
-// TVL_LOOKUP signal endpoint. No ground truth exists for this intent yet
-// (checked live against /groundtruths/TVL_LOOKUP, 2026-08-18) — same
-// speculative-on-grading caveat as the other new endpoints. Uses
-// DefiLlama's public API, not Ankr/Blockscout — TVL is an
-// aggregated/indexed figure no chain RPC exposes directly. Accepts either
-// `protocol` (a DefiLlama protocol slug, e.g. "uniswap") or `tvl_chain` (a
-// free-text DefiLlama chain name, e.g. "Ethereum") — exactly one of the
-// two. Deliberately not named `chain` — that param is already
+// TVL_LOOKUP signal endpoint. Uses DefiLlama's public API, not
+// Ankr/Blockscout — TVL is an aggregated/indexed figure no chain RPC
+// exposes directly. Accepts `protocol` (a DefiLlama protocol slug, e.g.
+// "uniswap") and/or `tvl_chain` (a free-text DefiLlama chain name, e.g.
+// "Ethereum"). Deliberately not named `chain` — that param is already
 // enum-restricted to the five EVM slugs the other four endpoints use, and
 // DefiLlama's chain names (~460 of them, capitalized, not limited to EVM)
 // don't fit that enum.
+//
+// Used to reject the request outright when both were supplied. Confirmed
+// live 2026-08-25 via Render request logs that Telegraph's dispatcher
+// regularly sends both together for a question like "Aave V3 protocol on
+// the Ethereum chain" — both facts are true, so it reasonably passes both.
+// That meant every graded TVL question on a named protocol was 400ing and
+// scoring as a blank answer, a bug in our own validation, not a grading or
+// uptime problem. Now `protocol` wins when both are present (it's the more
+// specific identifier) and `tvl_chain` is only used alone.
 
 import { Router } from 'express';
 import {
@@ -29,20 +35,13 @@ async function handleTvl(req, res) {
   if (!protocol && !tvlChain) {
     return res.status(400).json({
       status: 'error',
-      summary: 'must include either a `protocol` (DefiLlama slug) or `tvl_chain` (DefiLlama chain name) query parameter',
+      summary: 'must include a `protocol` (DefiLlama slug) and/or `tvl_chain` (DefiLlama chain name) query parameter',
       confidence: 1.0,
       error: 'missing `protocol` or `tvl_chain` parameter',
     });
   }
-  if (protocol && tvlChain) {
-    return res.status(400).json({
-      status: 'error',
-      summary: 'must include only one of `protocol` or `tvl_chain`, not both',
-      confidence: 1.0,
-      error: 'both `protocol` and `tvl_chain` supplied',
-    });
-  }
 
+  // `protocol` wins when both are supplied — see file header comment.
   const queryType = protocol ? 'protocol' : 'chain';
   const query = protocol ?? tvlChain;
 

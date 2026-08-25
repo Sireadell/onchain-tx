@@ -39,10 +39,22 @@ test('tvl: missing both protocol and chain rejected before any call', async (t) 
   assert.equal(called, false);
 });
 
-test('tvl: both protocol and tvl_chain rejected', async (t) => {
+test('tvl: both protocol and tvl_chain supplied — protocol wins, not rejected', async (t) => {
+  resetDefiLlamaCache();
+  let calledPath;
+  mockFetch(t, async (url) => {
+    calledPath = url;
+    return { status: 200, text: async () => '5000' };
+  });
   const base = startServer(t);
-  const res = await fetch(`${base}/tvl?protocol=uniswap&tvl_chain=Ethereum`);
-  assert.equal(res.status, 400);
+
+  const res = await fetch(`${base}/tvl?protocol=aave-v3&tvl_chain=ethereum`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.query_type, 'protocol');
+  assert.equal(body.query, 'aave-v3');
+  assert.match(calledPath, /\/tvl\/aave-v3$/);
 });
 
 test('tvl: successful protocol lookup returns tvl_usd and canonical', async (t) => {
