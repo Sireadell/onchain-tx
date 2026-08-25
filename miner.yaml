@@ -43,7 +43,9 @@ description: >
   confirmation-depth concept, so confidence is always 1.0 on success. /tvl
   looks up current total value locked for a DefiLlama protocol slug or
   chain name. /crypto-price looks up current USD price for a CoinGecko id
-  or a specific on-chain token.
+  or a specific on-chain token. /stock-price looks up current USD price
+  for an equity ticker symbol. /ssl-check performs a live TLS handshake
+  against a domain and reports its certificate's validity and expiry.
 base_url: https://telegraph-onchain-tx-lookup-miner.onrender.com
 
 auth:
@@ -99,6 +101,19 @@ endpoints:
       price_chain (a free-text DefiLlama chain name, e.g. "ethereum") and
       token (0x-prefixed, 40 hex characters — the token's contract
       address) together. Exactly one of these two modes.
+  - path: /stock-price
+    external_path: /stock-price
+    method: GET
+    description: >
+      Current USD price for an equity ticker. Query params: ticker (a
+      stock symbol, e.g. "AAPL", required).
+  - path: /ssl-check
+    external_path: /ssl-check
+    method: GET
+    description: >
+      Live TLS certificate check for a domain — performs a real
+      handshake, not a cached lookup. Query params: domain (bare
+      hostname, e.g. "example.com", not a full URL, required).
 
 # input_schema/output_schema are top-level-only fields, documentation
 # surfaced to callers rather than a per-endpoint validator (confirmed
@@ -156,6 +171,14 @@ input_schema:
         e.g. "ethereum" (same namespace as tvl_chain, separate field since
         it's paired with `token` rather than used alone). Used by
         /crypto-price only, together with `token`.
+    ticker:
+      type: string
+      description: Stock ticker symbol, e.g. "AAPL". Required on /stock-price only.
+    domain:
+      type: string
+      description: >
+        Bare hostname to check, e.g. "example.com" — not a full URL (no
+        scheme, no path). Required on /ssl-check only.
 output_schema:
   type: object
   properties:
@@ -274,6 +297,33 @@ output_schema:
         /crypto-price, coin_id mode only. Which upstream actually served
         the price — coingecko unless that call failed, in which case it
         falls back to defillama.
+    currency:
+      type: [string, "null"]
+      description: /stock-price only. Non-null and non-"USD" for tickers priced in another currency (foreign exchanges).
+    exchange:
+      type: [string, "null"]
+      description: /stock-price only. The exchange the ticker trades on.
+    valid:
+      type: [boolean, "null"]
+      description: /ssl-check only. Null when status is unreachable (the handshake itself failed, so validity is unknown, not false).
+    authorized:
+      type: [boolean, "null"]
+      description: /ssl-check only. Whether Node's default trust store accepts the certificate chain.
+    authorization_error:
+      type: [string, "null"]
+      description: /ssl-check only. Reason authorized is false, e.g. a self-signed or expired certificate.
+    issuer:
+      type: [string, "null"]
+      description: /ssl-check only. Certificate authority organization or common name.
+    valid_from:
+      type: string
+      description: /ssl-check only. ISO timestamp of certificate issuance.
+    valid_to:
+      type: string
+      description: /ssl-check only. ISO timestamp of certificate expiry.
+    days_until_expiry:
+      type: integer
+      description: /ssl-check only. Negative if already expired.
 
 semantics:
   signal_mapping:
@@ -287,6 +337,8 @@ semantics:
     - TOKEN_HOLDER_COUNT
     - TVL_LOOKUP
     - CRYPTO_PRICE
+    - STOCK_PRICE
+    - SSL_VERIFICATION
 
 limitations:
   - code: MAX_PARAM_VALUE

@@ -13,6 +13,8 @@ import checkWalletBalanceRouter from './routes/checkWalletBalance.js';
 import checkTokenHoldersRouter from './routes/checkTokenHolders.js';
 import checkTvlRouter from './routes/checkTvl.js';
 import checkCryptoPriceRouter from './routes/checkCryptoPrice.js';
+import checkStockPriceRouter from './routes/checkStockPrice.js';
+import checkSslVerificationRouter from './routes/checkSslVerification.js';
 
 // Same limit/window on all six signal routes — each spends its own
 // upstream quota (Ankr, Blockscout, or DefiLlama), no reason to size them
@@ -33,6 +35,8 @@ const checkWalletBalanceRateLimit = signalRateLimit();
 const checkTokenHoldersRateLimit = signalRateLimit();
 const checkTvlRateLimit = signalRateLimit();
 const checkCryptoPriceRateLimit = signalRateLimit();
+const checkStockPriceRateLimit = signalRateLimit();
+const checkSslVerificationRateLimit = signalRateLimit();
 
 // Logs every request as it arrives and again when it finishes, to stdout
 // (Render captures this in its dashboard logs, no extra infra needed). Added
@@ -78,6 +82,8 @@ export function buildApp() {
   app.use('/token-holders', checkTokenHoldersRateLimit, checkTokenHoldersRouter);
   app.use('/tvl', checkTvlRateLimit, checkTvlRouter);
   app.use('/crypto-price', checkCryptoPriceRateLimit, checkCryptoPriceRouter);
+  app.use('/stock-price', checkStockPriceRateLimit, checkStockPriceRouter);
+  app.use('/ssl-check', checkSslVerificationRateLimit, checkSslVerificationRouter);
 
   return app;
 }
