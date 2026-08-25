@@ -1,12 +1,10 @@
 // STOCK_PRICE signal endpoint. Added 2026-08-25 — same "call a free public
 // price API, return a clean answer" shape as CRYPTO_PRICE, extended to
 // equities. Query param: ticker (a stock ticker symbol, e.g. "AAPL").
-// Source is Yahoo Finance's public chart endpoint (see
-// lib/yahooFinanceApi.js) — no API key required, unlike Alpha Vantage's
-// tight free-tier daily cap.
+// Twelve Data is the primary source, with Yahoo Finance as a fallback.
 
 import { Router } from 'express';
-import { getStockQuote, TickerNotFoundError } from '../lib/yahooFinanceApi.js';
+import { getStockQuote, TickerNotFoundError } from '../lib/stockPriceApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 
 const router = Router();
@@ -32,7 +30,7 @@ async function handleStockPrice(req, res) {
       return res.json({
         query: ticker,
         status: 'not_found',
-        summary: `no Yahoo Finance quote found for '${ticker}'`,
+        summary: `no stock quote found for '${ticker}'`,
         confidence: 1.0,
         canonical: ['ticker', ticker, 'not_found'].join(':'),
         price_usd: null,
@@ -54,6 +52,7 @@ async function handleStockPrice(req, res) {
     price_usd: quote.priceUsd,
     currency: quote.currency,
     exchange: quote.exchangeName,
+    price_source: quote.source,
     as_of,
   });
 }

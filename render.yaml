@@ -15,3 +15,5 @@ services:
         value: 12
       - key: ANKR_API_KEY
         sync: false
+      - key: TWELVE_DATA_API_KEY
+        sync: false
