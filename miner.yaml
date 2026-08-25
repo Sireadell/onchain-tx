@@ -267,6 +267,13 @@ output_schema:
     price_usd:
       type: [number, "null"]
       description: /crypto-price only. Null when status is not_found.
+    price_source:
+      type: string
+      enum: [coingecko, defillama]
+      description: >
+        /crypto-price, coin_id mode only. Which upstream actually served
+        the price — coingecko unless that call failed, in which case it
+        falls back to defillama.
 
 semantics:
   signal_mapping:
