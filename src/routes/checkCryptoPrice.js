@@ -26,13 +26,26 @@ import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 // timeout, unrecognized id) falls back to DefiLlama rather than failing
 // the whole request — a slightly stale answer beats no answer.
 async function getFreshestCoinPrice(coinId) {
-  try {
-    const { priceUsd, asOfUnix } = await getCoinGeckoPrice(coinId);
-    return { priceUsd, symbol: null, asOfUnix, source: 'coingecko' };
-  } catch {
-    const result = await getCoinPrice(`coingecko:${coinId}`);
-    return { ...result, source: 'defillama' };
-  }
+  const [coinGecko, defiLlama] = await Promise.allSettled([
+    getCoinGeckoPrice(coinId),
+    getCoinPrice(`coingecko:${coinId}`),
+  ]);
+  if (coinGecko.status === 'rejected' && defiLlama.status === 'rejected') throw defiLlama.reason;
+
+  const primary = coinGecko.status === 'fulfilled'
+    ? { ...coinGecko.value, symbol: null, source: 'coingecko' }
+    : { ...defiLlama.value, source: 'defillama' };
+  const sources = [];
+  if (coinGecko.status === 'fulfilled') sources.push({ source: 'coingecko', price_usd: coinGecko.value.priceUsd });
+  if (defiLlama.status === 'fulfilled') sources.push({ source: 'defillama', price_usd: defiLlama.value.priceUsd });
+  const prices = sources.map((item) => item.price_usd);
+  return {
+    ...primary,
+    sources,
+    sourceCount: sources.length,
+    priceRangeLowUsd: prices.length ? Math.min(...prices) : primary.priceUsd,
+    priceRangeHighUsd: prices.length ? Math.max(...prices) : primary.priceUsd,
+  };
 }
 
 const router = Router();
@@ -109,16 +122,31 @@ async function handleCryptoPrice(req, res) {
   // all-caps mangling of it (e.g. "bitcoin", not "BITCOIN").
   const symbol = priceInfo.symbol ?? (coinId || null);
   const as_of = priceInfo.asOfUnix != null ? new Date(priceInfo.asOfUnix * 1000).toISOString() : new Date().toISOString();
+  const changeText = typeof priceInfo.change24hPct === 'number'
+    ? `, ${priceInfo.change24hPct >= 0 ? 'up' : 'down'} ${Math.abs(priceInfo.change24hPct).toFixed(2)}% over 24 hours`
+    : '';
+  const marketCapText = typeof priceInfo.marketCapUsd === 'number'
+    ? `, with a market capitalization of about $${priceInfo.marketCapUsd.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+    : '';
+  const sourceText = priceInfo.sourceCount > 1
+    ? ` CoinGecko and DefiLlama currently report a range of $${priceInfo.priceRangeLowUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })} to $${priceInfo.priceRangeHighUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })}.`
+    : '';
   res.json({
     query_type: queryType,
     query,
     status: 'ok',
-    summary: `${symbol ?? query} is $${priceInfo.priceUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })}`,
+    summary: `${symbol ?? query} is currently $${priceInfo.priceUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })} USD${changeText}${marketCapText}.${sourceText}`,
     confidence: 1.0,
     canonical: [queryType, query, priceInfo.priceUsd].join(':'),
     price_usd: priceInfo.priceUsd,
     symbol,
     price_source: priceInfo.source ?? 'defillama',
+    sources: priceInfo.sources ?? [{ source: priceInfo.source ?? 'defillama', price_usd: priceInfo.priceUsd }],
+    source_count: priceInfo.sourceCount ?? 1,
+    price_range_low_usd: priceInfo.priceRangeLowUsd ?? priceInfo.priceUsd,
+    price_range_high_usd: priceInfo.priceRangeHighUsd ?? priceInfo.priceUsd,
+    change_24h_pct: priceInfo.change24hPct ?? null,
+    market_cap_usd: priceInfo.marketCapUsd ?? null,
     as_of,
   });
 }

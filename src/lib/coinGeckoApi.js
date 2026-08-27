@@ -48,7 +48,7 @@ export async function getCoinGeckoPrice(coinId) {
     let networkErr;
     try {
       res = await fetch(
-        `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(coinId)}&vs_currencies=usd&include_last_updated_at=true`,
+        `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(coinId)}&vs_currencies=usd&include_market_cap=true&include_24hr_change=true&include_last_updated_at=true`,
         { signal: controller.signal }
       );
       statusCode = res.status;
@@ -67,7 +67,12 @@ export async function getCoinGeckoPrice(coinId) {
       if (!entry || typeof entry.usd !== 'number') {
         throw new CoinGeckoNotFoundError(`no CoinGecko price found for '${coinId}'`);
       }
-      return { priceUsd: entry.usd, asOfUnix: entry.last_updated_at ?? null };
+      return {
+        priceUsd: entry.usd,
+        marketCapUsd: typeof entry.usd_market_cap === 'number' ? entry.usd_market_cap : null,
+        change24hPct: typeof entry.usd_24h_change === 'number' ? entry.usd_24h_change : null,
+        asOfUnix: entry.last_updated_at ?? null,
+      };
     }
 
     const retryable = isRetryableFailure(statusCode, errName);

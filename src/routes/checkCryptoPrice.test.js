@@ -93,7 +93,7 @@ test('crypto-price: successful coin_id lookup uses CoinGecko directly', async (t
   mockFetchWithCoinGecko(t, {
     coingecko: async () => ({
       status: 200,
-      json: async () => ({ bitcoin: { usd: 64549.31, last_updated_at: 1787090150 } }),
+      json: async () => ({ bitcoin: { usd: 64549.31, usd_market_cap: 1270000000000, usd_24h_change: 3.25, last_updated_at: 1787090150 } }),
     }),
   });
   const base = startServer(t);
@@ -106,6 +106,9 @@ test('crypto-price: successful coin_id lookup uses CoinGecko directly', async (t
   assert.equal(body.price_usd, 64549.31);
   assert.equal(body.symbol, 'bitcoin');
   assert.equal(body.price_source, 'coingecko');
+  assert.equal(body.change_24h_pct, 3.25);
+  assert.equal(body.market_cap_usd, 1270000000000);
+  assert.match(body.summary, /up 3.25%/);
 });
 
 test('crypto-price: CoinGecko failure falls back to DefiLlama', async (t) => {

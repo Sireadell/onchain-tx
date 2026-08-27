@@ -333,6 +333,19 @@ output_schema:
     price_usd:
       type: [number, "null"]
       description: /crypto-price only. Null when status is not_found.
+    change_24h_pct:
+      type: [number, "null"]
+      description: /crypto-price only. CoinGecko 24-hour USD price change percentage when available.
+    market_cap_usd:
+      type: [number, "null"]
+      description: /crypto-price only. Current CoinGecko market capitalization when available.
+    source_count:
+      type: integer
+      description: /crypto-price only. Number of independent price feeds that answered.
+    sources:
+      type: array
+      items:
+        type: object
     price_source:
       type: string
       enum: [coingecko, defillama]
