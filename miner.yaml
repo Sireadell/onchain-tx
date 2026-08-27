@@ -260,6 +260,18 @@ output_schema:
     value_wei:
       type: [string, "null"]
       description: /check-tx only.
+    value_eth:
+      type: [number, "null"]
+      description: /check-tx only. Native ETH value in human-readable units.
+    method:
+      type: [string, "null"]
+      description: /check-tx only. Decoded contract method name when available.
+    method_signature:
+      type: [string, "null"]
+      description: /check-tx only. Decoded contract method signature when available.
+    method_selector:
+      type: [string, "null"]
+      description: /check-tx only. First four calldata bytes for contract calls.
     block_number:
       type: [number, "null"]
       description: Null while pending / no receipt yet, or if the block-number read failed best-effort.

@@ -13,6 +13,7 @@ import {
 } from '../lib/ankrRpc.js';
 import { evaluateTransaction } from '../lib/txStatus.js';
 import { CHAINS, DEFAULT_CHAIN, resolveChain } from '../lib/chains.js';
+import { lookupMethodSignature } from '../lib/fourByte.js';
 
 const router = Router();
 
@@ -88,6 +89,20 @@ async function handleCheckTx(req, res) {
   }
 
   const result = evaluateTransaction({ tx, receipt, currentBlockNumberHex });
+  const method_selector = tx?.input && tx.input !== '0x' ? tx.input.slice(0, 10).toLowerCase() : null;
+  const method_signature = await lookupMethodSignature(tx?.input);
+  const method = method_signature?.split('(')[0] ?? null;
+  const value_eth = result.value_wei === null ? null : Number(result.value_wei) / 1e18;
+
+  let summary = result.summary;
+  if (tx && result.status !== 'not_found') {
+    const methodText = method
+      ? ` and called ${method}`
+      : method_selector
+        ? ` and called contract method selector ${method_selector}`
+        : '';
+    summary = `Ethereum transaction ${txHash} sent ${value_eth} ETH from ${result.from} to ${result.to}${methodText} in block ${result.block_number}; status ${result.receipt_status ?? result.status}.`;
+  }
 
   // Compact, deterministic one-line summary of the verdict — chain:tx_hash:
   // status:block_number:block_hash:receipt_status, `-` standing in for any
@@ -106,12 +121,16 @@ async function handleCheckTx(req, res) {
     tx_hash: txHash,
     chain: chainParam,
     status: result.status,
-    summary: result.summary,
+    summary,
     confidence: result.confidence,
     canonical,
     from: result.from,
     to: result.to,
     value_wei: result.value_wei,
+    value_eth,
+    method,
+    method_signature,
+    method_selector,
     block_number: result.block_number,
     block_hash: result.block_hash,
     receipt_status: result.receipt_status,
