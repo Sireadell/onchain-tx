@@ -2,8 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildApp } from '../app.js';
 import { resetDefiLlamaCache } from '../lib/defiLlamaApi.js';
+import { resetCoinGeckoCache } from '../lib/coinGeckoApi.js';
 
 function startServer(t) {
+  resetCoinGeckoCache();
   const server = buildApp().listen(0);
   t.after(() => {
     server.closeAllConnections();

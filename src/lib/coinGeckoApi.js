@@ -16,6 +16,12 @@ import { checkBudget } from './ankrRpc.js';
 
 const COINGECKO_CALL_TIMEOUT_MS = Number(process.env.COINGECKO_CALL_TIMEOUT_MS) || 5_000;
 const RETRY_DELAYS_MS = [500, 1_000];
+const CACHE_TTL_MS = Number(process.env.COINGECKO_CACHE_TTL_MS) || 60_000;
+const priceCache = new Map();
+
+export function resetCoinGeckoCache() {
+  priceCache.clear();
+}
 
 export class CoinGeckoNotFoundError extends Error {
   constructor(message) {
@@ -37,6 +43,9 @@ function isRetryableFailure(statusCode, errName) {
 // throws a plain Error — callers should treat that as "try the fallback
 // source", not "this coin doesn't exist".
 export async function getCoinGeckoPrice(coinId) {
+  const cached = priceCache.get(coinId);
+  if (cached && Date.now() - cached.storedAt < CACHE_TTL_MS) return cached.value;
+
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
     checkBudget();
     const controller = new AbortController();
@@ -67,12 +76,14 @@ export async function getCoinGeckoPrice(coinId) {
       if (!entry || typeof entry.usd !== 'number') {
         throw new CoinGeckoNotFoundError(`no CoinGecko price found for '${coinId}'`);
       }
-      return {
+      const value = {
         priceUsd: entry.usd,
         marketCapUsd: typeof entry.usd_market_cap === 'number' ? entry.usd_market_cap : null,
         change24hPct: typeof entry.usd_24h_change === 'number' ? entry.usd_24h_change : null,
         asOfUnix: entry.last_updated_at ?? null,
       };
+      priceCache.set(coinId, { value, storedAt: Date.now() });
+      return value;
     }
 
     const retryable = isRetryableFailure(statusCode, errName);
