@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   getProtocolTvl,
+  getProtocolChainTvl,
   getChainTvl,
   getCoinPrice,
   resetDefiLlamaCache,
@@ -69,6 +70,15 @@ test('getProtocolTvl: caches repeat lookups for the same slug', async (t) => {
   await getProtocolTvl('uniswap');
   await getProtocolTvl('uniswap');
   assert.equal(callCount, 1);
+});
+
+test('getProtocolChainTvl: returns protocol TVL for the requested chain only', async (t) => {
+  resetDefiLlamaCache();
+  mockFetchHost(t, 'api.llama.fi', async () => ({
+    status: 200,
+    json: async () => ({ currentChainTvls: { Ethereum: 150, 'Ethereum-borrowed': 90, Base: 25 } }),
+  }));
+  assert.equal(await getProtocolChainTvl('aave-v3', 'ethereum'), 150);
 });
 
 test('getChainTvl: returns TVL for a matching chain name, case-insensitive', async (t) => {

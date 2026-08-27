@@ -19,6 +19,7 @@
 import { Router } from 'express';
 import {
   getProtocolTvl,
+  getProtocolChainTvl,
   getChainTvl,
   ProtocolNotFoundError,
   ChainNotFoundError,
@@ -41,13 +42,20 @@ async function handleTvl(req, res) {
     });
   }
 
-  // `protocol` wins when both are supplied — see file header comment.
-  const queryType = protocol ? 'protocol' : 'chain';
-  const query = protocol ?? tvlChain;
+  const queryType = protocol && tvlChain ? 'protocol_chain' : protocol ? 'protocol' : 'chain';
+  const query = protocol && tvlChain ? `${protocol}:${tvlChain}` : protocol ?? tvlChain;
 
   let tvlUsd;
+  let protocolTotalTvlUsd = null;
   try {
-    tvlUsd = protocol ? await getProtocolTvl(protocol) : await getChainTvl(tvlChain);
+    if (protocol && tvlChain) {
+      [tvlUsd, protocolTotalTvlUsd] = await Promise.all([
+        getProtocolChainTvl(protocol, tvlChain),
+        getProtocolTvl(protocol),
+      ]);
+    } else {
+      tvlUsd = protocol ? await getProtocolTvl(protocol) : await getChainTvl(tvlChain);
+    }
   } catch (err) {
     if (err instanceof ProtocolNotFoundError || err instanceof ChainNotFoundError) {
       return res.json({
@@ -67,14 +75,21 @@ async function handleTvl(req, res) {
   }
 
   const as_of = new Date().toISOString();
+  const summary = protocol && tvlChain
+    ? `${protocol} on ${tvlChain} has $${tvlUsd.toLocaleString('en-US', { maximumFractionDigits: 0 })} TVL; the protocol has $${protocolTotalTvlUsd.toLocaleString('en-US', { maximumFractionDigits: 0 })} total TVL across all chains, according to DefiLlama.`
+    : `${query} has $${tvlUsd.toLocaleString('en-US', { maximumFractionDigits: 0 })} TVL according to DefiLlama.`;
   res.json({
     query_type: queryType,
     query,
     status: 'ok',
-    summary: `${query} has $${tvlUsd.toLocaleString('en-US', { maximumFractionDigits: 0 })} TVL`,
+    summary,
     confidence: 1.0,
     canonical: [queryType, query, Math.round(tvlUsd)].join(':'),
     tvl_usd: tvlUsd,
+    chain_tvl_usd: protocol && tvlChain ? tvlUsd : null,
+    protocol_total_tvl_usd: protocolTotalTvlUsd,
+    protocol: protocol ?? null,
+    tvl_chain: tvlChain ?? null,
     as_of,
   });
 }

@@ -220,7 +220,7 @@ output_schema:
       type: string
     query_type:
       type: string
-      enum: [protocol, chain, coin_id, chain_token]
+      enum: [protocol, chain, protocol_chain, coin_id, chain_token]
       description: >
         /tvl and /crypto-price only. Which query mode the request used
         (protocol/chain for /tvl, coin_id/chain_token for /crypto-price).
@@ -324,6 +324,12 @@ output_schema:
     tvl_usd:
       type: [number, "null"]
       description: /tvl only. Null when status is not_found.
+    chain_tvl_usd:
+      type: [number, "null"]
+      description: /tvl only. Protocol TVL on the requested chain when both protocol and tvl_chain are supplied.
+    protocol_total_tvl_usd:
+      type: [number, "null"]
+      description: /tvl only. Total protocol TVL across all chains when both protocol and tvl_chain are supplied.
     price_usd:
       type: [number, "null"]
       description: /crypto-price only. Null when status is not_found.

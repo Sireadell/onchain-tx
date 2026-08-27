@@ -132,6 +132,35 @@ export async function getProtocolTvl(slug) {
   return tvl;
 }
 
+// Returns the TVL for one protocol on one chain while keeping the total
+// protocol TVL available separately. DefiLlama's /tvl/{slug} endpoint is
+// aggregate-only, so questions such as "Aave V3 on Ethereum" require the
+// richer /protocol/{slug} response and its currentChainTvls map.
+export async function getProtocolChainTvl(slug, chainName) {
+  const key = `protocol-chain:${slug}:${chainName.toLowerCase()}`;
+  const hit = protocolCache.get(key);
+  if (hit && Date.now() - hit.storedAt < PROTOCOL_CACHE_TTL_MS) return hit.value;
+
+  const res = await fetchDefiLlama('api.llama.fi', `/protocol/${encodeURIComponent(slug)}`);
+  if (res.status !== 200) {
+    throw new ProtocolNotFoundError(`no DefiLlama protocol found for slug '${slug}'`);
+  }
+  const body = await res.json();
+  const entries = Object.entries(body?.currentChainTvls ?? {});
+  const match = entries.find(([name, value]) =>
+    !name.toLowerCase().endsWith('-borrowed')
+    && name.toLowerCase() === chainName.toLowerCase()
+    && typeof value === 'number'
+  );
+  if (!match) {
+    throw new ChainNotFoundError(`protocol '${slug}' has no DefiLlama TVL for chain '${chainName}'`);
+  }
+  const value = match[1];
+  protocolCache.set(key, { value, storedAt: Date.now() });
+  if (protocolCache.size > MAX_CACHE_ENTRIES) protocolCache.delete(protocolCache.keys().next().value);
+  return value;
+}
+
 // Returns current TVL in USD for a chain name (e.g. "Ethereum", matched
 // case-insensitively), or throws ChainNotFoundError. Whole /v2/chains list
 // is cached together since it's one call regardless of which chain is

@@ -39,11 +39,14 @@ test('tvl: missing both protocol and chain rejected before any call', async (t) 
   assert.equal(called, false);
 });
 
-test('tvl: both protocol and tvl_chain supplied — protocol wins, not rejected', async (t) => {
+test('tvl: both protocol and tvl_chain return chain-specific and total protocol TVL', async (t) => {
   resetDefiLlamaCache();
-  let calledPath;
+  const calledPaths = [];
   mockFetch(t, async (url) => {
-    calledPath = url;
+    calledPaths.push(url);
+    if (url.includes('/protocol/')) {
+      return { status: 200, json: async () => ({ currentChainTvls: { Ethereum: 4000 } }) };
+    }
     return { status: 200, text: async () => '5000' };
   });
   const base = startServer(t);
@@ -52,9 +55,13 @@ test('tvl: both protocol and tvl_chain supplied — protocol wins, not rejected'
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.status, 'ok');
-  assert.equal(body.query_type, 'protocol');
-  assert.equal(body.query, 'aave-v3');
-  assert.match(calledPath, /\/tvl\/aave-v3$/);
+  assert.equal(body.query_type, 'protocol_chain');
+  assert.equal(body.query, 'aave-v3:ethereum');
+  assert.equal(body.tvl_usd, 4000);
+  assert.equal(body.chain_tvl_usd, 4000);
+  assert.equal(body.protocol_total_tvl_usd, 5000);
+  assert.match(body.summary, /all chains/);
+  assert.equal(calledPaths.length, 2);
 });
 
 test('tvl: successful protocol lookup returns tvl_usd and canonical', async (t) => {
