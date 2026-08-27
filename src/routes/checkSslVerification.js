@@ -40,13 +40,19 @@ async function handleSslVerification(req, res) {
     result = await checkSslCertificate(domain);
   } catch (err) {
     if (err instanceof SslConnectionError) {
+      const summary = `${domain} is unreachable, so its TLS/SSL certificate and chain cannot be verified. ${err.message}. When the host is reachable, inspect the leaf and intermediate certificates, confirm the chain reaches a trusted root, verify the Subject Alternative Name includes ${domain}, check validity dates and revocation status, and review supported TLS versions and cipher suites. Use openssl s_client -connect ${domain}:443 -servername ${domain} -showcerts or an SSL Labs server test.`;
       return res.json({
         query: domain,
         status: 'unreachable',
-        summary: err.message,
+        summary,
+        reason: summary,
         confidence: 1.0,
         canonical: ['ssl', domain, 'unreachable'].join(':'),
         valid: null,
+        authorized: null,
+        chain_complete: null,
+        hostname_valid: null,
+        unreachable_reason: err.message,
       });
     }
     if (err instanceof RpcBudgetExceededError) {

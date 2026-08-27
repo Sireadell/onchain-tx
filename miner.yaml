@@ -352,6 +352,15 @@ output_schema:
     authorized:
       type: [boolean, "null"]
       description: /ssl-check only. Whether Node's default trust store accepts the certificate chain.
+    chain_complete:
+      type: [boolean, "null"]
+      description: /ssl-check only. Null when the host is unreachable and the chain cannot be inspected.
+    hostname_valid:
+      type: [boolean, "null"]
+      description: /ssl-check only. Null when the host is unreachable and hostname validation cannot run.
+    unreachable_reason:
+      type: [string, "null"]
+      description: /ssl-check only. Connection or DNS failure when the host cannot be inspected.
     authorization_error:
       type: [string, "null"]
       description: /ssl-check only. Reason authorized is false, e.g. a self-signed or expired certificate.

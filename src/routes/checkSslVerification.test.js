@@ -51,4 +51,9 @@ test('ssl-check: unresolvable domain returns unreachable, not an error', async (
   const body = await res.json();
   assert.equal(body.status, 'unreachable');
   assert.equal(body.valid, null);
+  assert.equal(body.chain_complete, null);
+  assert.equal(body.hostname_valid, null);
+  assert.match(body.summary, /leaf and intermediate certificates/);
+  assert.match(body.summary, /Subject Alternative Name/);
+  assert.match(body.summary, /SSL Labs/);
 });
