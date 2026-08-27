@@ -114,6 +114,24 @@ endpoints:
       Live TLS certificate check for a domain — performs a real
       handshake, not a cached lookup. Query params: domain (bare
       hostname, e.g. "example.com", not a full URL, required).
+  - path: /fraud-query
+    external_path: /fraud-query
+    method: POST
+    description: >
+      Answers factual questions about known fraud schemes, cases, and
+      perpetrators using Sentinel. JSON body: { "query": "..." }.
+  - path: /assess-wallet
+    external_path: /assess-wallet
+    method: GET
+    description: >
+      Assesses an Ethereum address for fraud risk using Sentinel. Query
+      param: wallet (0x-prefixed, 40 hex characters, required).
+  - path: /assess-wallet
+    external_path: /assess-wallet
+    method: POST
+    description: >
+      Assesses an Ethereum address for fraud risk using Sentinel. JSON
+      body: { "wallet": "0x..." }.
 
 # input_schema/output_schema are top-level-only fields, documentation
 # surfaced to callers rather than a per-endpoint validator (confirmed
@@ -179,6 +197,13 @@ input_schema:
       description: >
         Bare hostname to check, e.g. "example.com" — not a full URL (no
         scheme, no path). Required on /ssl-check only.
+    query:
+      type: string
+      description: General factual fraud question for /fraud-query.
+    wallet:
+      type: string
+      pattern: "^0x[0-9a-fA-F]{40}$"
+      description: Ethereum address assessed by /assess-wallet.
 output_schema:
   type: object
   properties:
@@ -324,6 +349,46 @@ output_schema:
     days_until_expiry:
       type: integer
       description: /ssl-check only. Negative if already expired.
+    mode:
+      type: string
+      enum: [fraud_knowledge, wallet_risk]
+    label:
+      type: string
+      description: Sentinel fraud verdict, also returned as status for TxLens compatibility.
+    reason:
+      type: string
+      description: Complete fraud answer or wallet-risk explanation.
+    assessment_status:
+      type: string
+      enum: [ASSESSED, LIMITED, INCONCLUSIVE]
+    answer:
+      type: string
+    source:
+      type: object
+    wallet:
+      type: string
+    risk_score:
+      type: number
+      minimum: 0
+      maximum: 1
+    risk_level:
+      type: string
+      enum: [LOW, ELEVATED, HIGH, NOT_APPLICABLE]
+    reason_codes:
+      type: array
+      items:
+        type: string
+    evidence:
+      type: array
+      items:
+        type: object
+    coverage:
+      type: object
+    latency_ms:
+      type: number
+    analysis_tier:
+      type: string
+      enum: [fast, deep]
 
 semantics:
   signal_mapping:
@@ -339,6 +404,7 @@ semantics:
     - CRYPTO_PRICE
     - STOCK_PRICE
     - SSL_VERIFICATION
+    - FRAUD_DETECTION
 
 limitations:
   - code: MAX_PARAM_VALUE
@@ -356,6 +422,12 @@ limitations:
   - code: MAX_PARAM_VALUE
     message: token must be exactly 42 characters (0x-prefixed, 40 hex characters).
     param: token
+    property: length
+    value_num: 42
+    operator: eq
+  - code: MAX_PARAM_VALUE
+    message: wallet must be a valid 0x-prefixed, 40 hex character EVM address.
+    param: wallet
     property: length
     value_num: 42
     operator: eq
