@@ -25,6 +25,7 @@ import {
   ChainNotFoundError,
 } from '../lib/defiLlamaApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
+import { respondUnusableInput } from '../lib/unusableInput.js';
 
 const router = Router();
 
@@ -34,12 +35,10 @@ async function handleTvl(req, res) {
   const tvlChain = params?.tvl_chain;
 
   if (!protocol && !tvlChain) {
-    return res.status(400).json({
-      status: 'error',
-      summary: 'must include a `protocol` (DefiLlama slug) and/or `tvl_chain` (DefiLlama chain name) query parameter',
-      confidence: 1.0,
-      error: 'missing `protocol` or `tvl_chain` parameter',
-    });
+    return respondUnusableInput(
+      res,
+      'I cannot report total value locked because neither a protocol nor a chain was named. Pass a protocol such as "aave" or "uniswap" as the protocol parameter, or a chain such as "Ethereum" or "Base" as the tvl_chain parameter, or send both together to get one protocol value locked on one chain.',
+    );
   }
 
   const queryType = protocol && tvlChain ? 'protocol_chain' : protocol ? 'protocol' : 'chain';

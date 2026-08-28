@@ -47,7 +47,8 @@ test('stock-price: missing ticker rejected before any call', async (t) => {
   const base = startServer(t);
 
   const res = await fetch(`${base}/stock-price`);
-  assert.equal(res.status, 400);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).status, 'invalid_input');
   assert.equal(called, false);
 });
 

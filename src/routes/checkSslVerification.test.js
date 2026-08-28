@@ -20,16 +20,18 @@ function startServer(t) {
   return `http://127.0.0.1:${port}`;
 }
 
-test('ssl-check: missing domain rejected', async (t) => {
+test('ssl-check: missing domain answered with guidance', async (t) => {
   const base = startServer(t);
   const res = await fetch(`${base}/ssl-check`);
-  assert.equal(res.status, 400);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).status, 'invalid_input');
 });
 
-test('ssl-check: full URL instead of bare hostname rejected', async (t) => {
+test('ssl-check: full URL instead of bare hostname answered with guidance', async (t) => {
   const base = startServer(t);
   const res = await fetch(`${base}/ssl-check?domain=${encodeURIComponent('https://example.com/path')}`);
-  assert.equal(res.status, 400);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).status, 'invalid_input');
 });
 
 test('ssl-check: real domain with a trusted certificate returns valid', async (t) => {

@@ -23,6 +23,7 @@ import {
 } from '../lib/ankrRpc.js';
 import { getTokenInfo, TokenNotFoundError } from '../lib/blockscoutApi.js';
 import { CHAINS, DEFAULT_CHAIN, resolveChain } from '../lib/chains.js';
+import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 
 const router = Router();
 
@@ -126,30 +127,27 @@ async function handleWalletBalance(req, res) {
   const token = params?.token;
 
   if (!address || !ADDRESS_RE.test(address)) {
-    return res.status(400).json({
-      status: 'error',
-      summary: 'must include a valid `address` query parameter (0x-prefixed, 40 hex characters)',
-      confidence: 1.0,
-      error: req.method === 'GET' ? 'must include valid `address` query parameter' : 'body must include valid `address`',
-    });
+    const problem = address
+      ? `${quoteParam(address)} is not a valid wallet address`
+      : 'no wallet address was supplied';
+    return respondUnusableInput(
+      res,
+      `I cannot check this balance because ${problem}. A wallet address is 42 characters long: "0x" followed by 40 hexadecimal characters. An ENS name or a transaction hash will not work here. Pass an address as the address parameter and I will return its native balance, plus its balance of any ERC-20 token you name.`,
+    );
   }
   if (token && !ADDRESS_RE.test(token)) {
-    return res.status(400).json({
-      status: 'error',
-      summary: 'if supplied, `token` must be a valid 0x-prefixed, 40 hex character address',
-      confidence: 1.0,
-      error: 'malformed `token` parameter',
-    });
+    return respondUnusableInput(
+      res,
+      `I can read the wallet address, but I cannot check the token balance because ${quoteParam(token)} is not a valid token contract address. I need the token's contract address, 42 characters long: "0x" followed by 40 hexadecimal characters. A ticker such as USDC will not work here. Drop the token parameter and I will return the wallet's native balance instead.`,
+    );
   }
 
   const chain = resolveChain(chainParam);
   if (!chain) {
-    return res.status(400).json({
-      status: 'error',
-      summary: `unsupported chain '${chainParam}' — must be one of: ${Object.keys(CHAINS).join(', ')}`,
-      confidence: 1.0,
-      error: 'unsupported `chain` parameter',
-    });
+    return respondUnusableInput(
+      res,
+      `I cannot check a balance on ${quoteParam(chainParam)} because it is not a chain I index. I can read balances on ${Object.keys(CHAINS).join(', ')}. Ask again naming one of those and I will return the wallet's balance there.`,
+    );
   }
 
   if (token) {

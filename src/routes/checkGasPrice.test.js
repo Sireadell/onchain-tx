@@ -61,9 +61,10 @@ test('gas-price: unsupported chain rejected before any RPC call', async (t) => {
   const base = startServer(t);
 
   const res = await fetch(`${base}/gas-price?chain=solana`);
-  assert.equal(res.status, 400);
+  assert.equal(res.status, 200);
   const body = await res.json();
-  assert.equal(body.status, 'error');
+  assert.equal(body.status, 'invalid_input');
+  assert.equal(body.error, undefined);
   assert.equal(called, false);
 });
 

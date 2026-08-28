@@ -6,6 +6,7 @@
 import { Router } from 'express';
 import { getStockQuote, TickerNotFoundError } from '../lib/stockPriceApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
+import { respondUnusableInput } from '../lib/unusableInput.js';
 
 const router = Router();
 
@@ -14,12 +15,10 @@ async function handleStockPrice(req, res) {
   const ticker = params?.ticker;
 
   if (!ticker) {
-    return res.status(400).json({
-      status: 'error',
-      summary: 'must include a `ticker` (stock symbol, e.g. "AAPL") query parameter',
-      confidence: 1.0,
-      error: 'missing `ticker` parameter',
-    });
+    return respondUnusableInput(
+      res,
+      'I cannot quote a share price because no ticker was supplied. Pass a stock symbol such as "AAPL" for Apple or "MSFT" for Microsoft as the ticker parameter, and I will return the latest price, the change on the day, and the time of the quote.',
+    );
   }
 
   let quote;

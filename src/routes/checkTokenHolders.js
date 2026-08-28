@@ -8,6 +8,7 @@ import { Router } from 'express';
 import { getTokenInfo, TokenNotFoundError } from '../lib/blockscoutApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { CHAINS, DEFAULT_CHAIN, resolveChain } from '../lib/chains.js';
+import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 
 const router = Router();
 
@@ -19,22 +20,21 @@ async function handleTokenHolders(req, res) {
   const chainParam = params?.chain ?? DEFAULT_CHAIN;
 
   if (!token || !ADDRESS_RE.test(token)) {
-    return res.status(400).json({
-      status: 'error',
-      summary: 'must include a valid `token` query parameter (0x-prefixed, 40 hex characters)',
-      confidence: 1.0,
-      error: req.method === 'GET' ? 'must include valid `token` query parameter' : 'body must include valid `token`',
-    });
+    const problem = token
+      ? `${quoteParam(token)} is not a valid token contract address`
+      : 'no token contract address was supplied';
+    return respondUnusableInput(
+      res,
+      `I cannot count holders because ${problem}. I need the token's contract address, which is 42 characters long: "0x" followed by 40 hexadecimal characters. A token name or ticker will not work here. Pass the contract address as the token parameter and I will return its holder count.`,
+    );
   }
 
   const chain = resolveChain(chainParam);
   if (!chain) {
-    return res.status(400).json({
-      status: 'error',
-      summary: `unsupported chain '${chainParam}' — must be one of: ${Object.keys(CHAINS).join(', ')}`,
-      confidence: 1.0,
-      error: 'unsupported `chain` parameter',
-    });
+    return respondUnusableInput(
+      res,
+      `I cannot count holders on ${quoteParam(chainParam)} because it is not a chain I index. I can count token holders on ${Object.keys(CHAINS).join(', ')}. Ask again naming one of those and I will return the holder count for that token.`,
+    );
   }
 
   let info;

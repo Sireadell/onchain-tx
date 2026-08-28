@@ -48,10 +48,11 @@ test('unsupported chain is rejected before any RPC call', async (t) => {
   const base = startServer(t);
 
   const res = await fetch(`${base}/check-tx?chain=solana&tx_hash=0x${'1'.repeat(64)}`);
-  assert.equal(res.status, 400);
+  assert.equal(res.status, 200);
   const body = await res.json();
-  assert.equal(body.status, 'error');
-  assert.match(body.summary, /unsupported chain/);
+  assert.equal(body.status, 'invalid_input');
+  assert.equal(body.error, undefined);
+  assert.match(body.summary, /not a chain I index/);
   assert.equal(called, false);
 });
 

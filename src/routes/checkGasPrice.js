@@ -17,6 +17,7 @@ import { Router } from 'express';
 import { getGasPrice, getBlockNumber, withRpcBudget, RpcBudgetExceededError, ApiKeyMissingError } from '../lib/ankrRpc.js';
 import { getCoinPrice } from '../lib/defiLlamaApi.js';
 import { CHAINS, DEFAULT_CHAIN, resolveChain } from '../lib/chains.js';
+import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 
 const STANDARD_TRANSFER_GAS_UNITS = 21_000;
 
@@ -28,12 +29,10 @@ async function handleGasPrice(req, res) {
 
   const chain = resolveChain(chainParam);
   if (!chain) {
-    return res.status(400).json({
-      status: 'error',
-      summary: `unsupported chain '${chainParam}' — must be one of: ${Object.keys(CHAINS).join(', ')}`,
-      confidence: 1.0,
-      error: 'unsupported `chain` parameter',
-    });
+    return respondUnusableInput(
+      res,
+      `I cannot report gas for ${quoteParam(chainParam)} because it is not a chain I cover. I track current transaction fees on ${Object.keys(CHAINS).join(', ')}. Ask again naming one of those and I will give the current gas price in gwei and the USD cost of a standard transfer.`,
+    );
   }
 
   let gasPriceHex;

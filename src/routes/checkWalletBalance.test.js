@@ -39,24 +39,27 @@ test('wallet-balance: missing address is rejected before any RPC call', async (t
   const base = startServer(t);
 
   const res = await fetch(`${base}/wallet-balance?chain=eth`);
-  assert.equal(res.status, 400);
+  assert.equal(res.status, 200);
   const body = await res.json();
-  assert.equal(body.status, 'error');
+  assert.equal(body.status, 'invalid_input');
+  assert.equal(body.error, undefined);
   assert.equal(called, false);
 });
 
-test('wallet-balance: malformed address is rejected', async (t) => {
+test('wallet-balance: malformed address is answered with guidance', async (t) => {
   process.env.ANKR_API_KEY = 'test-key';
   const base = startServer(t);
   const res = await fetch(`${base}/wallet-balance?address=not-an-address`);
-  assert.equal(res.status, 400);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).status, 'invalid_input');
 });
 
-test('wallet-balance: unsupported chain rejected', async (t) => {
+test('wallet-balance: unsupported chain answered with guidance', async (t) => {
   process.env.ANKR_API_KEY = 'test-key';
   const base = startServer(t);
   const res = await fetch(`${base}/wallet-balance?chain=solana&address=${ADDRESS}`);
-  assert.equal(res.status, 400);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).status, 'invalid_input');
 });
 
 test('wallet-balance: successful read returns wei/native and canonical', async (t) => {
@@ -81,11 +84,12 @@ test('wallet-balance: successful read returns wei/native and canonical', async (
 
 const TOKEN = '0x' + 'b'.repeat(40);
 
-test('wallet-balance: malformed token param is rejected', async (t) => {
+test('wallet-balance: malformed token param is answered with guidance', async (t) => {
   process.env.ANKR_API_KEY = 'test-key';
   const base = startServer(t);
   const res = await fetch(`${base}/wallet-balance?address=${ADDRESS}&token=not-an-address`);
-  assert.equal(res.status, 400);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).status, 'invalid_input');
 });
 
 test('wallet-balance: token param returns normalized ERC-20 balance', async (t) => {

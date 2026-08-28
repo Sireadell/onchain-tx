@@ -1,4 +1,5 @@
 import express from 'express';
+import { respondUnusableInput } from '../lib/unusableInput.js';
 
 const router = express.Router();
 const DEFAULT_SENTINEL_BASE_URL = 'https://telegraph-sentinel-40vp.onrender.com';
@@ -36,6 +37,19 @@ async function proxySentinel(req, res, path) {
       body = raw ? JSON.parse(raw) : {};
     } catch {
       return res.status(502).json({ error: 'Sentinel returned an invalid response' });
+    }
+
+    // A 400 or 422 from Sentinel means the caller's input was unusable, not
+    // that anything is broken, and Telegraph books any non-2xx as a failed
+    // question. Answer those instead of passing the failure through. See
+    // ../lib/unusableInput.js. Genuine faults keep their own status.
+    if (upstream.status === 400 || upstream.status === 422) {
+      const detail = body?.summary ?? body?.error ?? body?.message ?? null;
+      const cause = detail ? `: ${detail}` : ' because no wallet address was supplied';
+      return respondUnusableInput(
+        res,
+        `I cannot assess this wallet for fraud risk${cause}. Pass a wallet address, 42 characters long and starting with "0x", as the wallet parameter, and I will return a risk verdict with the reasons behind it.`,
+      );
     }
 
     if (!upstream.ok) return res.status(upstream.status).json(body);

@@ -14,6 +14,7 @@ import {
 import { evaluateTransaction } from '../lib/txStatus.js';
 import { CHAINS, DEFAULT_CHAIN, resolveChain } from '../lib/chains.js';
 import { lookupMethodSignature } from '../lib/fourByte.js';
+import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 
 const router = Router();
 
@@ -28,25 +29,21 @@ async function handleCheckTx(req, res) {
   const chainParam = params?.chain ?? DEFAULT_CHAIN;
 
   if (!txHash || !TX_HASH_RE.test(txHash)) {
-    return res.status(400).json({
-      status: 'error',
-      summary: 'must include a valid `tx_hash` query parameter (0x-prefixed, 64 hex characters)',
-      confidence: 1.0,
-      error:
-        req.method === 'GET'
-          ? 'must include valid `tx_hash` query parameter'
-          : 'body must include valid `tx_hash`',
-    });
+    const problem = txHash
+      ? `${quoteParam(txHash)} is not a valid Ethereum transaction hash`
+      : 'no transaction hash was supplied';
+    return respondUnusableInput(
+      res,
+      `I cannot look up this transaction because ${problem}. A transaction hash is 66 characters long: "0x" followed by 64 hexadecimal characters. Pass one as the tx_hash parameter and I will report its confirmation status, block, sender, recipient, value in ETH, and decoded contract method.`,
+    );
   }
 
   const chain = resolveChain(chainParam);
   if (!chain) {
-    return res.status(400).json({
-      status: 'error',
-      summary: `unsupported chain '${chainParam}' — must be one of: ${Object.keys(CHAINS).join(', ')}`,
-      confidence: 1.0,
-      error: 'unsupported `chain` parameter',
-    });
+    return respondUnusableInput(
+      res,
+      `I cannot look up this transaction because ${quoteParam(chainParam)} is not a chain I index. I can read transactions on ${Object.keys(CHAINS).join(', ')}. Ask again naming one of those and I will report the transaction's confirmation status, block, sender, recipient, and value.`,
+    );
   }
 
   let tx;

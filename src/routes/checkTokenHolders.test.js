@@ -37,14 +37,16 @@ test('token-holders: missing token param rejected before any call', async (t) =>
   const base = startServer(t);
 
   const res = await fetch(`${base}/token-holders?chain=eth`);
-  assert.equal(res.status, 400);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).status, 'invalid_input');
   assert.equal(called, false);
 });
 
-test('token-holders: unsupported chain rejected', async (t) => {
+test('token-holders: unsupported chain answered with guidance', async (t) => {
   const base = startServer(t);
   const res = await fetch(`${base}/token-holders?chain=solana&token=${TOKEN}`);
-  assert.equal(res.status, 400);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).status, 'invalid_input');
 });
 
 test('token-holders: successful lookup returns holders_count and canonical', async (t) => {

@@ -5,6 +5,7 @@
 import { Router } from 'express';
 import { checkSslCertificate, SslConnectionError } from '../lib/sslCheck.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
+import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 
 const router = Router();
 
@@ -19,20 +20,16 @@ async function handleSslVerification(req, res) {
   const domain = params?.domain;
 
   if (!domain) {
-    return res.status(400).json({
-      status: 'error',
-      summary: 'must include a `domain` (bare hostname, e.g. "example.com") query parameter',
-      confidence: 1.0,
-      error: 'missing `domain` parameter',
-    });
+    return respondUnusableInput(
+      res,
+      'I cannot check a certificate because no domain was supplied. Pass a bare hostname such as "example.com" as the domain parameter and I will report whether its TLS certificate is valid, who issued it, when it expires, and any problems in its trust chain.',
+    );
   }
   if (!DOMAIN_RE.test(domain)) {
-    return res.status(400).json({
-      status: 'error',
-      summary: '`domain` must be a bare hostname, not a full URL — e.g. "example.com", not "https://example.com/path"',
-      confidence: 1.0,
-      error: 'malformed `domain` parameter',
-    });
+    return respondUnusableInput(
+      res,
+      `I cannot check a certificate for ${quoteParam(domain)} because I need a bare hostname, not a full web address. Send "example.com" rather than "https://example.com/path". Strip the protocol and the path, pass just the hostname, and I will report the certificate's validity, issuer, expiry, and trust chain.`,
+    );
   }
 
   let result;

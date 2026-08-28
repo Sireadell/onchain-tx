@@ -282,12 +282,18 @@ output_schema:
         name, coin id, or chain:token pair that was looked up.
     status:
       type: string
-      enum: [confirmed, reverted, pending, not_found, error, ok]
+      enum: [confirmed, reverted, pending, not_found, error, ok, invalid_input]
       description: >
         confirmed/reverted/pending/not_found/error on /check-tx; ok/error
         on /gas-price and /wallet-balance (live reads have no confirmation
         states); ok/not_found/error on /token-holders (not_found means the
         address isn't a known ERC-20 token on that chain, not a failure).
+        invalid_input can be returned by any endpoint and is an answer, not
+        a failure: it means the parameters supplied could not identify
+        anything to look up, and summary explains in plain language what the
+        endpoint needs instead. It is returned with HTTP 200 and no error
+        field, because the input was unusable rather than TxLens being
+        unable to serve.
     summary:
       type: string
     confidence:

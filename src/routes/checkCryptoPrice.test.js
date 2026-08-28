@@ -68,26 +68,30 @@ test('crypto-price: missing all params rejected before any call', async (t) => {
   const base = startServer(t);
 
   const res = await fetch(`${base}/crypto-price`);
-  assert.equal(res.status, 400);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).status, 'invalid_input');
   assert.equal(called, false);
 });
 
-test('crypto-price: coin_id and price_chain/token both supplied rejected', async (t) => {
+test('crypto-price: coin_id and price_chain/token both supplied answered with guidance', async (t) => {
   const base = startServer(t);
   const res = await fetch(`${base}/crypto-price?coin_id=bitcoin&price_chain=ethereum&token=${TOKEN}`);
-  assert.equal(res.status, 400);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).status, 'invalid_input');
 });
 
-test('crypto-price: price_chain without token rejected', async (t) => {
+test('crypto-price: price_chain without token answered with guidance', async (t) => {
   const base = startServer(t);
   const res = await fetch(`${base}/crypto-price?price_chain=ethereum`);
-  assert.equal(res.status, 400);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).status, 'invalid_input');
 });
 
-test('crypto-price: malformed token address rejected', async (t) => {
+test('crypto-price: malformed token address answered with guidance', async (t) => {
   const base = startServer(t);
   const res = await fetch(`${base}/crypto-price?price_chain=ethereum&token=not-an-address`);
-  assert.equal(res.status, 400);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).status, 'invalid_input');
 });
 
 test('crypto-price: successful coin_id lookup uses CoinGecko directly', async (t) => {

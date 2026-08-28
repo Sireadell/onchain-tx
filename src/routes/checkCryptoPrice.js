@@ -21,6 +21,7 @@ import { Router } from 'express';
 import { getCoinPrice, CoinNotFoundError } from '../lib/defiLlamaApi.js';
 import { getCoinGeckoPrice } from '../lib/coinGeckoApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
+import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 
 // Tries CoinGecko direct first (fresher); any failure there (rate limit,
 // timeout, unrecognized id) falls back to DefiLlama rather than failing
@@ -60,36 +61,29 @@ async function handleCryptoPrice(req, res) {
 
   const chainTokenMode = Boolean(priceChain || token);
   if (!coinId && !chainTokenMode) {
-    return res.status(400).json({
-      status: 'error',
-      summary: 'must include either `coin_id` (CoinGecko id) or both `price_chain` and `token` (on-chain token price)',
-      confidence: 1.0,
-      error: 'missing `coin_id` or `price_chain`+`token` parameters',
-    });
+    return respondUnusableInput(
+      res,
+      'I cannot quote a price because no coin was named. For a major coin, pass its id as the coin_id parameter, such as "bitcoin", "ethereum" or "solana". For any other token, pass its chain as price_chain and its contract address as token. Either way I will return the current price in USD.',
+    );
   }
   if (coinId && chainTokenMode) {
-    return res.status(400).json({
-      status: 'error',
-      summary: 'must include only one of `coin_id` or `price_chain`+`token`, not both',
-      confidence: 1.0,
-      error: '`coin_id` and `price_chain`/`token` both supplied',
-    });
+    return respondUnusableInput(
+      res,
+      `I was asked for a price in two different ways at once: by coin id (${quoteParam(coinId)}) and by contract address. I can only follow one. Send coin_id on its own for a major coin, or price_chain and token together for a specific contract, and I will return the current USD price.`,
+    );
   }
   if (chainTokenMode && (!priceChain || !token)) {
-    return res.status(400).json({
-      status: 'error',
-      summary: 'on-chain token price lookup requires both `price_chain` and `token`',
-      confidence: 1.0,
-      error: 'missing `price_chain` or `token`',
-    });
+    const missing = priceChain ? 'the token contract address' : 'the chain it lives on';
+    return respondUnusableInput(
+      res,
+      `I cannot price a token by contract address without both halves of the pair, and ${missing} is missing. Send price_chain and token together, or send coin_id on its own for a major coin, and I will return the current USD price.`,
+    );
   }
   if (chainTokenMode && !TOKEN_ADDRESS_RE.test(token)) {
-    return res.status(400).json({
-      status: 'error',
-      summary: '`token` must be a valid 0x-prefixed, 40 hex character address',
-      confidence: 1.0,
-      error: 'malformed `token` parameter',
-    });
+    return respondUnusableInput(
+      res,
+      `I cannot price this token because ${quoteParam(token)} is not a valid contract address. A contract address is 42 characters long: "0x" followed by 40 hexadecimal characters. If you meant a major coin, send its name as coin_id instead, such as "bitcoin" or "ethereum", and I will return its current USD price.`,
+    );
   }
 
   const queryType = coinId ? 'coin_id' : 'chain_token';
