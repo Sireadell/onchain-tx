@@ -3,10 +3,10 @@ import { ethers } from 'ethers';
 
 const DIAMOND = '0x5a2324aA18613FAD4e44bDF0d6c73Ec1f6D87ff8';
 const RPC = 'https://sepolia.base.org';
-const OLD_REGISTRATION_ID = 215;
-const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/fbff65899df1eeac7b6cb8f97cd91ff2163c7f60/miner.yaml';
-const YAML_HASH = '0x48f21f8cbc30bced3f6deea692f91ac2edb53c66f55b7f8fd6269d8d31b5edff';
-const PREVIOUS_YAML_HASH = '5e79db0aab269ac68252e0735d19d5ce77af8a2edc7f4e3bdaa67a28efff29f9';
+const OLD_REGISTRATION_ID = 246;
+const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/fa9e16b36e2cbc99ccd33fe3efd1de59b1ae8577/miner.yaml';
+const YAML_HASH = '0x7b9acb76d249dda8ca3d5426548c48bc9fc656b7b641788f9b4131e0c8cf4d39';
+const PREVIOUS_YAML_HASH = '48f21f8cbc30bced3f6deea692f91ac2edb53c66f55b7f8fd6269d8d31b5edff';
 const FEE_ADDRESS = '0x6f477610A93C5B255C29c489760045272BCeDa99';
 const MIN_PRICE_USDC = 10000;
 const CONFIRMATION_PHRASE = `update-txlens-${OLD_REGISTRATION_ID}-${YAML_HASH.slice(2, 10)}`;
