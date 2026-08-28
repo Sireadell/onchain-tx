@@ -32,20 +32,26 @@ slug: txlens
 protocol: generic
 name: TxLens
 description: >
-  On-chain read signals across five EVM chains (Ethereum, Base, Arbitrum,
-  Optimism, Polygon), backed by shared retry/rate-limit/cache/RPC-budget
-  infrastructure. /check-tx looks up a transaction by hash and reports its
-  status (confirmed / reverted / pending / not_found) with structured
-  fields (from, to, value_wei, block_number, block_hash, receipt_status)
-  and a confidence score reflecting confirmation depth. /gas-price,
-  /wallet-balance, and /token-holders are live reads (current gas price,
-  native or ERC-20 token balance, ERC-20 holder count) with no
-  confirmation-depth concept, so confidence is always 1.0 on success. /tvl
-  looks up current total value locked for a DefiLlama protocol slug or
-  chain name. /crypto-price looks up current USD price for a CoinGecko id
-  or a specific on-chain token. /stock-price looks up current USD price
-  for an equity ticker symbol. /ssl-check performs a live TLS handshake
-  against a domain and reports its certificate's validity and expiry.
+  TxLens answers on-chain and market questions with a single verifiable
+  number or status, sourced live and never cached stale.
+
+  It covers nine canonical intents. ONCHAIN_TX_LOOKUP: given a transaction
+  hash, is it confirmed, reverted, pending or not found, and what did it do.
+  GAS_PRICE: what does a transaction cost right now on a named chain.
+  WALLET_BALANCE_CHECK: what native coin or ERC-20 token does a given
+  address hold. TOKEN_HOLDER_COUNT: how many distinct addresses hold a
+  token. TVL_LOOKUP: how much value is locked in a named DeFi protocol or
+  chain. CRYPTO_PRICE: what is a coin or on-chain token worth in USD.
+  STOCK_PRICE: what is a listed equity trading at. SSL_VERIFICATION: is a
+  domain's TLS certificate valid and when does it expire, from a real live
+  handshake. FRAUD_DETECTION: how likely is a given address or scheme to be
+  fraudulent.
+
+  Reads run across five EVM chains (Ethereum, Base, Arbitrum, Optimism,
+  Polygon) over a shared retry, rate-limit, cache and RPC-budget layer.
+  Every answer carries a plain-language `summary`, a deterministic
+  `canonical` string for hashing, and a 0-1 `confidence` that reflects
+  real confirmation depth rather than a fixed constant.
 base_url: https://telegraph-onchain-tx-lookup-miner.onrender.com
 
 auth:
@@ -56,82 +62,127 @@ endpoints:
     external_path: /check-tx
     method: GET
     description: >
-      Looks up an EVM transaction by hash. Query params: tx_hash
-      (0x-prefixed, 64 hex characters, required), chain (one of eth, base,
-      arbitrum, optimism, polygon — optional, defaults to eth).
+      ONCHAIN_TX_LOOKUP. Answers "is transaction 0xabc... confirmed or did
+      it fail", "what did this tx hash do", "what is the status of this
+      transaction on Base". Takes a specific transaction reference and
+      returns its details, status and effects: confirmed, reverted, pending
+      or not_found, plus from, to, value_wei, value_eth, block_number,
+      block_hash, receipt_status, and the decoded contract method where the
+      calldata identifies one. Confidence scales with confirmation depth.
+      Params: tx_hash (required, 0x-prefixed, 64 hex characters), chain
+      (optional, one of eth, base, arbitrum, optimism, polygon, default eth).
   - path: /gas-price
     external_path: /gas-price
     method: GET
     description: >
-      Current gas price for a chain, plus an estimated USD fee for a
-      standard 21,000-gas transfer. Query params: chain (one of eth,
-      base, arbitrum, optimism, polygon — optional, defaults to eth).
+      GAS_PRICE. Answers "what is gas right now on Ethereum", "how much does
+      a transfer cost on Polygon", "are fees high on Base". Returns the
+      current transaction fee level on a named chain in wei and gwei, plus
+      the estimated USD cost of a standard 21,000-gas transfer. This is the
+      fee to transact, not the price of the chain's token, which is
+      CRYPTO_PRICE. Params: chain (optional, one of eth, base, arbitrum,
+      optimism, polygon, default eth).
   - path: /wallet-balance
     external_path: /wallet-balance
     method: GET
     description: >
-      Native or ERC-20 token balance for an EVM address. Query params:
-      address (0x-prefixed, 40 hex characters, required), chain (one of
-      eth, base, arbitrum, optimism, polygon — optional, defaults to eth),
-      token (0x-prefixed, 40 hex characters, optional — an ERC-20 contract
-      address; when supplied, returns that token's balance instead of the
-      chain's native token).
+      WALLET_BALANCE_CHECK. Answers "how much ETH does 0xabc... hold", "what
+      is the USDC balance of this address on Arbitrum". Takes a specific
+      blockchain address and returns its current native-coin or ERC-20 token
+      balance on a named chain. Params: address (required, 0x-prefixed, 40
+      hex characters), chain (optional, one of eth, base, arbitrum,
+      optimism, polygon, default eth), token (optional, 0x-prefixed, 40 hex
+      characters, an ERC-20 contract address; when supplied, returns that
+      token's balance instead of the chain's native coin).
   - path: /token-holders
     external_path: /token-holders
     method: GET
     description: >
-      Holder count for an ERC-20 token. Query params: token (0x-prefixed,
-      40 hex characters, required), chain (one of eth, base, arbitrum,
-      optimism, polygon — optional, defaults to eth).
+      TOKEN_HOLDER_COUNT. Answers "how many wallets hold this token", "how
+      many distinct addresses own 0xabc...". Takes a specific token contract
+      address and returns the count of distinct holding addresses. This is a
+      holder count, not price, supply or market data. Params: token
+      (required, 0x-prefixed, 40 hex characters), chain (optional, one of
+      eth, base, arbitrum, optimism, polygon, default eth).
   - path: /tvl
     external_path: /tvl
     method: GET
     description: >
-      Current total value locked (USD) for a DefiLlama protocol or chain.
-      Query params: exactly one of protocol (a DefiLlama protocol slug,
-      e.g. "uniswap") or tvl_chain (a free-text DefiLlama chain name, e.g.
-      "Ethereum" — not limited to the five EVM chains above, DefiLlama
-      covers ~460 chains, hence the separate param name from `chain`).
+      TVL_LOOKUP. Answers "what is the TVL of Aave", "how much value is
+      locked in Uniswap", "what is total value locked on Ethereum". Takes a
+      named DeFi protocol, pool or chain and returns the total value locked
+      in it in USD. This is value locked, not market capitalisation. When
+      both a protocol and a chain are supplied it returns that protocol's
+      TVL on that chain alongside its total across all chains. Params:
+      exactly one of protocol (a DefiLlama protocol slug, e.g. "uniswap") or
+      tvl_chain (a free-text DefiLlama chain name, e.g. "Ethereum", covering
+      DefiLlama's ~460 chains rather than only the five EVM chains above,
+      which is why the param name differs from `chain`).
   - path: /crypto-price
     external_path: /crypto-price
     method: GET
     description: >
-      Current USD price for a coin or on-chain token. Query params:
-      either coin_id (a CoinGecko id, e.g. "bitcoin") alone, or both
-      price_chain (a free-text DefiLlama chain name, e.g. "ethereum") and
-      token (0x-prefixed, 40 hex characters — the token's contract
-      address) together. Exactly one of these two modes.
+      CRYPTO_PRICE. Answers "what is Bitcoin worth", "price of ETH in USD",
+      "how much is the token at 0xabc... trading for". Names a
+      cryptocurrency asset and returns its current USD price, with 24-hour
+      change and market cap where the feed supplies them, cross-checked
+      across independent sources and reported with a source count. For the
+      cost of transacting on a chain use GAS_PRICE instead. Params: either
+      coin_id alone (a CoinGecko id, e.g. "bitcoin"), or price_chain (a
+      free-text DefiLlama chain name, e.g. "ethereum") together with token
+      (0x-prefixed, 40 hex characters, the token's contract address).
+      Exactly one of those two modes.
   - path: /stock-price
     external_path: /stock-price
     method: GET
     description: >
-      Current USD price for an equity ticker. Query params: ticker (a
-      stock symbol, e.g. "AAPL", required).
+      STOCK_PRICE. Answers "what is Apple trading at", "current share price
+      of TSLA", "how much is NVDA stock". Names a listed equity or ticker
+      and returns its current USD share price. Params: ticker (required, a
+      stock symbol, e.g. "AAPL").
   - path: /ssl-check
     external_path: /ssl-check
     method: GET
     description: >
-      Live TLS certificate check for a domain — performs a real
-      handshake, not a cached lookup. Query params: domain (bare
-      hostname, e.g. "example.com", not a full URL, required).
+      SSL_VERIFICATION. Answers "is the SSL certificate for example.com
+      valid", "when does this domain's TLS certificate expire", "who issued
+      the certificate for this host". Takes a hostname and reports its
+      TLS/SSL certificate, chain and configuration from a real live
+      handshake performed at request time, not a cached or third-party
+      lookup, including issuer, validity window, days to expiry and
+      chain-completeness diagnostics. Params: domain (required, a bare
+      hostname such as "example.com", not a full URL).
   - path: /fraud-query
     external_path: /fraud-query
     method: POST
     description: >
-      Answers factual questions about known fraud schemes, cases, and
-      perpetrators using Sentinel. JSON body: { "query": "..." }.
+      FRAUD_DETECTION. Answers "was BitConnect a scam", "is this scheme
+      fraudulent", "what happened in the FTX fraud". Assesses how likely a
+      named entity, scheme or action is to be fraudulent, answering from
+      source-backed fraud knowledge rather than speculation, and returning
+      INCONCLUSIVE rather than guessing when the record does not support a
+      verdict. JSON body: { "query": "..." } (8 to 1000 characters).
   - path: /assess-wallet
     external_path: /assess-wallet
     method: GET
     description: >
-      Assesses an Ethereum address for fraud risk using Sentinel. Query
-      param: wallet (0x-prefixed, 40 hex characters, required).
+      FRAUD_DETECTION for a specific address. Answers "is 0xabc... a scam
+      wallet", "how risky is this address", "is it safe to receive funds
+      from this wallet". Returns a 0-1 risk score with named contributing
+      signals, checked against a built-in registry of over 2,600 known
+      entities (OFAC-sanctioned addresses, reported scam addresses, exchange
+      and bridge wallets, mixers and burn addresses) so that known-legitimate
+      infrastructure is not flagged as fraud. Risk and confidence are
+      reported separately: a low-risk verdict from bounded scanning is
+      returned as low risk with low confidence rather than overstated.
+      Params: wallet (required, 0x-prefixed, 40 hex characters).
   - path: /assess-wallet
     external_path: /assess-wallet
     method: POST
     description: >
-      Assesses an Ethereum address for fraud risk using Sentinel. JSON
-      body: { "wallet": "0x..." }.
+      FRAUD_DETECTION for a specific address, identical to the GET form
+      above and accepting the address in a JSON body instead of the query
+      string. JSON body: { "wallet": "0x..." }.
 
 # input_schema/output_schema are top-level-only fields, documentation
 # surfaced to callers rather than a per-endpoint validator (confirmed
@@ -445,6 +496,23 @@ semantics:
     - STOCK_PRICE
     - SSL_VERIFICATION
     - FRAUD_DETECTION
+
+docs:
+  repository: https://github.com/Sireadell/onchain-tx
+
+# Where TxLens reports failures inside its JSON body. message_path and
+# code_path only make failures readable to callers; they do not change
+# which calls count as failures.
+#
+# status_path is deliberately NOT declared. TxLens uses real HTTP status
+# codes, and the docs say to omit status_path in that case. Declaring it
+# here would be actively harmful: a successful lookup that legitimately
+# answers "not_found" (a hash that is not on chain) carries
+# status: not_found in a 200 response, and would be reclassified as a
+# failed call.
+errors:
+  message_path: summary
+  code_path: error
 
 limitations:
   - code: MAX_PARAM_VALUE
