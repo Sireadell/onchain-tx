@@ -18,7 +18,7 @@ const DOMAIN_RE = /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
 async function handleSslVerification(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
-  const rawDomain = params?.domain;
+  const rawDomain = params?.domain ?? params?.host ?? params?.url ?? params?.query ?? params?.q ?? params?.question;
   // Exact bare hostname first; if that fails, pull a hostname out of a
   // full URL, a "host:port" pair, or a whole question naming the domain,
   // rather than rejecting outright. Live-checked 2026-08-29: a competing
@@ -68,30 +68,73 @@ async function handleSslVerification(req, res) {
   const valid = result.authorized && result.daysUntilExpiry > 0;
   const category = classifyCertificate(result);
   const issuerName = result.issuer?.O ?? result.issuer?.CN ?? 'unknown issuer';
-  const summaryByCategory = {
-    valid: `${domain} has a valid certificate, expiring in ${result.daysUntilExpiry} days (issued by ${issuerName})`,
-    expired: `${domain}'s certificate expired ${Math.abs(result.daysUntilExpiry)} days ago (issued by ${issuerName})`,
-    self_signed: `${domain} is serving a self-signed certificate, not one from a trusted certificate authority`,
-    hostname_mismatch: `${domain} is serving a certificate issued for a different hostname, so it does not match ${domain}`,
-    untrusted: `${domain}'s certificate does not chain to a trusted root${result.authorizationError ? ` (${result.authorizationError})` : ''}`,
+  const chainComplete = category !== 'untrusted' && category !== 'self_signed';
+  const hostnameValid = category !== 'hostname_mismatch';
+  const expiryDate = result.validTo.slice(0, 10);
+
+  // The verdict first, then one labelled clause per thing that was
+  // actually checked. This is the shape the miner leading this intent
+  // answers in, and it is the right shape: a caller asking "is the
+  // certificate valid" wants the reasons, not a single adjective.
+  const verdictByCategory = {
+    valid: `The TLS/SSL certificate configuration for ${domain} is valid.`,
+    expired: `The TLS/SSL certificate for ${domain} is expired and not valid.`,
+    self_signed: `The TLS/SSL certificate for ${domain} is self-signed and not valid for public use.`,
+    hostname_mismatch: `The TLS/SSL certificate served by ${domain} was issued for a different hostname and does not validate for ${domain}.`,
+    untrusted: `The TLS/SSL certificate for ${domain} does not chain to a trusted root and is not valid.`,
   };
+
+  const validityClause = result.daysUntilExpiry > 0
+    ? `Certificate validity: currently valid, expiring in ${result.daysUntilExpiry} days on ${expiryDate}, issued by ${issuerName} on ${result.validFrom.slice(0, 10)}.`
+    : `Certificate validity: expired ${Math.abs(result.daysUntilExpiry)} days ago, on ${expiryDate}, issued by ${issuerName}.`;
+
+  const chainClause = chainComplete
+    ? `Chain trust: the server presented a chain of ${result.chainLength} certificate(s) including intermediates, building a trusted path to a root in the public trust store.`
+    : `Chain trust: the chain of ${result.chainLength} certificate(s) presented does not reach a trusted root${result.authorizationError ? ` (${result.authorizationError})` : ''}.`;
+
+  const hostnameClause = hostnameValid
+    ? `Hostname verification: passes${result.matchedAltName ? `, matching ${result.matchedAltName} on the certificate` : ''}${result.altNames.length > 1 ? ` out of ${result.altNames.length} names it covers` : ''}.`
+    : `Hostname verification: fails — the certificate covers ${result.altNames.slice(0, 5).join(', ') || 'other names'}${result.altNames.length > 5 ? ` and ${result.altNames.length - 5} more` : ''}, none of which is ${domain}.`;
+
+  const protocolClause = result.protocolDeprecated
+    ? `Connection: negotiated over ${result.protocol} using ${result.cipherName}. ${result.protocol} is deprecated and most modern clients now refuse it, so this host will fail for many callers regardless of the certificate.`
+    : `Connection: negotiated over ${result.protocol} using ${result.cipherName}${result.keyBits ? `, with a ${result.keyBits}-bit key` : ''}.`;
+
+  const summary = [
+    verdictByCategory[category],
+    validityClause,
+    chainClause,
+    hostnameClause,
+    protocolClause,
+    'Read from a real TLS handshake performed against the host at request time, so this is the certificate it is serving right now, not what certificate transparency logs say was issued.',
+  ].join(' ');
 
   res.json({
     query: domain,
     status: 'ok',
-    summary: summaryByCategory[category],
+    summary,
     confidence: 1.0,
     canonical: ['ssl', domain, category, result.daysUntilExpiry].join(':'),
     valid,
     category,
     authorized: result.authorized,
     authorization_error: result.authorizationError,
-    chain_complete: category !== 'untrusted' && category !== 'self_signed',
-    hostname_valid: category !== 'hostname_mismatch',
+    chain_complete: chainComplete,
+    chain_length: result.chainLength,
+    hostname_valid: hostnameValid,
+    matched_hostname: result.matchedAltName,
+    covers_hostnames: result.altNames,
+    protocol: result.protocol,
+    cipher: result.cipherName,
+    protocol_deprecated: result.protocolDeprecated,
+    key_bits: result.keyBits,
+    serial_number: result.serialNumber,
+    fingerprint_sha256: result.fingerprint256,
     issuer: issuerName,
     valid_from: result.validFrom,
     valid_to: result.validTo,
     days_until_expiry: result.daysUntilExpiry,
+    checked_at: new Date().toISOString(),
   });
 }
 

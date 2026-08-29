@@ -16,6 +16,9 @@ import checkCryptoPriceRouter from './routes/checkCryptoPrice.js';
 import checkStockPriceRouter from './routes/checkStockPrice.js';
 import checkSslVerificationRouter from './routes/checkSslVerification.js';
 import checkWeatherForecastRouter from './routes/checkWeatherForecast.js';
+import checkStormAlertRouter from './routes/checkStormAlert.js';
+import checkIpGeolocationRouter from './routes/checkIpGeolocation.js';
+import checkAcademicSearchRouter from './routes/checkAcademicSearch.js';
 import sentinelFraudRouter from './routes/sentinelFraud.js';
 
 // Same limit/window on all six signal routes — each spends its own
@@ -40,6 +43,9 @@ const checkCryptoPriceRateLimit = signalRateLimit();
 const checkStockPriceRateLimit = signalRateLimit();
 const checkSslVerificationRateLimit = signalRateLimit();
 const checkWeatherForecastRateLimit = signalRateLimit();
+const checkStormAlertRateLimit = signalRateLimit();
+const checkIpGeolocationRateLimit = signalRateLimit();
+const checkAcademicSearchRateLimit = signalRateLimit();
 const sentinelFraudRateLimit = signalRateLimit();
 
 // Logs every request as it arrives and again when it finishes, to stdout
@@ -89,6 +95,9 @@ export function buildApp() {
   app.use('/stock-price', checkStockPriceRateLimit, checkStockPriceRouter);
   app.use('/ssl-check', checkSslVerificationRateLimit, checkSslVerificationRouter);
   app.use('/weather-forecast', checkWeatherForecastRateLimit, checkWeatherForecastRouter);
+  app.use('/storm-alert', checkStormAlertRateLimit, checkStormAlertRouter);
+  app.use('/ip-geolocate', checkIpGeolocationRateLimit, checkIpGeolocationRouter);
+  app.use('/academic-search', checkAcademicSearchRateLimit, checkAcademicSearchRouter);
   app.use('/', sentinelFraudRateLimit, sentinelFraudRouter);
 
   return app;

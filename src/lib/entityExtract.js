@@ -65,6 +65,37 @@ export function extractHostname(input) {
   return match ? match[0] : null;
 }
 
+// Matches a bare IPv4 address, or an IPv4-shaped token inside a longer
+// sentence ("where is 8.8.8.8 located?" -> "8.8.8.8").
+const IPV4_RE = /\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/;
+
+// IPv6 in the forms that actually get asked about: full groups, "::"
+// compressed, and the IPv4-mapped tail (::ffff:8.8.8.8). Anchored on
+// surrounding whitespace or punctuation and requiring at least two
+// colon-separated hex groups, so "host:port" and a bare word cannot match.
+// IPv6 was previously out of scope here; an adversarial review on
+// 2026-08-29 found the rank-1 competing miner on this intent accepts it
+// while we answered "I cannot find an IPv4 address", which is a guaranteed
+// miss on every IPv6 question rather than merely a weaker answer.
+const IPV6_RE = /(?:^|[\s(,'"])((?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:|(?:[0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,5}(?::[0-9A-Fa-f]{1,4}){1,2}|(?:[0-9A-Fa-f]{1,4}:){1,4}(?::[0-9A-Fa-f]{1,4}){1,3}|(?:[0-9A-Fa-f]{1,4}:){1,3}(?::[0-9A-Fa-f]{1,4}){1,4}|(?:[0-9A-Fa-f]{1,4}:){1,2}(?::[0-9A-Fa-f]{1,4}){1,5}|[0-9A-Fa-f]{1,4}:(?::[0-9A-Fa-f]{1,4}){1,6}|:(?::[0-9A-Fa-f]{1,4}){1,7}|::[Ff]{4}:\d{1,3}(?:\.\d{1,3}){3})(?=$|[\s).,;'"?!])/;
+
+// Finds an IP address, v4 or v6, anywhere in the string. IPv4 is tried
+// first: an IPv4-mapped IPv6 address contains a dotted quad, and the plain
+// v4 form is the more useful answer whenever both could match.
+export function extractIp(input) {
+  if (typeof input !== 'string') return null;
+  const text = input.trim();
+
+  const v4 = text.match(IPV4_RE);
+  if (v4) {
+    const octets = v4[1].split('.').map(Number);
+    if (octets.every((o) => o <= 255)) return v4[1];
+  }
+
+  const v6 = ` ${text} `.match(IPV6_RE);
+  return v6 ? v6[1] : null;
+}
+
 // Splits free text into lowercase word tokens, for scanning a sentence
 // against a known vocabulary (chain names, coin slugs/symbols) when no
 // single param cleanly names the entity on its own.
