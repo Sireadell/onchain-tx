@@ -133,8 +133,10 @@ async function handleCryptoPrice(req, res) {
   const marketCapText = typeof priceInfo.marketCapUsd === 'number'
     ? `, with a market capitalization of about $${priceInfo.marketCapUsd.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
     : '';
+  const SOURCE_LABELS = { coinpaprika: 'CoinPaprika', coingecko: 'CoinGecko', defillama: 'DefiLlama' };
+  const sourceNames = (priceInfo.sources ?? []).map((item) => SOURCE_LABELS[item.source] ?? item.source);
   const sourceText = priceInfo.sourceCount > 1
-    ? ` CoinGecko and DefiLlama currently report a range of $${priceInfo.priceRangeLowUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })} to $${priceInfo.priceRangeHighUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })}.`
+    ? ` ${new Intl.ListFormat('en', { type: 'conjunction' }).format(sourceNames)} currently report a range of $${priceInfo.priceRangeLowUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })} to $${priceInfo.priceRangeHighUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })}.`
     : '';
   res.json({
     query_type: queryType,

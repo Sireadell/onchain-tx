@@ -145,6 +145,36 @@ test('crypto-price: successful coin_id lookup prefers CoinPaprika over CoinGecko
   assert.equal(body.market_cap_usd, 1562110242633);
 });
 
+test('crypto-price: multi-source summary names the sources that actually answered', async (t) => {
+  resetDefiLlamaCache();
+  mockFetchWithCoinGecko(t, {
+    coinpaprika: async () => ({
+      status: 200,
+      json: async () => [{ id: 'btc-bitcoin', symbol: 'BTC', is_active: true, rank: 1 }],
+    }),
+    coinpaprikaTicker: async () => ({
+      status: 200,
+      json: async () => ({
+        symbol: 'BTC',
+        last_updated: '2026-08-29T02:01:24Z',
+        quotes: { USD: { price: 77801.51, market_cap: 1561989416378, percent_change_24h: -2.7 } },
+      }),
+    }),
+    coingecko: async () => ({ status: 500, statusText: 'Internal Server Error' }),
+    defillama: async () => ({
+      status: 200,
+      json: async () => ({ coins: { 'coingecko:bitcoin': { price: 77776.27, symbol: 'BTC', timestamp: 1787090000 } } }),
+    }),
+  });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/crypto-price?coin_id=bitcoin`);
+  const body = await res.json();
+  assert.equal(body.price_source, 'coinpaprika');
+  assert.match(body.summary, /CoinPaprika and DefiLlama currently report a range/);
+  assert.doesNotMatch(body.summary, /CoinGecko/);
+});
+
 test('crypto-price: CoinPaprika slug collision resolves to the lower-rank (dominant) asset', async (t) => {
   resetDefiLlamaCache();
   let requestedId = null;
