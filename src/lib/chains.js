@@ -40,3 +40,51 @@ export const DEFAULT_CHAIN = process.env.CHAIN || 'eth';
 export function resolveChain(chain) {
   return CHAINS[chain] ?? null;
 }
+
+// Names beyond the canonical keys above that a caller — or an LLM pulling
+// a chain out of a question — is just as likely to send. Live-checked
+// 2026-08-29: "chain=ethereum" (the chain's actual name, not our short
+// key) was rejected outright, on every endpoint that takes a chain param.
+const CHAIN_ALIASES = {
+  ethereum: 'eth',
+  mainnet: 'eth',
+  'eth mainnet': 'eth',
+  'ethereum mainnet': 'eth',
+  'base mainnet': 'base',
+  arb: 'arbitrum',
+  'arbitrum one': 'arbitrum',
+  op: 'optimism',
+  'op mainnet': 'optimism',
+  'optimism mainnet': 'optimism',
+  matic: 'polygon',
+  'polygon pos': 'polygon',
+  'polygon mainnet': 'polygon',
+};
+
+const CHAIN_VOCABULARY = [...Object.keys(CHAINS), ...Object.keys(CHAIN_ALIASES)].sort(
+  (a, b) => b.length - a.length,
+);
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Same as resolveChain, but also accepts case-insensitive full names and
+// common aliases (see CHAIN_ALIASES), and — failing an exact match —
+// scans a longer string (e.g. a whole question) for one of those names
+// appearing as a whole word or phrase. Superset of resolveChain: anything
+// resolveChain accepts, this accepts too.
+export function resolveChainLoose(input) {
+  if (typeof input !== 'string') return null;
+  const normalized = input.trim().toLowerCase();
+  if (CHAINS[normalized]) return CHAINS[normalized];
+  if (CHAIN_ALIASES[normalized]) return CHAINS[CHAIN_ALIASES[normalized]];
+
+  for (const term of CHAIN_VOCABULARY) {
+    const boundary = `(?:^|[^a-z0-9])${escapeRegExp(term)}(?:$|[^a-z0-9])`;
+    if (new RegExp(boundary, 'i').test(normalized)) {
+      return CHAINS[term] ?? CHAINS[CHAIN_ALIASES[term]];
+    }
+  }
+  return null;
+}

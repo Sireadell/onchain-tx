@@ -27,9 +27,36 @@ test('ssl-check: missing domain answered with guidance', async (t) => {
   assert.equal((await res.json()).status, 'invalid_input');
 });
 
-test('ssl-check: full URL instead of bare hostname answered with guidance', async (t) => {
+test('ssl-check: full URL is resolved to its bare hostname instead of rejected', async (t) => {
   const base = startServer(t);
   const res = await fetch(`${base}/ssl-check?domain=${encodeURIComponent('https://example.com/path')}`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.query, 'example.com');
+});
+
+test('ssl-check: host:port is resolved to its bare hostname instead of rejected', async (t) => {
+  const base = startServer(t);
+  const res = await fetch(`${base}/ssl-check?domain=${encodeURIComponent('example.com:443')}`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.query, 'example.com');
+});
+
+test('ssl-check: a whole question naming the domain is resolved instead of rejected', async (t) => {
+  const base = startServer(t);
+  const res = await fetch(`${base}/ssl-check?domain=${encodeURIComponent('Is the SSL certificate for example.com valid?')}`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.query, 'example.com');
+});
+
+test('ssl-check: input with no extractable hostname answered with guidance', async (t) => {
+  const base = startServer(t);
+  const res = await fetch(`${base}/ssl-check?domain=${encodeURIComponent('is this thing secure')}`);
   assert.equal(res.status, 200);
   assert.equal((await res.json()).status, 'invalid_input');
 });

@@ -41,13 +41,17 @@ async function handleStockPrice(req, res) {
     return res.status(502).json({ status: 'error', summary: 'upstream stock price call failed', confidence: 1.0, error: err.message });
   }
 
+  // resolvedTicker is the real symbol used for the quote, which may differ
+  // from what the caller sent (e.g. ticker=Apple resolved to AAPL via
+  // symbol search — see stockPriceApi.js). Display that, not the input.
+  const resolvedTicker = (quote.resolvedTicker ?? ticker).toUpperCase();
   const as_of = quote.asOfUnix != null ? new Date(quote.asOfUnix * 1000).toISOString() : new Date().toISOString();
   res.json({
     query: ticker,
     status: 'ok',
-    summary: `${ticker.toUpperCase()} is $${quote.priceUsd.toLocaleString('en-US', { maximumFractionDigits: 4 })}${quote.currency && quote.currency !== 'USD' ? ` ${quote.currency}` : ''}`,
+    summary: `${resolvedTicker} is $${quote.priceUsd.toLocaleString('en-US', { maximumFractionDigits: 4 })}${quote.currency && quote.currency !== 'USD' ? ` ${quote.currency}` : ''}`,
     confidence: 1.0,
-    canonical: ['ticker', ticker.toUpperCase(), quote.priceUsd].join(':'),
+    canonical: ['ticker', resolvedTicker, quote.priceUsd].join(':'),
     price_usd: quote.priceUsd,
     currency: quote.currency,
     exchange: quote.exchangeName,

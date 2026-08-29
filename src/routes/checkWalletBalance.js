@@ -22,8 +22,9 @@ import {
   ApiKeyMissingError,
 } from '../lib/ankrRpc.js';
 import { getTokenInfo, TokenNotFoundError } from '../lib/blockscoutApi.js';
-import { CHAINS, DEFAULT_CHAIN, resolveChain } from '../lib/chains.js';
+import { CHAINS, DEFAULT_CHAIN, resolveChainLoose } from '../lib/chains.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
+import { extractAddress } from '../lib/entityExtract.js';
 
 const router = Router();
 
@@ -122,27 +123,35 @@ async function handleTokenBalance(req, res, address, chainParam, chain, token) {
 
 async function handleWalletBalance(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
-  const address = params?.address;
+  const rawAddress = params?.address;
   const chainParam = params?.chain ?? DEFAULT_CHAIN;
-  const token = params?.token;
+  const rawToken = params?.token;
 
-  if (!address || !ADDRESS_RE.test(address)) {
-    const problem = address
-      ? `${quoteParam(address)} is not a valid wallet address`
+  // Exact match first; if that fails, pull an address out of whatever was
+  // sent (a whole question, an address with surrounding punctuation)
+  // rather than rejecting outright. Does not resolve ENS names or
+  // tickers — only an address already present but wrapped in other text.
+  // See entityExtract.js.
+  const address = rawAddress && ADDRESS_RE.test(rawAddress) ? rawAddress : extractAddress(rawAddress);
+  const token = rawToken ? (ADDRESS_RE.test(rawToken) ? rawToken : extractAddress(rawToken)) : null;
+
+  if (!address) {
+    const problem = rawAddress
+      ? `${quoteParam(rawAddress)} does not contain a valid wallet address`
       : 'no wallet address was supplied';
     return respondUnusableInput(
       res,
       `I cannot check this balance because ${problem}. A wallet address is 42 characters long: "0x" followed by 40 hexadecimal characters. An ENS name or a transaction hash will not work here. Pass an address as the address parameter and I will return its native balance, plus its balance of any ERC-20 token you name.`,
     );
   }
-  if (token && !ADDRESS_RE.test(token)) {
+  if (rawToken && !token) {
     return respondUnusableInput(
       res,
-      `I can read the wallet address, but I cannot check the token balance because ${quoteParam(token)} is not a valid token contract address. I need the token's contract address, 42 characters long: "0x" followed by 40 hexadecimal characters. A ticker such as USDC will not work here. Drop the token parameter and I will return the wallet's native balance instead.`,
+      `I can read the wallet address, but I cannot check the token balance because ${quoteParam(rawToken)} does not contain a valid token contract address. I need the token's contract address, 42 characters long: "0x" followed by 40 hexadecimal characters. A ticker such as USDC will not work here. Drop the token parameter and I will return the wallet's native balance instead.`,
     );
   }
 
-  const chain = resolveChain(chainParam);
+  const chain = resolveChainLoose(chainParam);
   if (!chain) {
     return respondUnusableInput(
       res,

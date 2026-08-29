@@ -12,9 +12,10 @@ import {
   ApiKeyMissingError,
 } from '../lib/ankrRpc.js';
 import { evaluateTransaction } from '../lib/txStatus.js';
-import { CHAINS, DEFAULT_CHAIN, resolveChain } from '../lib/chains.js';
+import { CHAINS, DEFAULT_CHAIN, resolveChainLoose } from '../lib/chains.js';
 import { lookupMethodSignature } from '../lib/fourByte.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
+import { extractTxHash } from '../lib/entityExtract.js';
 
 const router = Router();
 
@@ -22,15 +23,19 @@ const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 
 async function handleCheckTx(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
-  const txHash = params?.tx_hash;
+  const rawTxHash = params?.tx_hash;
+  // Exact match first; if that fails, try pulling a hash out of whatever
+  // was sent (a full question, a hash with surrounding punctuation) rather
+  // than rejecting outright. See entityExtract.js.
+  const txHash = rawTxHash && TX_HASH_RE.test(rawTxHash) ? rawTxHash : extractTxHash(rawTxHash);
   // No chain param at all -> DEFAULT_CHAIN, preserving pre-multi-chain
   // behavior for existing callers. An explicit but unrecognized chain is a
   // validation error, not a silent fallback.
   const chainParam = params?.chain ?? DEFAULT_CHAIN;
 
-  if (!txHash || !TX_HASH_RE.test(txHash)) {
-    const problem = txHash
-      ? `${quoteParam(txHash)} is not a valid Ethereum transaction hash`
+  if (!txHash) {
+    const problem = rawTxHash
+      ? `${quoteParam(rawTxHash)} does not contain a valid Ethereum transaction hash`
       : 'no transaction hash was supplied';
     return respondUnusableInput(
       res,
@@ -38,7 +43,7 @@ async function handleCheckTx(req, res) {
     );
   }
 
-  const chain = resolveChain(chainParam);
+  const chain = resolveChainLoose(chainParam);
   if (!chain) {
     return respondUnusableInput(
       res,

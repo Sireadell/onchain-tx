@@ -16,7 +16,7 @@
 import { Router } from 'express';
 import { getGasPrice, getBlockNumber, withRpcBudget, RpcBudgetExceededError, ApiKeyMissingError } from '../lib/ankrRpc.js';
 import { getCoinPrice } from '../lib/defiLlamaApi.js';
-import { CHAINS, DEFAULT_CHAIN, resolveChain } from '../lib/chains.js';
+import { CHAINS, DEFAULT_CHAIN, resolveChainLoose } from '../lib/chains.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 
 const STANDARD_TRANSFER_GAS_UNITS = 21_000;
@@ -27,7 +27,7 @@ async function handleGasPrice(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
   const chainParam = params?.chain ?? DEFAULT_CHAIN;
 
-  const chain = resolveChain(chainParam);
+  const chain = resolveChainLoose(chainParam);
   if (!chain) {
     return respondUnusableInput(
       res,

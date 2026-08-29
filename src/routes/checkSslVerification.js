@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { checkSslCertificate, SslConnectionError } from '../lib/sslCheck.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
+import { extractHostname } from '../lib/entityExtract.js';
 
 const router = Router();
 
@@ -17,18 +18,24 @@ const DOMAIN_RE = /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
 async function handleSslVerification(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
-  const domain = params?.domain;
+  const rawDomain = params?.domain;
+  // Exact bare hostname first; if that fails, pull a hostname out of a
+  // full URL, a "host:port" pair, or a whole question naming the domain,
+  // rather than rejecting outright. Live-checked 2026-08-29: a competing
+  // SSL miner answers all three of these forms; we were rejecting them.
+  // See entityExtract.js.
+  const domain = rawDomain && DOMAIN_RE.test(rawDomain) ? rawDomain : extractHostname(rawDomain);
 
-  if (!domain) {
+  if (!rawDomain) {
     return respondUnusableInput(
       res,
       'I cannot check a certificate because no domain was supplied. Pass a bare hostname such as "example.com" as the domain parameter and I will report whether its TLS certificate is valid, who issued it, when it expires, and any problems in its trust chain.',
     );
   }
-  if (!DOMAIN_RE.test(domain)) {
+  if (!domain) {
     return respondUnusableInput(
       res,
-      `I cannot check a certificate for ${quoteParam(domain)} because I need a bare hostname, not a full web address. Send "example.com" rather than "https://example.com/path". Strip the protocol and the path, pass just the hostname, and I will report the certificate's validity, issuer, expiry, and trust chain.`,
+      `I cannot check a certificate for ${quoteParam(rawDomain)} because I cannot find a hostname in it. Pass a bare hostname such as "example.com", a full URL, or a question naming the domain, and I will report the certificate's validity, issuer, expiry, and trust chain.`,
     );
   }
 

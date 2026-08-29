@@ -15,6 +15,7 @@
 // always resolves to the dominant asset rather than a copycat.
 
 import { checkBudget } from './ankrRpc.js';
+import { tokenize } from './entityExtract.js';
 
 const CALL_TIMEOUT_MS = Number(process.env.COINPAPRIKA_CALL_TIMEOUT_MS) || 5_000;
 const RETRY_DELAYS_MS = [500, 1_000];
@@ -23,12 +24,14 @@ const COIN_LIST_TTL_MS = 12 * 60 * 60 * 1000;
 
 const priceCache = new Map();
 let slugToId = null;
+let symbolToId = null;
 let coinListCachedAt = 0;
 let coinListPromise = null;
 
 export function resetCoinPaprikaCache() {
   priceCache.clear();
   slugToId = null;
+  symbolToId = null;
   coinListCachedAt = 0;
   coinListPromise = null;
 }
@@ -87,29 +90,69 @@ async function fetchJsonWithRetry(url) {
   }
 }
 
-async function getSlugToId() {
-  if (slugToId && Date.now() - coinListCachedAt < COIN_LIST_TTL_MS) return slugToId;
+// Builds both lookup maps together off the same coin list fetch: slug ->
+// id ("bitcoin" -> "btc-bitcoin", for the coin_id this miner already
+// accepts) and symbol -> id ("BTC" -> "btc-bitcoin", for a caller or an
+// LLM sending the ticker instead). Same lowest-rank-wins collision rule
+// applies to both, since a symbol can collide across active assets too.
+async function getCoinIdMaps() {
+  if (slugToId && symbolToId && Date.now() - coinListCachedAt < COIN_LIST_TTL_MS) {
+    return { slugToId, symbolToId };
+  }
   if (!coinListPromise) {
     coinListPromise = fetchJsonWithRetry('https://api.coinpaprika.com/v1/coins')
       .then((coins) => {
-        const map = new Map();
+        const slugs = new Map();
+        const symbols = new Map();
         for (const coin of coins) {
           if (!coin.is_active) continue;
           const dashIndex = coin.id.indexOf('-');
           const slug = dashIndex === -1 ? coin.id : coin.id.slice(dashIndex + 1);
           const rank = coin.rank || Infinity;
-          const existing = map.get(slug);
-          if (!existing || rank < existing.rank) map.set(slug, { id: coin.id, rank });
+          const entry = { id: coin.id, rank };
+
+          const existingSlug = slugs.get(slug);
+          if (!existingSlug || rank < existingSlug.rank) slugs.set(slug, entry);
+
+          if (coin.symbol) {
+            const symbolKey = coin.symbol.toLowerCase();
+            const existingSymbol = symbols.get(symbolKey);
+            if (!existingSymbol || rank < existingSymbol.rank) symbols.set(symbolKey, entry);
+          }
         }
-        slugToId = map;
+        slugToId = slugs;
+        symbolToId = symbols;
         coinListCachedAt = Date.now();
-        return map;
+        return { slugToId: slugs, symbolToId: symbols };
       })
       .finally(() => {
         coinListPromise = null;
       });
   }
   return coinListPromise;
+}
+
+// Resolves a caller-supplied coin_id to a CoinPaprika asset id, trying
+// progressively looser interpretations: the input as a slug, then as a
+// ticker symbol, then — if it looks like free text rather than a single
+// token — each word in it as a slug or symbol, in order, first hit wins.
+// Live-checked 2026-08-29: this is what turns "BTC" and "What is bitcoin
+// worth" into the same resolved asset as plain "bitcoin".
+async function resolveCoinId(coinId) {
+  const { slugToId: slugs, symbolToId: symbols } = await getCoinIdMaps();
+  const normalized = coinId.toLowerCase();
+
+  const direct = slugs.get(normalized) ?? symbols.get(normalized);
+  if (direct) return direct;
+
+  if (/\s/.test(coinId)) {
+    for (const word of tokenize(coinId)) {
+      const hit = slugs.get(word) ?? symbols.get(word);
+      if (hit) return hit;
+    }
+  }
+
+  return null;
 }
 
 // Returns { priceUsd, symbol, marketCapUsd, change24hPct, asOfUnix } for a
@@ -121,8 +164,7 @@ export async function getCoinPaprikaPrice(coinId) {
   const cached = priceCache.get(coinId);
   if (cached && Date.now() - cached.storedAt < PRICE_CACHE_TTL_MS) return cached.value;
 
-  const map = await getSlugToId();
-  const entry = map.get(coinId.toLowerCase());
+  const entry = await resolveCoinId(coinId);
   if (!entry) throw new CoinPaprikaNotFoundError(`no CoinPaprika asset found for '${coinId}'`);
 
   const ticker = await fetchJsonWithRetry(`https://api.coinpaprika.com/v1/tickers/${entry.id}`);

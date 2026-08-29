@@ -7,8 +7,9 @@
 import { Router } from 'express';
 import { getTokenInfo, TokenNotFoundError } from '../lib/blockscoutApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
-import { CHAINS, DEFAULT_CHAIN, resolveChain } from '../lib/chains.js';
+import { CHAINS, DEFAULT_CHAIN, resolveChainLoose } from '../lib/chains.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
+import { extractAddress } from '../lib/entityExtract.js';
 
 const router = Router();
 
@@ -16,12 +17,18 @@ const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
 async function handleTokenHolders(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
-  const token = params?.token;
+  const rawToken = params?.token;
+  // Exact match first; if that fails, pull a contract address out of
+  // whatever was sent instead of rejecting outright — this does not (and
+  // cannot reliably) resolve a ticker like "USDC" to an address, only an
+  // address already present but wrapped in other text. See
+  // entityExtract.js.
+  const token = rawToken && ADDRESS_RE.test(rawToken) ? rawToken : extractAddress(rawToken);
   const chainParam = params?.chain ?? DEFAULT_CHAIN;
 
-  if (!token || !ADDRESS_RE.test(token)) {
-    const problem = token
-      ? `${quoteParam(token)} is not a valid token contract address`
+  if (!token) {
+    const problem = rawToken
+      ? `${quoteParam(rawToken)} does not contain a valid token contract address`
       : 'no token contract address was supplied';
     return respondUnusableInput(
       res,
@@ -29,7 +36,7 @@ async function handleTokenHolders(req, res) {
     );
   }
 
-  const chain = resolveChain(chainParam);
+  const chain = resolveChainLoose(chainParam);
   if (!chain) {
     return respondUnusableInput(
       res,
