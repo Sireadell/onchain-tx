@@ -15,6 +15,7 @@ import checkTvlRouter from './routes/checkTvl.js';
 import checkCryptoPriceRouter from './routes/checkCryptoPrice.js';
 import checkStockPriceRouter from './routes/checkStockPrice.js';
 import checkSslVerificationRouter from './routes/checkSslVerification.js';
+import checkWeatherForecastRouter from './routes/checkWeatherForecast.js';
 import sentinelFraudRouter from './routes/sentinelFraud.js';
 
 // Same limit/window on all six signal routes — each spends its own
@@ -38,6 +39,7 @@ const checkTvlRateLimit = signalRateLimit();
 const checkCryptoPriceRateLimit = signalRateLimit();
 const checkStockPriceRateLimit = signalRateLimit();
 const checkSslVerificationRateLimit = signalRateLimit();
+const checkWeatherForecastRateLimit = signalRateLimit();
 const sentinelFraudRateLimit = signalRateLimit();
 
 // Logs every request as it arrives and again when it finishes, to stdout
@@ -86,6 +88,7 @@ export function buildApp() {
   app.use('/crypto-price', checkCryptoPriceRateLimit, checkCryptoPriceRouter);
   app.use('/stock-price', checkStockPriceRateLimit, checkStockPriceRouter);
   app.use('/ssl-check', checkSslVerificationRateLimit, checkSslVerificationRouter);
+  app.use('/weather-forecast', checkWeatherForecastRateLimit, checkWeatherForecastRouter);
   app.use('/', sentinelFraudRateLimit, sentinelFraudRouter);
 
   return app;

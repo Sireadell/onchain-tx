@@ -152,6 +152,17 @@ endpoints:
       lookup, including issuer, validity window, days to expiry and
       chain-completeness diagnostics. Params: domain (required, a bare
       hostname such as "example.com", not a full URL).
+  - path: /weather-forecast
+    external_path: /weather-forecast
+    method: GET
+    description: >
+      WEATHER_FORECAST. Answers "what's the weather in Tokyo the next
+      three days", "will it rain in London tomorrow". Takes a place name
+      or "lat,lon" and reports the expected condition in plain words,
+      temperature range, total precipitation and peak wind over the
+      requested window, from a real live forecast at request time.
+      Params: location (required, a place name, "lat,lon", or a question
+      naming the place), days (optional, 1-16, default 3).
   - path: /fraud-query
     external_path: /fraud-query
     method: POST
@@ -501,6 +512,7 @@ semantics:
     - CRYPTO_PRICE
     - STOCK_PRICE
     - SSL_VERIFICATION
+    - WEATHER_FORECAST
     - FRAUD_DETECTION
 
 docs:
