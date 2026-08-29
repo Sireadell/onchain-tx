@@ -120,7 +120,9 @@ async function handleStormAlert(req, res) {
     thunderstorm_hours: result.thunderstorm_hours,
     severe_hail_hours: result.severe_hail_hours,
     recommended_action: RISK_ACTION[result.risk],
-    checked_at: new Date().toISOString(),
+    // May be served from a short-lived cache (see weatherForecast.js), so
+    // this is when the data was actually pulled, not the request time.
+    checked_at: result.fetchedAt,
   });
 }
 

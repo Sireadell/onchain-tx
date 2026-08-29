@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildApp } from '../app.js';
+import { __clearWeatherCachesForTesting } from '../lib/weatherForecast.js';
 
 // WEATHER_FORECAST hits a real forecast API (lib/weatherForecast.js) rather
 // than a mockable one — same trade-off as checkSslVerification.test.js:
@@ -86,6 +87,7 @@ test('weather-forecast: "tomorrow" forecasts tomorrow, not a range starting toda
 // (past the one built-in retry) and asserts the response is a real error
 // status, not a disguised-as-caller's-fault 200.
 test('weather-forecast: an upstream failure is reported as a real error, not invalid_input', async (t) => {
+  __clearWeatherCachesForTesting();
   const realFetch = global.fetch;
   global.fetch = async (url) => {
     if (String(url).includes('open-meteo.com')) {
@@ -102,4 +104,17 @@ test('weather-forecast: an upstream failure is reported as a real error, not inv
   assert.equal(body.status, 'error');
   assert.doesNotMatch(body.summary, /invalid_input/);
   assert.match(body.summary, /temporarily unavailable/);
+});
+
+// The actual fix for the shared-IP rate-limit problem: repeated questions
+// about the same place, close together, must not re-hit Open-Meteo at all.
+// Confirmed live against a competing miner on this intent (2026-08-29) that
+// this is exactly how it avoids the same problem.
+test('weather-forecast: a repeated question for the same place is served from cache, not refetched', async (t) => {
+  __clearWeatherCachesForTesting();
+  const base = startServer(t);
+  const first = await (await fetch(`${base}/weather-forecast?location=Paris`)).json();
+  const second = await (await fetch(`${base}/weather-forecast?location=Paris`)).json();
+  assert.equal(first.status, 'ok');
+  assert.equal(second.checked_at, first.checked_at, 'a cached answer must report when the data was actually fetched, not the request time');
 });

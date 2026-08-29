@@ -172,7 +172,10 @@ async function handleWeatherForecast(req, res) {
     peak_wind_kmh: Math.max(...result.days.map((d) => d.wind_max_kmh ?? 0)),
     peak_gust_kmh: Math.max(...result.days.map((d) => d.wind_gust_max_kmh ?? 0)),
     days: result.days,
-    checked_at: new Date().toISOString(),
+    // The forecast may be served from a short-lived cache (see
+    // weatherForecast.js) rather than fetched fresh for this request, so
+    // this is when the underlying data was actually pulled, not now.
+    checked_at: result.fetchedAt,
   });
 }
 

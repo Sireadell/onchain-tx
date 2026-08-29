@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildApp } from '../app.js';
+import { __clearWeatherCachesForTesting } from '../lib/weatherForecast.js';
 
 function startServer(t) {
   const server = buildApp().listen(0);
@@ -73,6 +74,7 @@ test('storm-alert: the window starts now, not at midnight', async (t) => {
 // rate limit was being reported to callers as invalid_input instead of a
 // real error status.
 test('storm-alert: an upstream failure is reported as a real error, not invalid_input', async (t) => {
+  __clearWeatherCachesForTesting();
   const realFetch = global.fetch;
   global.fetch = async (url) => {
     if (String(url).includes('open-meteo.com')) {
@@ -89,4 +91,15 @@ test('storm-alert: an upstream failure is reported as a real error, not invalid_
   assert.equal(body.status, 'error');
   assert.doesNotMatch(body.summary, /invalid_input/);
   assert.match(body.summary, /temporarily unavailable/);
+});
+
+// Same fix as weather-forecast: a repeated question for the same place
+// must be served from cache instead of re-hitting Open-Meteo.
+test('storm-alert: a repeated question for the same place is served from cache, not refetched', async (t) => {
+  __clearWeatherCachesForTesting();
+  const base = startServer(t);
+  const first = await (await fetch(`${base}/storm-alert?location=Nairobi`)).json();
+  const second = await (await fetch(`${base}/storm-alert?location=Nairobi`)).json();
+  assert.equal(first.status, 'ok');
+  assert.equal(second.checked_at, first.checked_at, 'a cached answer must report when the data was actually fetched, not the request time');
 });

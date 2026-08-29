@@ -53,6 +53,73 @@ export function describeWeatherCode(code) {
   return WEATHER_CODE_TEXT[code] ?? `unrecognized condition code ${code}`;
 }
 
+// A small in-memory cache, per key, with its own TTL. Added 2026-08-29
+// alongside the WeatherUpstreamError split: the real fix for Render's
+// shared egress IP getting rate-limited by Open-Meteo is to stop asking it
+// the same question over and over. Two competing miners on these intents
+// (livecert, confirmed live) do exactly this — repeated requests for the
+// same place return the same fetched_at timestamp for roughly a minute or
+// two before a fresh one appears. A single Node process is the whole of
+// this miner's runtime, so a plain Map is enough; no shared store needed.
+// Capped so an unusual traffic spike can't grow this unbounded — oldest
+// entry evicted first, via Map's insertion order.
+class TtlCache {
+  constructor(maxEntries = 500) {
+    this.maxEntries = maxEntries;
+    this.store = new Map();
+  }
+
+  get(key) {
+    const entry = this.store.get(key);
+    if (!entry) return undefined;
+    if (Date.now() > entry.expiresAt) {
+      this.store.delete(key);
+      return undefined;
+    }
+    return entry.value;
+  }
+
+  set(key, value, ttlMs) {
+    if (this.store.size >= this.maxEntries && !this.store.has(key)) {
+      const oldestKey = this.store.keys().next().value;
+      this.store.delete(oldestKey);
+    }
+    this.store.set(key, { value, expiresAt: Date.now() + ttlMs });
+  }
+}
+
+// Coordinates for a place name never change, so this can be cached far
+// longer than the forecast itself — long enough that, in practice, a
+// second question about the same place almost never re-geocodes.
+const GEOCODE_CACHE_TTL_MS = Number(process.env.WEATHER_GEOCODE_CACHE_TTL_MS) || 6 * 60 * 60 * 1000;
+const geocodeCache = new TtlCache();
+
+// Matches the window confirmed live against a competing miner on these
+// intents: repeated questions about the same place inside this window get
+// the same answer instead of a fresh Open-Meteo call, which is what
+// actually relieves the shared-IP rate limit rather than just relabeling
+// it when it happens.
+const FORECAST_CACHE_TTL_MS = Number(process.env.WEATHER_FORECAST_CACHE_TTL_MS) || 90_000;
+const forecastCache = new TtlCache();
+const stormCache = new TtlCache();
+
+// Test-only: forces a real network attempt on the next call for a place
+// this process has already cached, regardless of test execution order.
+// Without this, a test asserting on upstream-failure behavior can be
+// silently served a real cached success from an earlier test instead of
+// ever reaching the network.
+export function __clearWeatherCachesForTesting() {
+  geocodeCache.store.clear();
+  forecastCache.store.clear();
+  stormCache.store.clear();
+}
+
+// Rounded to ~1km — enough to treat "London" and a "lat,lon" a few streets
+// apart as the same cache entry, without merging genuinely different towns.
+function roundCoord(n) {
+  return Math.round(n * 100) / 100;
+}
+
 // One retry, short backoff, only for 429 — this is specifically for
 // Render's shared egress IP getting rate-limited by Open-Meteo, which
 // clears within seconds far more often than it persists. Anything else
@@ -99,6 +166,13 @@ export async function resolveLocation(input) {
   if (candidates.length === 0) throw new WeatherLookupError(`no place name found in '${input}'`);
 
   for (const candidate of candidates) {
+    const cacheKey = candidate.trim().toLowerCase();
+    const cached = geocodeCache.get(cacheKey);
+    if (cached !== undefined) {
+      if (cached === null) continue; // cached "this candidate has no match"
+      return cached;
+    }
+
     const url = `${GEOCODE_URL}?name=${encodeURIComponent(candidate)}&count=1&format=json`;
     let body;
     try {
@@ -110,9 +184,14 @@ export async function resolveLocation(input) {
       continue;
     }
     const hit = body?.results?.[0];
-    if (!hit) continue;
+    if (!hit) {
+      geocodeCache.set(cacheKey, null, GEOCODE_CACHE_TTL_MS);
+      continue;
+    }
     const label = [hit.name, hit.admin1, hit.country].filter(Boolean).join(', ');
-    return { name: label, latitude: hit.latitude, longitude: hit.longitude };
+    const resolved = { name: label, latitude: hit.latitude, longitude: hit.longitude };
+    geocodeCache.set(cacheKey, resolved, GEOCODE_CACHE_TTL_MS);
+    return resolved;
   }
   throw new WeatherLookupError(`no location found matching '${input}'`);
 }
@@ -135,6 +214,11 @@ export async function fetchForecast(input, days = 3, startDay = 0) {
   const location = await resolveLocation(input);
   const span = Math.min(Math.max(days, 1), 16);
   const offset = Math.min(Math.max(startDay, 0), 15);
+
+  const cacheKey = `${roundCoord(location.latitude)},${roundCoord(location.longitude)}|${span}|${offset}`;
+  const cached = forecastCache.get(cacheKey);
+  if (cached) return { ...cached, name: location.name };
+
   const params = new URLSearchParams({
     latitude: location.latitude,
     longitude: location.longitude,
@@ -162,7 +246,9 @@ export async function fetchForecast(input, days = 3, startDay = 0) {
   })).slice(offset, offset + span);
 
   if (daysOut.length === 0) throw new WeatherLookupError(`the forecast does not reach that far ahead for '${input}'`);
-  return { ...location, timezone: body.timezone ?? null, days: daysOut };
+  const result = { ...location, timezone: body.timezone ?? null, days: daysOut, fetchedAt: new Date().toISOString() };
+  forecastCache.set(cacheKey, result, FORECAST_CACHE_TTL_MS);
+  return result;
 }
 
 // Beaufort wind-force scale, by max gust speed in km/h. Used to grade
@@ -190,6 +276,11 @@ const SEVERE_HAIL_CODES = new Set([96, 99]);
 export async function fetchStormRisk(input, hours = 48) {
   const location = await resolveLocation(input);
   const span = Math.min(Math.max(hours, 1), 16 * 24);
+
+  const cacheKey = `${roundCoord(location.latitude)},${roundCoord(location.longitude)}|${span}`;
+  const cached = stormCache.get(cacheKey);
+  if (cached) return { ...cached, name: location.name };
+
   const params = new URLSearchParams({
     latitude: location.latitude,
     longitude: location.longitude,
@@ -239,7 +330,7 @@ export async function fetchStormRisk(input, hours = 48) {
   // into the wind term, which would misreport a still-air electrical storm.
   const riskScore = Math.min(1, Number((force / 12 + (thunderstormHours > 0 ? 0.2 : 0) + (severeHailHours > 0 ? 0.2 : 0)).toFixed(2)));
 
-  return {
+  const result = {
     ...location,
     timezone: body.timezone ?? null,
     hours: gusts.length,
@@ -255,5 +346,12 @@ export async function fetchStormRisk(input, hours = 48) {
     beaufort_force: force,
     thunderstorm_hours: thunderstormHours,
     severe_hail_hours: severeHailHours,
+    fetchedAt: new Date().toISOString(),
   };
+  // Cached briefly rather than hitting Open-Meteo on every question — see
+  // the note on FORECAST_CACHE_TTL_MS above. The window_start this freezes
+  // can drift up to that TTL behind "now" for a cached answer, which is
+  // negligible next to the multi-hour drift the midnight-start bug had.
+  stormCache.set(cacheKey, result, FORECAST_CACHE_TTL_MS);
+  return result;
 }
