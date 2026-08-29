@@ -7,12 +7,17 @@
 //
 // coin_id here is the same CoinGecko-style slug the rest of this miner
 // already accepts (e.g. "bitcoin", "ethereum"). CoinPaprika's own ids are
-// "<symbol>-<slug>" (e.g. "btc-bitcoin"), so a slug -> id lookup is built
-// from CoinPaprika's full coin list (/v1/coins, ~13k active assets) and
-// cached for COIN_LIST_TTL_MS. Some slugs collide across multiple listed
-// assets (e.g. "bitcoin" also names an unrelated rank-10000+ token); the
-// lower `rank` value is kept, matching how CoinGecko's own "bitcoin" id
-// always resolves to the dominant asset rather than a copycat.
+// "<symbol>-<slug>" (e.g. "btc-bitcoin"), so a caller-supplied coin_id is
+// resolved to a real asset id via CoinPaprika's search endpoint
+// (/v1/search), not by downloading its full ~13k-asset coin list. That
+// full-list approach was the first design here and was replaced the same
+// day: it fetched 7.4MB on the first crypto-price call after every
+// process restart, and Render's free tier makes that restart happen on
+// every redeploy (and, without an active keepalive, on every wake from
+// idle) — a ~1.5-2s tax on whichever real request happened to be first.
+// /v1/search returns the same exact-match result for a few KB in well
+// under a second, live-checked 2026-08-29, and resolved ids are cached
+// here afterward so the same input never pays for a second search.
 
 import { checkBudget } from './ankrRpc.js';
 import { tokenize } from './entityExtract.js';
@@ -20,20 +25,18 @@ import { tokenize } from './entityExtract.js';
 const CALL_TIMEOUT_MS = Number(process.env.COINPAPRIKA_CALL_TIMEOUT_MS) || 5_000;
 const RETRY_DELAYS_MS = [500, 1_000];
 const PRICE_CACHE_TTL_MS = Number(process.env.COINPAPRIKA_CACHE_TTL_MS) || 60_000;
-const COIN_LIST_TTL_MS = 12 * 60 * 60 * 1000;
+// Name/ticker -> asset id almost never changes, so this is cached far
+// longer than a price quote — a resolution, once made, should not need
+// another network round trip for the rest of the process's life under
+// normal traffic.
+const RESOLUTION_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 const priceCache = new Map();
-let slugToId = null;
-let symbolToId = null;
-let coinListCachedAt = 0;
-let coinListPromise = null;
+const resolutionCache = new Map();
 
 export function resetCoinPaprikaCache() {
   priceCache.clear();
-  slugToId = null;
-  symbolToId = null;
-  coinListCachedAt = 0;
-  coinListPromise = null;
+  resolutionCache.clear();
 }
 
 export class CoinPaprikaNotFoundError extends Error {
@@ -90,69 +93,60 @@ async function fetchJsonWithRetry(url) {
   }
 }
 
-// Builds both lookup maps together off the same coin list fetch: slug ->
-// id ("bitcoin" -> "btc-bitcoin", for the coin_id this miner already
-// accepts) and symbol -> id ("BTC" -> "btc-bitcoin", for a caller or an
-// LLM sending the ticker instead). Same lowest-rank-wins collision rule
-// applies to both, since a symbol can collide across active assets too.
-async function getCoinIdMaps() {
-  if (slugToId && symbolToId && Date.now() - coinListCachedAt < COIN_LIST_TTL_MS) {
-    return { slugToId, symbolToId };
-  }
-  if (!coinListPromise) {
-    coinListPromise = fetchJsonWithRetry('https://api.coinpaprika.com/v1/coins')
-      .then((coins) => {
-        const slugs = new Map();
-        const symbols = new Map();
-        for (const coin of coins) {
-          if (!coin.is_active) continue;
-          const dashIndex = coin.id.indexOf('-');
-          const slug = dashIndex === -1 ? coin.id : coin.id.slice(dashIndex + 1);
-          const rank = coin.rank || Infinity;
-          const entry = { id: coin.id, rank };
+// Searches CoinPaprika for `query` and returns the best exact match: a
+// result whose slug (the part of its id after the symbol prefix) or
+// symbol equals `query` exactly, case-insensitive — never a loose
+// full-text match, since /v1/search ranks by relevance, not correctness,
+// and a fuzzy hit here would silently price the wrong asset. Among exact
+// matches, the lowest `rank` wins (e.g. "bitcoin" also names an unrelated
+// rank-10000+ copycat token; the real Bitcoin, rank 1, wins), matching
+// how CoinGecko's own "bitcoin" id always resolves to the dominant asset.
+// Returns null if nothing matched exactly.
+async function searchExactAsset(query) {
+  const normalized = query.toLowerCase();
+  const url = `https://api.coinpaprika.com/v1/search/?q=${encodeURIComponent(query)}&c=currencies&limit=10`;
+  const body = await fetchJsonWithRetry(url);
+  const candidates = body?.currencies ?? [];
 
-          const existingSlug = slugs.get(slug);
-          if (!existingSlug || rank < existingSlug.rank) slugs.set(slug, entry);
-
-          if (coin.symbol) {
-            const symbolKey = coin.symbol.toLowerCase();
-            const existingSymbol = symbols.get(symbolKey);
-            if (!existingSymbol || rank < existingSymbol.rank) symbols.set(symbolKey, entry);
-          }
-        }
-        slugToId = slugs;
-        symbolToId = symbols;
-        coinListCachedAt = Date.now();
-        return { slugToId: slugs, symbolToId: symbols };
-      })
-      .finally(() => {
-        coinListPromise = null;
-      });
+  let best = null;
+  for (const coin of candidates) {
+    if (!coin.is_active) continue;
+    const dashIndex = coin.id.indexOf('-');
+    const slug = dashIndex === -1 ? coin.id : coin.id.slice(dashIndex + 1);
+    const isExactMatch = slug === normalized || (coin.symbol && coin.symbol.toLowerCase() === normalized);
+    if (!isExactMatch) continue;
+    const rank = coin.rank || Infinity;
+    if (!best || rank < best.rank) best = { id: coin.id, rank };
   }
-  return coinListPromise;
+  return best;
 }
 
 // Resolves a caller-supplied coin_id to a CoinPaprika asset id, trying
-// progressively looser interpretations: the input as a slug, then as a
-// ticker symbol, then — if it looks like free text rather than a single
-// token — each word in it as a slug or symbol, in order, first hit wins.
-// Live-checked 2026-08-29: this is what turns "BTC" and "What is bitcoin
-// worth" into the same resolved asset as plain "bitcoin".
+// progressively looser interpretations: the input as a whole (as a slug
+// or a ticker symbol, either resolves via searchExactAsset), then — if
+// that fails and the input looks like free text rather than a single
+// token — every word in it searched in parallel, lowest rank among any
+// exact-match hits wins. Live-checked 2026-08-29: this is what turns
+// "BTC" and "What is bitcoin worth" into the same resolved asset as plain
+// "bitcoin". Resolutions are cached by the exact input string, so a
+// second question phrased identically never searches again.
 async function resolveCoinId(coinId) {
-  const { slugToId: slugs, symbolToId: symbols } = await getCoinIdMaps();
-  const normalized = coinId.toLowerCase();
+  const cacheKey = coinId.toLowerCase();
+  const cached = resolutionCache.get(cacheKey);
+  if (cached && Date.now() - cached.storedAt < RESOLUTION_CACHE_TTL_MS) return cached.entry;
 
-  const direct = slugs.get(normalized) ?? symbols.get(normalized);
-  if (direct) return direct;
+  let entry = await searchExactAsset(coinId);
 
-  if (/\s/.test(coinId)) {
-    for (const word of tokenize(coinId)) {
-      const hit = slugs.get(word) ?? symbols.get(word);
-      if (hit) return hit;
+  if (!entry && /\s/.test(coinId)) {
+    const words = tokenize(coinId);
+    const results = await Promise.all(words.map((word) => searchExactAsset(word).catch(() => null)));
+    for (const hit of results) {
+      if (hit && (!entry || hit.rank < entry.rank)) entry = hit;
     }
   }
 
-  return null;
+  resolutionCache.set(cacheKey, { entry, storedAt: Date.now() });
+  return entry;
 }
 
 // Returns { priceUsd, symbol, marketCapUsd, change24hPct, asOfUnix } for a

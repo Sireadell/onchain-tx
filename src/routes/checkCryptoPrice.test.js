@@ -41,15 +41,18 @@ function mockFetch(t, handler) {
 // coin_id mode races CoinPaprika, CoinGecko, and DefiLlama (see
 // checkCryptoPrice.js header comment) — mocks all three hosts so tests
 // stay hermetic instead of hitting real APIs. A test that doesn't pass a
-// `coinpaprika` handler gets the "coin not listed" shape by default (empty
-// coin list -> no slug match), since CoinPaprika is now the preferred
-// source and most existing tests are specifically about the other two.
+// `coinpaprika` handler gets the "no exact match" shape by default (empty
+// search results -> no resolution), since CoinPaprika is now the
+// preferred source and most existing tests are specifically about the
+// other two. `coinpaprika` mocks the resolution call
+// (/v1/search/?q=...&c=currencies) CoinPaprika's client makes to turn a
+// coin_id into a real asset id — see coinPaprikaApi.js's searchExactAsset.
 function mockFetchWithCoinGecko(t, { coinpaprika, coinpaprikaTicker, coingecko, defillama } = {}) {
   const original = globalThis.fetch;
   globalThis.fetch = (url, ...rest) => {
-    if (typeof url === 'string' && url.startsWith('https://api.coinpaprika.com/v1/coins')) {
+    if (typeof url === 'string' && url.startsWith('https://api.coinpaprika.com/v1/search/')) {
       if (coinpaprika) return coinpaprika(url, ...rest);
-      return { status: 200, json: async () => [] };
+      return { status: 200, json: async () => ({ currencies: [] }) };
     }
     if (typeof url === 'string' && url.startsWith('https://api.coinpaprika.com/v1/tickers/')) {
       if (!coinpaprikaTicker) throw new Error(`unexpected CoinPaprika ticker call in this test: ${url}`);
@@ -112,10 +115,12 @@ test('crypto-price: successful coin_id lookup prefers CoinPaprika over CoinGecko
   mockFetchWithCoinGecko(t, {
     coinpaprika: async () => ({
       status: 200,
-      json: async () => [
-        { id: 'btc-bitcoin', symbol: 'BTC', is_active: true, rank: 1 },
-        { id: 'bitcoin-bitcoin', symbol: 'BITCOIN', is_active: true, rank: 10622 },
-      ],
+      json: async () => ({
+        currencies: [
+          { id: 'btc-bitcoin', symbol: 'BTC', is_active: true, rank: 1 },
+          { id: 'bitcoin-bitcoin', symbol: 'BITCOIN', is_active: true, rank: 10622 },
+        ],
+      }),
     }),
     coinpaprikaTicker: async (url) => {
       assert.equal(url, 'https://api.coinpaprika.com/v1/tickers/btc-bitcoin');
@@ -150,7 +155,7 @@ test('crypto-price: multi-source summary names the sources that actually answere
   mockFetchWithCoinGecko(t, {
     coinpaprika: async () => ({
       status: 200,
-      json: async () => [{ id: 'btc-bitcoin', symbol: 'BTC', is_active: true, rank: 1 }],
+      json: async () => ({ currencies: [{ id: 'btc-bitcoin', symbol: 'BTC', is_active: true, rank: 1 }] }),
     }),
     coinpaprikaTicker: async () => ({
       status: 200,
@@ -181,10 +186,12 @@ test('crypto-price: CoinPaprika slug collision resolves to the lower-rank (domin
   mockFetchWithCoinGecko(t, {
     coinpaprika: async () => ({
       status: 200,
-      json: async () => [
-        { id: 'bitcoin-bitcoin', symbol: 'BITCOIN', is_active: true, rank: 10622 },
-        { id: 'btc-bitcoin', symbol: 'BTC', is_active: true, rank: 1 },
-      ],
+      json: async () => ({
+        currencies: [
+          { id: 'bitcoin-bitcoin', symbol: 'BITCOIN', is_active: true, rank: 10622 },
+          { id: 'btc-bitcoin', symbol: 'BTC', is_active: true, rank: 1 },
+        ],
+      }),
     }),
     coinpaprikaTicker: async (url) => {
       requestedId = url;
