@@ -2,11 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildApp } from '../app.js';
 import { resetDefiLlamaCache } from '../lib/defiLlamaApi.js';
-import { resetCoinGeckoCache } from '../lib/coinGeckoApi.js';
 import { resetCoinPaprikaCache } from '../lib/coinPaprikaApi.js';
 
 function startServer(t) {
-  resetCoinGeckoCache();
   resetCoinPaprikaCache();
   const server = buildApp().listen(0);
   t.after(() => {
@@ -38,16 +36,16 @@ function mockFetch(t, handler) {
   });
 }
 
-// coin_id mode races CoinPaprika, CoinGecko, and DefiLlama (see
-// checkCryptoPrice.js header comment) — mocks all three hosts so tests
-// stay hermetic instead of hitting real APIs. A test that doesn't pass a
-// `coinpaprika` handler gets the "no exact match" shape by default (empty
-// search results -> no resolution), since CoinPaprika is now the
-// preferred source and most existing tests are specifically about the
-// other two. `coinpaprika` mocks the resolution call
-// (/v1/search/?q=...&c=currencies) CoinPaprika's client makes to turn a
-// coin_id into a real asset id — see coinPaprikaApi.js's searchExactAsset.
-function mockFetchWithCoinGecko(t, { coinpaprika, coinpaprikaTicker, coingecko, defillama } = {}) {
+// coin_id mode races CoinPaprika and DefiLlama (see checkCryptoPrice.js
+// header comment) — mocks both hosts so tests stay hermetic instead of
+// hitting real APIs. A test that doesn't pass a `coinpaprika` handler gets
+// the "no exact match" shape by default (empty search results -> no
+// resolution), since CoinPaprika is the preferred source and most
+// existing tests are specifically about the other one. `coinpaprika`
+// mocks the resolution call (/v1/search/?q=...&c=currencies) CoinPaprika's
+// client makes to turn a coin_id into a real asset id — see
+// coinPaprikaApi.js's searchExactAsset.
+function mockFetchWithCoinGecko(t, { coinpaprika, coinpaprikaTicker, defillama } = {}) {
   const original = globalThis.fetch;
   globalThis.fetch = (url, ...rest) => {
     if (typeof url === 'string' && url.startsWith('https://api.coinpaprika.com/v1/search/')) {
@@ -57,10 +55,6 @@ function mockFetchWithCoinGecko(t, { coinpaprika, coinpaprikaTicker, coingecko, 
     if (typeof url === 'string' && url.startsWith('https://api.coinpaprika.com/v1/tickers/')) {
       if (!coinpaprikaTicker) throw new Error(`unexpected CoinPaprika ticker call in this test: ${url}`);
       return coinpaprikaTicker(url, ...rest);
-    }
-    if (typeof url === 'string' && url.startsWith('https://api.coingecko.com/')) {
-      if (!coingecko) throw new Error('unexpected CoinGecko call in this test');
-      return coingecko(url, ...rest);
     }
     if (typeof url === 'string' && url.startsWith('https://coins.llama.fi/')) {
       if (!defillama) throw new Error('unexpected DefiLlama call in this test');
@@ -110,7 +104,7 @@ test('crypto-price: malformed token address answered with guidance', async (t) =
   assert.equal((await res.json()).status, 'invalid_input');
 });
 
-test('crypto-price: successful coin_id lookup prefers CoinPaprika over CoinGecko', async (t) => {
+test('crypto-price: successful coin_id lookup uses CoinPaprika', async (t) => {
   resetDefiLlamaCache();
   mockFetchWithCoinGecko(t, {
     coinpaprika: async () => ({
@@ -132,9 +126,6 @@ test('crypto-price: successful coin_id lookup prefers CoinPaprika over CoinGecko
           quotes: { USD: { price: 77807.55, market_cap: 1562110242633, percent_change_24h: -2.68 } },
         }),
       };
-    },
-    coingecko: async () => {
-      throw new Error('CoinGecko should not be needed when CoinPaprika succeeds');
     },
   });
   const base = startServer(t);
@@ -212,33 +203,11 @@ test('crypto-price: CoinPaprika slug collision resolves to the lower-rank (domin
   assert.equal(requestedId, 'https://api.coinpaprika.com/v1/tickers/btc-bitcoin');
 });
 
-test('crypto-price: successful coin_id lookup uses CoinGecko directly', async (t) => {
+test('crypto-price: CoinPaprika failure falls back to DefiLlama', async (t) => {
   resetDefiLlamaCache();
   mockFetchWithCoinGecko(t, {
-    coingecko: async () => ({
-      status: 200,
-      json: async () => ({ bitcoin: { usd: 64549.31, usd_market_cap: 1270000000000, usd_24h_change: 3.25, last_updated_at: 1787090150 } }),
-    }),
-  });
-  const base = startServer(t);
-
-  const res = await fetch(`${base}/crypto-price?coin_id=bitcoin`);
-  assert.equal(res.status, 200);
-  const body = await res.json();
-  assert.equal(body.status, 'ok');
-  assert.equal(body.query_type, 'coin_id');
-  assert.equal(body.price_usd, 64549.31);
-  assert.equal(body.symbol, 'bitcoin');
-  assert.equal(body.price_source, 'coingecko');
-  assert.equal(body.change_24h_pct, 3.25);
-  assert.equal(body.market_cap_usd, 1270000000000);
-  assert.match(body.summary, /up 3.25%/);
-});
-
-test('crypto-price: CoinGecko failure falls back to DefiLlama', async (t) => {
-  resetDefiLlamaCache();
-  mockFetchWithCoinGecko(t, {
-    coingecko: async () => ({ status: 500, statusText: 'Internal Server Error' }),
+    // Default (no `coinpaprika` handler) -> empty search results -> no
+    // resolution -> CoinPaprikaNotFoundError, exercising the fallback.
     defillama: async () => ({
       status: 200,
       json: async () => ({
@@ -277,9 +246,9 @@ test('crypto-price: successful chain_token lookup', async (t) => {
 
 test('crypto-price: unknown coin returns not_found, not an error', async (t) => {
   resetDefiLlamaCache();
-  // Neither CoinGecko nor the DefiLlama fallback recognize the id.
+  // Default (no `coinpaprika` handler) -> no resolution; DefiLlama also
+  // doesn't recognize the id.
   mockFetchWithCoinGecko(t, {
-    coingecko: async () => ({ status: 200, json: async () => ({}) }),
     defillama: async () => ({ status: 200, json: async () => ({ coins: {} }) }),
   });
   const base = startServer(t);

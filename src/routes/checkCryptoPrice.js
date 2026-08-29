@@ -6,49 +6,50 @@
 // /tvl's `tvl_chain`: DefiLlama's chain namespace isn't restricted to our
 // five-chain enum.
 //
-// coin_id mode queries CoinPaprika, CoinGecko, and DefiLlama's
-// coins.llama.fi proxy concurrently and prefers whichever of the first two
-// answers, in that order, over DefiLlama's cache. CoinPaprika is the
-// primary source as of 2026-08-29: CoinGecko's free API returns 403 from
-// Render's production IP (confirmed live), which silently nulled out
-// market_cap_usd and change_24h_pct in every prod response even though
-// the code for them was correct. CoinGecko stays in the race as a bonus
-// source when it does work (local dev, other hosts) and DefiLlama remains
-// the last-resort fallback. chain_token mode is unaffected — it stays on
-// DefiLlama, the only source of the three that looks up a price by
-// on-chain contract address at all.
+// coin_id mode queries CoinPaprika and DefiLlama's coins.llama.fi proxy
+// concurrently and prefers CoinPaprika. CoinPaprika became primary
+// 2026-08-29: CoinGecko's free API returns 403 from Render's production
+// IP (confirmed live), which silently nulled out market_cap_usd and
+// change_24h_pct in every prod response even though the code for them was
+// correct. CoinGecko was dropped from this race the same day, also
+// live-measured: /crypto-price ran ~2-2.3s in production regardless of
+// which coin was asked for, while each source individually measured
+// under 1.2s — meaning the response was blocking on the slowest of three
+// sources to settle even after the fastest had already answered.
+// CoinGecko was one of those three and, per the above, never succeeds in
+// this environment at all: it was pure wasted latency (a full DNS+TLS+
+// HTTP round trip) and a wasted external request on every single
+// crypto-price call, for zero benefit. DefiLlama stays in the race — it
+// does succeed in prod and gives real fallback coverage plus the
+// multi-source range in the summary below. chain_token mode is unaffected
+// — it stays on DefiLlama, the only source of the two that looks up a
+// price by on-chain contract address at all.
 
 import { Router } from 'express';
 import { getCoinPrice, CoinNotFoundError } from '../lib/defiLlamaApi.js';
-import { getCoinGeckoPrice } from '../lib/coinGeckoApi.js';
 import { getCoinPaprikaPrice } from '../lib/coinPaprikaApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 
-// Tries all three sources at once; any failure (rate limit, blocked IP,
-// timeout, unrecognized id) just drops that source rather than failing
-// the whole request — a partial answer beats no answer. Preference order
-// for which source's numbers to lead with: coinpaprika > coingecko >
-// defillama.
+// Tries both sources at once; either failing (rate limit, timeout,
+// unrecognized id) just drops that source rather than failing the whole
+// request — a partial answer beats no answer. CoinPaprika's numbers lead
+// when available.
 async function getFreshestCoinPrice(coinId) {
-  const [coinPaprika, coinGecko, defiLlama] = await Promise.allSettled([
+  const [coinPaprika, defiLlama] = await Promise.allSettled([
     getCoinPaprikaPrice(coinId),
-    getCoinGeckoPrice(coinId),
     getCoinPrice(`coingecko:${coinId}`),
   ]);
-  if (coinPaprika.status === 'rejected' && coinGecko.status === 'rejected' && defiLlama.status === 'rejected') {
+  if (coinPaprika.status === 'rejected' && defiLlama.status === 'rejected') {
     throw defiLlama.reason;
   }
 
   const primary = coinPaprika.status === 'fulfilled'
     ? { ...coinPaprika.value, source: 'coinpaprika' }
-    : coinGecko.status === 'fulfilled'
-      ? { ...coinGecko.value, symbol: null, source: 'coingecko' }
-      : { ...defiLlama.value, source: 'defillama' };
+    : { ...defiLlama.value, source: 'defillama' };
 
   const sources = [];
   if (coinPaprika.status === 'fulfilled') sources.push({ source: 'coinpaprika', price_usd: coinPaprika.value.priceUsd });
-  if (coinGecko.status === 'fulfilled') sources.push({ source: 'coingecko', price_usd: coinGecko.value.priceUsd });
   if (defiLlama.status === 'fulfilled') sources.push({ source: 'defillama', price_usd: defiLlama.value.priceUsd });
   const prices = sources.map((item) => item.price_usd);
   return {
@@ -122,9 +123,8 @@ async function handleCryptoPrice(req, res) {
     return res.status(502).json({ status: 'error', summary: 'upstream price data call failed', confidence: 1.0, error: err.message });
   }
 
-  // CoinGecko's simple/price endpoint doesn't return a ticker symbol
-  // (DefiLlama's does) — fall back to the coin_id itself rather than an
-  // all-caps mangling of it (e.g. "bitcoin", not "BITCOIN").
+  // Both remaining sources return a real ticker symbol; this fallback only
+  // guards the case where a source unexpectedly omits one.
   const symbol = priceInfo.symbol ?? (coinId || null);
   const as_of = priceInfo.asOfUnix != null ? new Date(priceInfo.asOfUnix * 1000).toISOString() : new Date().toISOString();
   const changeText = typeof priceInfo.change24hPct === 'number'
@@ -133,7 +133,7 @@ async function handleCryptoPrice(req, res) {
   const marketCapText = typeof priceInfo.marketCapUsd === 'number'
     ? `, with a market capitalization of about $${priceInfo.marketCapUsd.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
     : '';
-  const SOURCE_LABELS = { coinpaprika: 'CoinPaprika', coingecko: 'CoinGecko', defillama: 'DefiLlama' };
+  const SOURCE_LABELS = { coinpaprika: 'CoinPaprika', defillama: 'DefiLlama' };
   const sourceNames = (priceInfo.sources ?? []).map((item) => SOURCE_LABELS[item.source] ?? item.source);
   const sourceText = priceInfo.sourceCount > 1
     ? ` ${new Intl.ListFormat('en', { type: 'conjunction' }).format(sourceNames)} currently report a range of $${priceInfo.priceRangeLowUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })} to $${priceInfo.priceRangeHighUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })}.`
