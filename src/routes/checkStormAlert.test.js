@@ -68,3 +68,25 @@ test('storm-alert: the window starts now, not at midnight', async (t) => {
   assert.ok(driftHours <= 1.5, `window starts ${driftHours.toFixed(1)}h from now (${body.window_start}, now ${localNow.toISOString()})`);
   assert.ok(new Date(body.peak_gust_time) >= startedAt, 'peak gust must be inside the future window');
 });
+
+// Same defect as weather-forecast (found live 2026-08-29): an upstream
+// rate limit was being reported to callers as invalid_input instead of a
+// real error status.
+test('storm-alert: an upstream failure is reported as a real error, not invalid_input', async (t) => {
+  const realFetch = global.fetch;
+  global.fetch = async (url) => {
+    if (String(url).includes('open-meteo.com')) {
+      return new Response('rate limited', { status: 429 });
+    }
+    return realFetch(url);
+  };
+  t.after(() => { global.fetch = realFetch; });
+
+  const base = startServer(t);
+  const res = await fetch(`${base}/storm-alert?location=Miami`);
+  const body = await res.json();
+  assert.equal(res.status, 502);
+  assert.equal(body.status, 'error');
+  assert.doesNotMatch(body.summary, /invalid_input/);
+  assert.match(body.summary, /temporarily unavailable/);
+});

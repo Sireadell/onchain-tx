@@ -9,7 +9,7 @@
 // answers about rain, in London, tomorrow.
 
 import { Router } from 'express';
-import { fetchForecast, WeatherLookupError } from '../lib/weatherForecast.js';
+import { fetchForecast, WeatherLookupError, WeatherUpstreamError } from '../lib/weatherForecast.js';
 import { parseWhen, parseFocus } from '../lib/questionParse.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 
@@ -135,7 +135,19 @@ async function handleWeatherForecast(req, res) {
         `I cannot forecast weather for ${quoteParam(rawLocation)}: ${err.message}. Pass a recognizable place name, "lat,lon" coordinates, or a question naming the place.`,
       );
     }
-    return res.status(502).json({ status: 'error', summary: 'weather forecast failed', confidence: 1.0, error: err.message });
+    // WeatherUpstreamError (and anything unexpected) is TxLens's fault, not
+    // the caller's — a real error status, not invalid_input. See the note
+    // on WeatherUpstreamError in weatherForecast.js: reporting an upstream
+    // outage as bad input would hide genuine downtime from the scorer.
+    const upstream = err instanceof WeatherUpstreamError;
+    return res.status(502).json({
+      status: 'error',
+      summary: upstream
+        ? `The weather forecast service is temporarily unavailable: ${err.message}. This is not a problem with the request; retry shortly.`
+        : 'weather forecast failed',
+      confidence: 1.0,
+      error: err.message,
+    });
   }
 
   const summary = summarize(result.name, result.days, when, focus);

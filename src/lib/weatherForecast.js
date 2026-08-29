@@ -9,10 +9,28 @@ const GEOCODE_URL = 'https://geocoding-api.open-meteo.com/v1/search';
 const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
 const CALL_TIMEOUT_MS = Number(process.env.WEATHER_TIMEOUT_MS) || 8_000;
 
+// The caller's input could not be resolved to an answer: no place found in
+// the text, or no place by that name exists. This is the caller's problem,
+// answered with respondUnusableInput (HTTP 200, status: invalid_input).
 export class WeatherLookupError extends Error {
   constructor(message) {
     super(message);
     this.name = 'WeatherLookupError';
+  }
+}
+
+// Open-Meteo itself failed to answer: rate-limited, timed out, or
+// unreachable. This is TxLens's problem, not the caller's, and must be
+// answered with a real error status rather than invalid_input — reporting
+// an upstream outage as bad input would hide genuine downtime, exactly
+// what unusableInput.js documents as the boundary between the two. Found
+// live 2026-08-29: Render's shared free-tier egress IP got rate-limited by
+// Open-Meteo, and every one of those 429s was being reported to callers as
+// if their question were unusable.
+export class WeatherUpstreamError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'WeatherUpstreamError';
   }
 }
 
@@ -35,17 +53,32 @@ export function describeWeatherCode(code) {
   return WEATHER_CODE_TEXT[code] ?? `unrecognized condition code ${code}`;
 }
 
-async function fetchJson(url, label) {
+// One retry, short backoff, only for 429 — this is specifically for
+// Render's shared egress IP getting rate-limited by Open-Meteo, which
+// clears within seconds far more often than it persists. Anything else
+// (4xx/5xx, timeout, network error) is TxLens's or Open-Meteo's fault
+// either way, so it fails immediately as a WeatherUpstreamError rather
+// than delaying an answer the retry can't fix.
+const RATE_LIMIT_RETRY_DELAY_MS = Number(process.env.WEATHER_RETRY_DELAY_MS) || 1_500;
+
+async function fetchJson(url, label, attempt = 1) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CALL_TIMEOUT_MS);
   try {
     const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) throw new WeatherLookupError(`${label} request failed with status ${res.status}`);
+    if (!res.ok) {
+      if (res.status === 429 && attempt === 1) {
+        clearTimeout(timer);
+        await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_RETRY_DELAY_MS));
+        return fetchJson(url, label, 2);
+      }
+      throw new WeatherUpstreamError(`${label} request failed with status ${res.status}`);
+    }
     return await res.json();
   } catch (err) {
-    if (err.name === 'AbortError') throw new WeatherLookupError(`${label} request timed out after ${CALL_TIMEOUT_MS}ms`);
-    if (err instanceof WeatherLookupError) throw err;
-    throw new WeatherLookupError(`${label} request failed: ${err.message}`);
+    if (err.name === 'AbortError') throw new WeatherUpstreamError(`${label} request timed out after ${CALL_TIMEOUT_MS}ms`);
+    if (err instanceof WeatherUpstreamError) throw err;
+    throw new WeatherUpstreamError(`${label} request failed: ${err.message}`);
   } finally {
     clearTimeout(timer);
   }

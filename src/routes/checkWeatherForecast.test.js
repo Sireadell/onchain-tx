@@ -77,3 +77,29 @@ test('weather-forecast: "tomorrow" forecasts tomorrow, not a range starting toda
   assert.equal(tomorrow.status, 'ok');
   assert.notEqual(tomorrow.days[0].date, today.days[0].date);
 });
+
+// Guards the mislabeling bug found live 2026-08-29: Render's shared
+// free-tier egress IP got rate-limited (429) by Open-Meteo, and every one
+// of those upstream failures was reported to callers as invalid_input —
+// "the question is unusable" — when the real cause was TxLens's own
+// upstream being unavailable. Stubs global fetch to force a persistent 429
+// (past the one built-in retry) and asserts the response is a real error
+// status, not a disguised-as-caller's-fault 200.
+test('weather-forecast: an upstream failure is reported as a real error, not invalid_input', async (t) => {
+  const realFetch = global.fetch;
+  global.fetch = async (url) => {
+    if (String(url).includes('open-meteo.com')) {
+      return new Response('rate limited', { status: 429 });
+    }
+    return realFetch(url);
+  };
+  t.after(() => { global.fetch = realFetch; });
+
+  const base = startServer(t);
+  const res = await fetch(`${base}/weather-forecast?location=London`);
+  const body = await res.json();
+  assert.equal(res.status, 502);
+  assert.equal(body.status, 'error');
+  assert.doesNotMatch(body.summary, /invalid_input/);
+  assert.match(body.summary, /temporarily unavailable/);
+});

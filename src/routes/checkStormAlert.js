@@ -9,7 +9,7 @@
 // Optional: hours (1-384, default 48, or read from the question).
 
 import { Router } from 'express';
-import { fetchStormRisk, WeatherLookupError } from '../lib/weatherForecast.js';
+import { fetchStormRisk, WeatherLookupError, WeatherUpstreamError } from '../lib/weatherForecast.js';
 import { parseWhen } from '../lib/questionParse.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 
@@ -67,7 +67,18 @@ async function handleStormAlert(req, res) {
         `I cannot assess storm risk for ${quoteParam(rawLocation)}: ${err.message}. Pass a recognizable place name, "lat,lon" coordinates, or a question naming the place.`,
       );
     }
-    return res.status(502).json({ status: 'error', summary: 'storm risk assessment failed', confidence: 1.0, error: err.message });
+    // WeatherUpstreamError is TxLens's fault, not the caller's — a real
+    // error status, not invalid_input. See the note on WeatherUpstreamError
+    // in weatherForecast.js.
+    const upstream = err instanceof WeatherUpstreamError;
+    return res.status(502).json({
+      status: 'error',
+      summary: upstream
+        ? `The storm forecast service is temporarily unavailable: ${err.message}. This is not a problem with the request; retry shortly.`
+        : 'storm risk assessment failed',
+      confidence: 1.0,
+      error: err.message,
+    });
   }
 
   const stormNote = result.thunderstorm_hours > 0
