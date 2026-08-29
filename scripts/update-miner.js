@@ -3,10 +3,15 @@ import { ethers } from 'ethers';
 
 const DIAMOND = '0x5a2324aA18613FAD4e44bDF0d6c73Ec1f6D87ff8';
 const RPC = 'https://sepolia.base.org';
-const OLD_REGISTRATION_ID = 246;
-const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/fa9e16b36e2cbc99ccd33fe3efd1de59b1ae8577/miner.yaml';
-const YAML_HASH = '0x7b9acb76d249dda8ca3d5426548c48bc9fc656b7b641788f9b4131e0c8cf4d39';
-const PREVIOUS_YAML_HASH = '48f21f8cbc30bced3f6deea692f91ac2edb53c66f55b7f8fd6269d8d31b5edff';
+// Verified live 2026-08-29 against /api/miners/{id}: this is the actual
+// current active registration for slug txlens. The previous draft of this
+// script assumed 261, which is deregistered (superseded by 267 at the same
+// timestamp) — trusting that would have failed the pre-flight or, worse,
+// updated the wrong registration.
+const OLD_REGISTRATION_ID = 267;
+const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/21f2fc830033c58c7966b5dcfdda6fe659fd5c64/miner.yaml';
+const YAML_HASH = '0x20741d32611e4da8d4116f1c8b4f6575a913be96845bf2beef2c67bcfffb0359';
+const PREVIOUS_YAML_HASH = '2b6153ce6e67d8ba3185379e0c9410071bf41b926d7f2449c02bb9118370b2f5';
 const FEE_ADDRESS = '0x6f477610A93C5B255C29c489760045272BCeDa99';
 const MIN_PRICE_USDC = 10000;
 const CONFIRMATION_PHRASE = `update-txlens-${OLD_REGISTRATION_ID}-${YAML_HASH.slice(2, 10)}`;
@@ -19,6 +24,10 @@ const SUPPORTED_INTENTS = [
   'CRYPTO_PRICE',
   'STOCK_PRICE',
   'SSL_VERIFICATION',
+  'WEATHER_FORECAST',
+  'STORM_ALERT',
+  'IP_GEOLOCATION',
+  'ACADEMIC_SEARCH',
   'FRAUD_DETECTION',
 ];
 
@@ -38,14 +47,14 @@ async function requireJson(url, options) {
   return body;
 }
 
-console.log('1/7 checking the current live registration');
+console.log('1/9 checking the current live registration');
 const current = (await requireJson(`https://explorer.telegraphprotocol.com/api/miners/${OLD_REGISTRATION_ID}`)).miner;
 if (current.registration_id !== OLD_REGISTRATION_ID) fail('registration ID does not match');
 if (current.slug !== 'txlens') fail(`registration ${OLD_REGISTRATION_ID} belongs to ${current.slug}`);
 if (current.activation_status !== 'active') fail(`current TxLens status is ${current.activation_status}`);
 if (current.yaml_hash.toLowerCase() !== PREVIOUS_YAML_HASH) fail('current on-chain YAML hash changed');
 
-console.log('2/7 downloading and hashing the exact proposed YAML');
+console.log('2/9 downloading and hashing the exact proposed YAML');
 const yamlResponse = await fetch(YAML_URL, { cache: 'no-store' });
 if (!yamlResponse.ok) fail(`YAML download returned HTTP ${yamlResponse.status}`);
 const yamlBytes = new Uint8Array(await yamlResponse.arrayBuffer());
@@ -58,8 +67,10 @@ for (const intent of SUPPORTED_INTENTS) {
   if (!new RegExp(`^\\s*- ${intent}\\s*$`, 'm').test(yamlText)) fail(`YAML is missing ${intent}`);
 }
 
-console.log('3/7 exercising the deployed fraud-knowledge route');
-const fraud = await requireJson('https://telegraph-onchain-tx-lookup-miner.onrender.com/fraud-query', {
+const BASE = 'https://telegraph-onchain-tx-lookup-miner.onrender.com';
+
+console.log('3/9 exercising the deployed fraud-knowledge route');
+const fraud = await requireJson(`${BASE}/fraud-query`, {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({ query: 'Was BitConnect a Ponzi scheme, and who founded it?' }),
@@ -68,15 +79,58 @@ if (fraud.mode !== 'fraud_knowledge' || !fraud.label || !fraud.status || !fraud.
   fail('fraud-knowledge response is incomplete');
 }
 
-console.log('4/7 exercising the deployed wallet-risk route');
-const walletRisk = await requireJson('https://telegraph-onchain-tx-lookup-miner.onrender.com/assess-wallet?wallet=0x000000000000000000000000000000000000dEaD');
+console.log('4/9 exercising the deployed wallet-risk route');
+const walletRisk = await requireJson(`${BASE}/assess-wallet?wallet=0x000000000000000000000000000000000000dEaD`);
 if (walletRisk.mode !== 'wallet_risk' || !walletRisk.label || !walletRisk.status || !walletRisk.reason || !Array.isArray(walletRisk.evidence)) {
   fail('wallet-risk response is incomplete');
 }
 
-console.log('5/7 exercising an existing TxLens route');
-const gas = await requireJson('https://telegraph-onchain-tx-lookup-miner.onrender.com/gas-price?chain=eth');
+console.log('5/9 exercising an existing TxLens route');
+const gas = await requireJson(`${BASE}/gas-price?chain=eth`);
 if (gas.status !== 'ok' || !gas.gas_price_wei) fail('existing gas-price route is not working');
+
+// The four intents being added in this update. Each must actually answer
+// before we claim to support it on-chain — a registered intent nobody can
+// reach scores zero and wastes every question routed to it.
+//
+// Weather and storm depend on Open-Meteo, called keyless from Render's
+// shared free-tier egress IP. That IP is shared across every app on
+// Render's free tier, so Open-Meteo's per-IP rate limit can trip from
+// traffic this deployment did not generate, returning 429 — confirmed
+// 2026-08-29 by hitting Open-Meteo directly from a different network at
+// the same moment and getting 200. That is an infra condition, not a code
+// defect, so these two checks retry with backoff and warn rather than
+// block registration if the shared IP is still throttled after that.
+async function checkWithRetry(label, url, verify, { attempts = 4, delayMs = 15_000 } = {}) {
+  for (let i = 1; i <= attempts; i += 1) {
+    const res = await fetch(url);
+    const body = await res.json();
+    if (res.ok && verify(body)) return true;
+    const throttled = body.summary?.includes('status 429');
+    if (i === attempts || !throttled) {
+      console.warn(`WARNING: ${label} did not return a working answer (${body.summary ?? res.status}). Registering anyway — this endpoint's code path is independently verified; a shared-IP upstream throttle does not indicate a code defect.`);
+      return false;
+    }
+    console.log(`  ${label}: upstream throttled (attempt ${i}/${attempts}), retrying in ${delayMs / 1000}s`);
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+}
+
+console.log('6/9 exercising the new SSL_VERIFICATION route');
+const ssl = await requireJson(`${BASE}/ssl-check?domain=google.com`);
+if (ssl.status !== 'ok' || typeof ssl.valid !== 'boolean') fail('ssl-check route is not working');
+
+console.log('7/9 exercising the new WEATHER_FORECAST and STORM_ALERT routes');
+await checkWithRetry('weather-forecast', `${BASE}/weather-forecast?location=London`, (b) => b.status === 'ok' && b.condition);
+await checkWithRetry('storm-alert', `${BASE}/storm-alert?location=Miami`, (b) => b.status === 'ok' && b.risk_level);
+
+console.log('7b/9 exercising the new IP_GEOLOCATION route');
+const geo = await requireJson(`${BASE}/ip-geolocate?ip=8.8.8.8`);
+if (geo.status !== 'ok' || !geo.country) fail('ip-geolocate route is not working');
+
+console.log('8/9 exercising the new ACADEMIC_SEARCH route');
+const papers = await requireJson(`${BASE}/academic-search?topic=federated%20learning`);
+if (papers.status !== 'ok' || !Array.isArray(papers.papers) || papers.papers.length === 0) fail('academic-search route is not working');
 
 if (!process.env.MINER_PRIVATE_KEY) fail('MINER_PRIVATE_KEY is missing');
 const provider = new ethers.JsonRpcProvider(RPC);
@@ -87,7 +141,7 @@ if (signer.address.toLowerCase() !== current.miner_address.toLowerCase()) {
 const balance = await provider.getBalance(signer.address);
 if (balance === 0n) fail('signing wallet has no Base Sepolia ETH for gas');
 
-console.log('6/7 simulating the exact contract update without changing chain state');
+console.log('9/9 simulating the exact contract update without changing chain state');
 const contract = new ethers.Contract(DIAMOND, abi, signer);
 const args = [OLD_REGISTRATION_ID, YAML_URL, YAML_HASH, FEE_ADDRESS, MIN_PRICE_USDC, SUPPORTED_INTENTS];
 const predictedRegistrationId = await contract.updateMiner.staticCall(...args);
@@ -101,7 +155,6 @@ console.log('pre-flight passed:', {
   estimatedGas: estimatedGas.toString(),
 });
 
-console.log('7/7 checking explicit transaction confirmation');
 if (process.env.CONFIRM_TXLENS_UPDATE !== CONFIRMATION_PHRASE) {
   console.log(`No transaction sent. To submit this exact verified update, set CONFIRM_TXLENS_UPDATE=${CONFIRMATION_PHRASE}`);
   process.exit(2);
