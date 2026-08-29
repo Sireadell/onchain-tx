@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import { buildApp } from '../app.js';
 import { resetDefiLlamaCache } from '../lib/defiLlamaApi.js';
 import { resetCoinGeckoCache } from '../lib/coinGeckoApi.js';
+import { resetCoinPaprikaCache } from '../lib/coinPaprikaApi.js';
 
 function startServer(t) {
   resetCoinGeckoCache();
+  resetCoinPaprikaCache();
   const server = buildApp().listen(0);
   t.after(() => {
     server.closeAllConnections();
@@ -36,12 +38,23 @@ function mockFetch(t, handler) {
   });
 }
 
-// coin_id mode tries CoinGecko first now (see checkCryptoPrice.js header
-// comment) — mocks both hosts so tests stay hermetic instead of hitting
-// the real CoinGecko API.
-function mockFetchWithCoinGecko(t, { coingecko, defillama } = {}) {
+// coin_id mode races CoinPaprika, CoinGecko, and DefiLlama (see
+// checkCryptoPrice.js header comment) — mocks all three hosts so tests
+// stay hermetic instead of hitting real APIs. A test that doesn't pass a
+// `coinpaprika` handler gets the "coin not listed" shape by default (empty
+// coin list -> no slug match), since CoinPaprika is now the preferred
+// source and most existing tests are specifically about the other two.
+function mockFetchWithCoinGecko(t, { coinpaprika, coinpaprikaTicker, coingecko, defillama } = {}) {
   const original = globalThis.fetch;
   globalThis.fetch = (url, ...rest) => {
+    if (typeof url === 'string' && url.startsWith('https://api.coinpaprika.com/v1/coins')) {
+      if (coinpaprika) return coinpaprika(url, ...rest);
+      return { status: 200, json: async () => [] };
+    }
+    if (typeof url === 'string' && url.startsWith('https://api.coinpaprika.com/v1/tickers/')) {
+      if (!coinpaprikaTicker) throw new Error(`unexpected CoinPaprika ticker call in this test: ${url}`);
+      return coinpaprikaTicker(url, ...rest);
+    }
     if (typeof url === 'string' && url.startsWith('https://api.coingecko.com/')) {
       if (!coingecko) throw new Error('unexpected CoinGecko call in this test');
       return coingecko(url, ...rest);
@@ -92,6 +105,74 @@ test('crypto-price: malformed token address answered with guidance', async (t) =
   const res = await fetch(`${base}/crypto-price?price_chain=ethereum&token=not-an-address`);
   assert.equal(res.status, 200);
   assert.equal((await res.json()).status, 'invalid_input');
+});
+
+test('crypto-price: successful coin_id lookup prefers CoinPaprika over CoinGecko', async (t) => {
+  resetDefiLlamaCache();
+  mockFetchWithCoinGecko(t, {
+    coinpaprika: async () => ({
+      status: 200,
+      json: async () => [
+        { id: 'btc-bitcoin', symbol: 'BTC', is_active: true, rank: 1 },
+        { id: 'bitcoin-bitcoin', symbol: 'BITCOIN', is_active: true, rank: 10622 },
+      ],
+    }),
+    coinpaprikaTicker: async (url) => {
+      assert.equal(url, 'https://api.coinpaprika.com/v1/tickers/btc-bitcoin');
+      return {
+        status: 200,
+        json: async () => ({
+          symbol: 'BTC',
+          last_updated: '2026-08-29T02:01:24Z',
+          quotes: { USD: { price: 77807.55, market_cap: 1562110242633, percent_change_24h: -2.68 } },
+        }),
+      };
+    },
+    coingecko: async () => {
+      throw new Error('CoinGecko should not be needed when CoinPaprika succeeds');
+    },
+  });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/crypto-price?coin_id=bitcoin`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.price_usd, 77807.55);
+  assert.equal(body.symbol, 'BTC');
+  assert.equal(body.price_source, 'coinpaprika');
+  assert.equal(body.change_24h_pct, -2.68);
+  assert.equal(body.market_cap_usd, 1562110242633);
+});
+
+test('crypto-price: CoinPaprika slug collision resolves to the lower-rank (dominant) asset', async (t) => {
+  resetDefiLlamaCache();
+  let requestedId = null;
+  mockFetchWithCoinGecko(t, {
+    coinpaprika: async () => ({
+      status: 200,
+      json: async () => [
+        { id: 'bitcoin-bitcoin', symbol: 'BITCOIN', is_active: true, rank: 10622 },
+        { id: 'btc-bitcoin', symbol: 'BTC', is_active: true, rank: 1 },
+      ],
+    }),
+    coinpaprikaTicker: async (url) => {
+      requestedId = url;
+      return {
+        status: 200,
+        json: async () => ({
+          symbol: 'BTC',
+          last_updated: '2026-08-29T02:01:24Z',
+          quotes: { USD: { price: 77807.55, market_cap: 1562110242633, percent_change_24h: -2.68 } },
+        }),
+      };
+    },
+  });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/crypto-price?coin_id=bitcoin`);
+  assert.equal(res.status, 200);
+  assert.equal(requestedId, 'https://api.coinpaprika.com/v1/tickers/btc-bitcoin');
 });
 
 test('crypto-price: successful coin_id lookup uses CoinGecko directly', async (t) => {
