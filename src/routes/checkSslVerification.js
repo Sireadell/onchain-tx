@@ -66,24 +66,45 @@ async function handleSslVerification(req, res) {
   }
 
   const valid = result.authorized && result.daysUntilExpiry > 0;
-  const summary = valid
-    ? `${domain} has a valid certificate, expiring in ${result.daysUntilExpiry} days (issued by ${result.issuer?.O ?? result.issuer?.CN ?? 'unknown issuer'})`
-    : `${domain}'s certificate is ${result.daysUntilExpiry <= 0 ? 'expired' : 'not trusted'}${result.authorizationError ? ` (${result.authorizationError})` : ''}`;
+  const category = classifyCertificate(result);
+  const issuerName = result.issuer?.O ?? result.issuer?.CN ?? 'unknown issuer';
+  const summaryByCategory = {
+    valid: `${domain} has a valid certificate, expiring in ${result.daysUntilExpiry} days (issued by ${issuerName})`,
+    expired: `${domain}'s certificate expired ${Math.abs(result.daysUntilExpiry)} days ago (issued by ${issuerName})`,
+    self_signed: `${domain} is serving a self-signed certificate, not one from a trusted certificate authority`,
+    hostname_mismatch: `${domain} is serving a certificate issued for a different hostname, so it does not match ${domain}`,
+    untrusted: `${domain}'s certificate does not chain to a trusted root${result.authorizationError ? ` (${result.authorizationError})` : ''}`,
+  };
 
   res.json({
     query: domain,
     status: 'ok',
-    summary,
+    summary: summaryByCategory[category],
     confidence: 1.0,
-    canonical: ['ssl', domain, valid ? 'valid' : 'invalid', result.daysUntilExpiry].join(':'),
+    canonical: ['ssl', domain, category, result.daysUntilExpiry].join(':'),
     valid,
+    category,
     authorized: result.authorized,
     authorization_error: result.authorizationError,
-    issuer: result.issuer?.O ?? result.issuer?.CN ?? null,
+    chain_complete: category !== 'untrusted' && category !== 'self_signed',
+    hostname_valid: category !== 'hostname_mismatch',
+    issuer: issuerName,
     valid_from: result.validFrom,
     valid_to: result.validTo,
     days_until_expiry: result.daysUntilExpiry,
   });
+}
+
+// Turns Node's raw authorized/authorizationError pair into the same named
+// buckets a competing SSL miner reports (valid/expired/self-signed/
+// untrusted/wrong-hostname), instead of one generic "not trusted".
+function classifyCertificate(result) {
+  if (result.authorized && result.daysUntilExpiry > 0) return 'valid';
+  if (result.daysUntilExpiry <= 0) return 'expired';
+  const err = String(result.authorizationError ?? '');
+  if (/SELF_SIGNED/.test(err)) return 'self_signed';
+  if (/ALTNAME|altnames|Hostname\/IP/.test(err)) return 'hostname_mismatch';
+  return 'untrusted';
 }
 
 router.get('/', (req, res) => withRpcBudget(() => handleSslVerification(req, res)));

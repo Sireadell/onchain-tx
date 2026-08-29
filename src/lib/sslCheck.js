@@ -25,7 +25,14 @@ export function checkSslCertificate(domain) {
     const socket = tls.connect(
       443,
       domain,
-      { servername: domain, timeout: CALL_TIMEOUT_MS },
+      // rejectUnauthorized: false — without this, Node aborts the
+      // handshake with a generic 'error' event on any cert problem
+      // (self-signed, expired, wrong hostname), so we could never tell
+      // those apart from the domain simply being unreachable. With it
+      // false, the handshake still completes and socket.authorized /
+      // socket.authorizationError report exactly what's wrong. The
+      // connection is never used for anything but inspection.
+      { servername: domain, timeout: CALL_TIMEOUT_MS, rejectUnauthorized: false },
       () => {
         if (settled) return;
         settled = true;
