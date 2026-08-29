@@ -16,17 +16,19 @@ function isNotFoundError(err) {
 }
 
 // Tries both providers with the given ticker as typed. Returns the quote
-// with a `resolvedTicker` field, or null if both providers say "not
-// found" (pushing their errors onto `errors` for the caller to inspect).
-// A genuine outage (timeout, 5xx, rate limit) is NOT swallowed here — it
-// is re-thrown immediately, since that's our fault, not the caller's, and
-// should not be masked by a resolution retry.
+// with a `resolvedTicker` field, or null if neither succeeded — pushing
+// every failure onto `errors`, not just "not found" ones. A transient
+// failure from one provider (rate limit, timeout) must not stop this from
+// still attempting name resolution below: a real 429 from Yahoo isn't
+// evidence the ticker is unresolvable, and aborting here on it would
+// skip the search-and-retry step entirely for an input that search could
+// have fixed. The caller classifies the collected errors once, after
+// every attempt (direct and resolved) is exhausted.
 async function tryQuote(ticker, errors) {
   if (process.env.TWELVE_DATA_API_KEY) {
     try {
       return { ...(await getTwelveDataStockQuote(ticker)), resolvedTicker: ticker };
     } catch (err) {
-      if (!(err instanceof TwelveDataTickerNotFoundError)) throw err;
       errors.push(err);
     }
   }
@@ -35,7 +37,6 @@ async function tryQuote(ticker, errors) {
     const quote = await getYahooStockQuote(ticker);
     return { ...quote, source: 'yahoo_finance', resolvedTicker: ticker };
   } catch (err) {
-    if (!(err instanceof YahooTickerNotFoundError)) throw err;
     errors.push(err);
   }
 

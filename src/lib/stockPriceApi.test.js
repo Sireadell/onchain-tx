@@ -67,6 +67,37 @@ test('getStockQuote falls back to symbol search when the ticker as typed is not 
   assert.ok(calls[0].includes('symbol=Apple') && !calls[0].includes('symbol_search'));
 });
 
+test('getStockQuote still resolves via search when the direct attempt fails with a transient error, not just not-found', async (t) => {
+  // Live-checked 2026-08-29: ticker=Apple failed in production because
+  // Yahoo's rate limit (429) on the direct "Apple" attempt aborted
+  // resolution before symbol search ever ran, even though search would
+  // have fixed it. A transient failure on the direct attempt must not
+  // pre-empt the resolve-and-retry path below.
+  withTwelveDataKey(t);
+  withFetchMock(t, async (url) => {
+    if (url.includes('symbol_search')) {
+      return { ok: true, json: async () => ({ data: [{ symbol: 'AAPL' }] }) };
+    }
+    if (url.includes('symbol=Apple')) {
+      return {
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        json: async () => ({ status: 'error', message: '**symbol** or **figi** parameter is missing or invalid.' }),
+      };
+    }
+    if (url.includes('yahoo') && url.endsWith('/Apple')) {
+      // Not a 404 (not-found) — a genuine transient failure.
+      return { status: 429, statusText: 'Too Many Requests' };
+    }
+    assert.match(url, /symbol=AAPL/);
+    return { ok: true, json: async () => ({ close: '319.7', currency: 'USD' }) };
+  });
+  const quote = await getStockQuote('Apple');
+  assert.equal(quote.priceUsd, 319.7);
+  assert.equal(quote.resolvedTicker, 'AAPL');
+});
+
 test('getStockQuote does not 502 when a name cannot be resolved by search or providers', async (t) => {
   withTwelveDataKey(t);
   withFetchMock(t, async (url) => {
