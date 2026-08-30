@@ -7,12 +7,18 @@ import { Router } from 'express';
 import { getStockQuote, TickerNotFoundError } from '../lib/stockPriceApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { respondUnusableInput } from '../lib/unusableInput.js';
+import { extractTicker, freeTextParam } from '../lib/entityExtract.js';
 
 const router = Router();
 
 async function handleStockPrice(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
-  const ticker = params?.ticker;
+  // The engine sends "What is Apple's share price today?" as a question,
+  // not as ticker=AAPL, and this route used to answer invalid_input to all
+  // of it. extractTicker prefers an explicit symbol in the text and falls
+  // back to the prose name, which the price API resolves by symbol search.
+  const question = freeTextParam(params);
+  const ticker = params?.ticker ?? (question ? extractTicker(question) : null);
 
   if (!ticker) {
     return respondUnusableInput(

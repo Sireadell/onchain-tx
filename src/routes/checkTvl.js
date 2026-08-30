@@ -27,6 +27,7 @@ import {
 } from '../lib/defiLlamaApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { respondUnusableInput } from '../lib/unusableInput.js';
+import { extractSubject, freeTextParam } from '../lib/entityExtract.js';
 
 const router = Router();
 
@@ -35,8 +36,19 @@ async function handleTvl(req, res) {
   // Trimmed here, not just in the transport: an untrimmed value still
   // reached the answer text and the canonical string, so a caller sending
   // " Base " got the right number reported under a ragged name.
-  const protocol = typeof params?.protocol === 'string' ? params.protocol.trim() : params?.protocol;
-  const tvlChain = typeof params?.tvl_chain === 'string' ? params.tvl_chain.trim() : params?.tvl_chain;
+  const rawProtocol = typeof params?.protocol === 'string' ? params.protocol.trim() : params?.protocol;
+  const rawTvlChain = typeof params?.tvl_chain === 'string' ? params.tvl_chain.trim() : params?.tvl_chain;
+  // Free-text fallback. "How much TVL does Curve have on Ethereum?" arrives
+  // as a question rather than protocol=curve&tvl_chain=Ethereum, and this
+  // route used to answer invalid_input to all of it. The question reduces
+  // to a subject, and a trailing "on <chain>" clause splits off as the
+  // chain — both then go through the same alias resolution as an explicit
+  // param, so a name DefiLlama has renamed still lands.
+  const question = !rawProtocol && !rawTvlChain ? freeTextParam(params) : null;
+  const subject = question ? extractSubject(question) : null;
+  const split = subject ? subject.match(/^(.*?)\s+\bon\s+(.+)$/i) : null;
+  const protocol = rawProtocol ?? (split ? split[1].trim() : subject ?? undefined);
+  const tvlChain = rawTvlChain ?? (split ? split[2].trim() : undefined);
 
   if (!protocol && !tvlChain) {
     return respondUnusableInput(

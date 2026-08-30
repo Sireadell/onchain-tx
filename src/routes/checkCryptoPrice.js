@@ -30,6 +30,7 @@ import { getCoinPrice, CoinNotFoundError } from '../lib/defiLlamaApi.js';
 import { getCoinPaprikaPrice } from '../lib/coinPaprikaApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
+import { extractSubject, freeTextParam } from '../lib/entityExtract.js';
 
 // Tries both sources at once; either failing (rate limit, timeout,
 // unrecognized id) just drops that source rather than failing the whole
@@ -67,9 +68,16 @@ const TOKEN_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
 async function handleCryptoPrice(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
-  const coinId = params?.coin_id;
+  // Free-text fallback: "How much is Bitcoin worth right now?" arrives as
+  // a question rather than coin_id=bitcoin, and this route used to answer
+  // invalid_input to all of it. The question reduces to a coin name, which
+  // DefiLlama resolves the same way it resolves a coin id. Contract-address
+  // lookups still require the explicit price_chain + token pair, because
+  // guessing which chain an address lives on would be a coin flip.
+  const question = freeTextParam(params);
   const priceChain = params?.price_chain;
   const token = params?.token;
+  const coinId = params?.coin_id ?? (!priceChain && !token && question ? extractSubject(question) : undefined);
 
   const chainTokenMode = Boolean(priceChain || token);
   if (!coinId && !chainTokenMode) {

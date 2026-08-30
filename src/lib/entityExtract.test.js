@@ -1,6 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractTxHash, extractAddress, extractHostname, tokenize } from './entityExtract.js';
+import {
+  extractTxHash,
+  extractAddress,
+  extractHostname,
+  tokenize,
+  freeTextParam,
+  extractSubject,
+  extractTicker,
+} from './entityExtract.js';
 
 const HASH = '0x' + '1'.repeat(64);
 const ADDR = '0x' + 'a'.repeat(40);
@@ -56,4 +64,39 @@ test('tokenize lowercases and splits on non-alphanumerics', () => {
 
 test('tokenize returns empty array for non-string input', () => {
   assert.deepEqual(tokenize(undefined), []);
+});
+
+// Free-text fallback, added 2026-08-30. The deployed miner was answering
+// invalid_input to whole questions on eight of thirteen routes, including
+// its flagship ONCHAIN_TX_LOOKUP endpoint, because those routes only ever
+// read their structured parameter.
+test('freeTextParam reads whichever free-text field the caller used', () => {
+  assert.equal(freeTextParam({ question: 'is it confirmed' }), 'is it confirmed');
+  assert.equal(freeTextParam({ q: 'is it confirmed' }), 'is it confirmed');
+  assert.equal(freeTextParam({ query: 'is it confirmed' }), 'is it confirmed');
+  assert.equal(freeTextParam({ text: 'is it confirmed' }), 'is it confirmed');
+  assert.equal(freeTextParam({ input: 'is it confirmed' }), 'is it confirmed');
+  // question wins when more than one is present, and blank never counts.
+  assert.equal(freeTextParam({ q: 'second', question: 'first' }), 'first');
+  assert.equal(freeTextParam({ question: '   ' }), null);
+  assert.equal(freeTextParam({ tx_hash: '0xabc' }), null);
+  assert.equal(freeTextParam(null), null);
+});
+
+test('extractSubject reduces a question to the thing being asked about', () => {
+  assert.equal(extractSubject('What is the price of Apple stock right now?'), 'Apple');
+  assert.equal(extractSubject('How much is Bitcoin worth?'), 'Bitcoin');
+  assert.equal(extractSubject('What is the TVL of Uniswap?'), 'Uniswap');
+  assert.equal(extractSubject('what is the total value locked in Aave'), 'Aave');
+  assert.equal(extractSubject('How much TVL does Curve have on Ethereum?'), 'Curve on Ethereum');
+  // A bare name is already the subject and must survive untouched.
+  assert.equal(extractSubject('uniswap'), 'uniswap');
+  assert.equal(extractSubject('MSFT'), 'MSFT');
+  assert.equal(extractSubject(null), null);
+});
+
+test('extractTicker prefers an explicit symbol over the prose name', () => {
+  assert.equal(extractTicker('What is AAPL trading at?'), 'AAPL');
+  assert.equal(extractTicker('What is Tesla stock price today?'), 'Tesla');
+  assert.equal(extractTicker(null), null);
 });

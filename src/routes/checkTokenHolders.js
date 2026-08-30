@@ -9,7 +9,7 @@ import { getTokenInfo, TokenNotFoundError } from '../lib/blockscoutApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { CHAINS, DEFAULT_CHAIN, resolveChainLoose } from '../lib/chains.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
-import { extractAddress } from '../lib/entityExtract.js';
+import { extractAddress, freeTextParam } from '../lib/entityExtract.js';
 
 const router = Router();
 
@@ -17,14 +17,18 @@ const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
 async function handleTokenHolders(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
-  const rawToken = params?.token;
+  // Same free-text fallback as the other on-chain routes: the engine
+  // sends "how many holders does 0xabc... have on Base" as a question, not
+  // as a bare token param.
+  const question = freeTextParam(params);
+  const rawToken = params?.token ?? question;
   // Exact match first; if that fails, pull a contract address out of
   // whatever was sent instead of rejecting outright — this does not (and
   // cannot reliably) resolve a ticker like "USDC" to an address, only an
   // address already present but wrapped in other text. See
   // entityExtract.js.
   const token = rawToken && ADDRESS_RE.test(rawToken) ? rawToken : extractAddress(rawToken);
-  const chainParam = params?.chain ?? DEFAULT_CHAIN;
+  const chainParam = params?.chain ?? resolveChainLoose(question ?? '')?.segment ?? DEFAULT_CHAIN;
 
   if (!token) {
     const problem = rawToken

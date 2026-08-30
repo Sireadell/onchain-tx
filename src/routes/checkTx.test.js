@@ -104,3 +104,57 @@ test('same tx_hash on two different chains does not cross-contaminate responses'
   assert.equal(ethRes.chain, 'eth');
   assert.equal(baseRes.chain, 'base');
 });
+
+// Added 2026-08-30 after the live miner was found answering "no transaction
+// hash was supplied" to a question that plainly contained one. The engine
+// hands the caller's question through; the route only read tx_hash, so
+// every free-text ONCHAIN_TX_LOOKUP request was refused.
+test('a whole question is answered, with the chain it names', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  resetRpcCache();
+  const seenChains = new Set();
+  mockFetch(t, async (url) => {
+    seenChains.add(url.split('/')[3]);
+    return { ok: true, status: 200, json: async () => ({ jsonrpc: '2.0', id: 1, result: null }) };
+  });
+  const base = startServer(t);
+  const hash = `0x${'4'.repeat(64)}`;
+
+  const question = encodeURIComponent(`Is transaction ${hash} on Base confirmed?`);
+  const body = await (await fetch(`${base}/check-tx?question=${question}`)).json();
+  assert.equal(body.status, 'not_found'); // reached the RPC rather than refusing
+  assert.equal(body.tx_hash, hash);
+  assert.equal(body.chain, 'base');
+  assert.ok(seenChains.has('base'));
+});
+
+test('a question naming no chain still defaults to eth', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  resetRpcCache();
+  mockFetch(t, async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ jsonrpc: '2.0', id: 1, result: null }),
+  }));
+  const base = startServer(t);
+  const hash = `0x${'5'.repeat(64)}`;
+
+  const question = encodeURIComponent(`what did ${hash} do?`);
+  const body = await (await fetch(`${base}/check-tx?q=${question}`)).json();
+  assert.equal(body.chain, 'eth');
+  assert.equal(body.tx_hash, hash);
+});
+
+test('a question with no hash in it is still refused', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  let called = false;
+  mockFetch(t, async () => {
+    called = true;
+    throw new Error('should not be called');
+  });
+  const base = startServer(t);
+
+  const body = await (await fetch(`${base}/check-tx?question=is+my+transaction+ok`)).json();
+  assert.equal(body.status, 'invalid_input');
+  assert.equal(called, false);
+});

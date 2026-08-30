@@ -17,6 +17,7 @@ import { Router } from 'express';
 import { getGasPrice, getBlockNumber, withRpcBudget, RpcBudgetExceededError, ApiKeyMissingError } from '../lib/ankrRpc.js';
 import { getCoinPrice } from '../lib/defiLlamaApi.js';
 import { CHAINS, DEFAULT_CHAIN, resolveChainLoose } from '../lib/chains.js';
+import { freeTextParam } from '../lib/entityExtract.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 
 const STANDARD_TRANSFER_GAS_UNITS = 21_000;
@@ -25,7 +26,12 @@ const router = Router();
 
 async function handleGasPrice(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
-  const chainParam = params?.chain ?? DEFAULT_CHAIN;
+  // "What does a transfer cost on Base right now?" arrives as a question,
+  // not as chain=base. resolveChainLoose already scans a whole sentence for
+  // a chain name, so hand the question to it before defaulting to eth —
+  // otherwise every free-text gas question silently answered for Ethereum.
+  const question = freeTextParam(params);
+  const chainParam = params?.chain ?? resolveChainLoose(question ?? '')?.segment ?? DEFAULT_CHAIN;
 
   const chain = resolveChainLoose(chainParam);
   if (!chain) {
