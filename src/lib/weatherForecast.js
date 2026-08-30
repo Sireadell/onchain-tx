@@ -4,6 +4,10 @@
 // coordinates.
 
 import { locationCandidates, parseCoordinates } from './questionParse.js';
+import {
+  METNO_URL, METNO_USER_AGENT, METNO_SOURCE,
+  offsetSecondsForTimezone, toOpenMeteoDaily, toOpenMeteoHourly,
+} from './metnoFallback.js';
 
 const GEOCODE_URL = 'https://geocoding-api.open-meteo.com/v1/search';
 const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
@@ -128,16 +132,16 @@ function roundCoord(n) {
 // than delaying an answer the retry can't fix.
 const RATE_LIMIT_RETRY_DELAY_MS = Number(process.env.WEATHER_RETRY_DELAY_MS) || 1_500;
 
-async function fetchJson(url, label, attempt = 1) {
+async function fetchJson(url, label, attempt = 1, headers = undefined) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CALL_TIMEOUT_MS);
   try {
-    const res = await fetch(url, { signal: controller.signal });
+    const res = await fetch(url, { signal: controller.signal, headers });
     if (!res.ok) {
       if (res.status === 429 && attempt === 1) {
         clearTimeout(timer);
         await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_RETRY_DELAY_MS));
-        return fetchJson(url, label, 2);
+        return fetchJson(url, label, 2, headers);
       }
       throw new WeatherUpstreamError(`${label} request failed with status ${res.status}`);
     }
@@ -148,6 +152,48 @@ async function fetchJson(url, label, attempt = 1) {
     throw new WeatherUpstreamError(`${label} request failed: ${err.message}`);
   } finally {
     clearTimeout(timer);
+  }
+}
+
+// Asks MET Norway the question Open-Meteo just refused, and hands back the
+// answer in Open-Meteo's own shape so nothing downstream has to know which
+// provider served it. Coordinates are rounded to four decimals because MET
+// returns 403 Forbidden for five or more.
+async function fetchMetno(location, shape) {
+  const lat = Number(location.latitude).toFixed(4);
+  const lon = Number(location.longitude).toFixed(4);
+  const body = await fetchJson(
+    `${METNO_URL}?lat=${lat}&lon=${lon}`,
+    'fallback forecast',
+    1,
+    { 'User-Agent': METNO_USER_AGENT, Accept: 'application/json' },
+  );
+  const opts = {
+    timezone: location.timezone ?? null,
+    offsetSeconds: offsetSecondsForTimezone(location.timezone),
+  };
+  return shape === 'daily' ? toOpenMeteoDaily(body, opts) : toOpenMeteoHourly(body, opts);
+}
+
+// Open-Meteo first, MET Norway only when Open-Meteo itself failed.
+//
+// Only WeatherUpstreamError triggers the fallback. A WeatherLookupError
+// means the caller's input was unusable, and a second provider cannot make
+// a nonexistent place exist, so retrying it there would just burn a call
+// and delay the same answer.
+async function fetchWithFallback(url, label, location, shape) {
+  try {
+    return { body: await fetchJson(url, label), source: 'Open-Meteo' };
+  } catch (err) {
+    if (!(err instanceof WeatherUpstreamError)) throw err;
+    try {
+      return { body: await fetchMetno(location, shape), source: METNO_SOURCE, degraded: true };
+    } catch (fallbackErr) {
+      // Both providers are down, which is a genuine outage rather than the
+      // shared-IP rate limit this fallback exists for. The original failure
+      // leads, because it describes the path that normally serves.
+      throw new WeatherUpstreamError(`${err.message}; fallback also failed: ${fallbackErr.message}`);
+    }
   }
 }
 
@@ -197,7 +243,12 @@ export async function resolveLocation(input) {
       continue;
     }
     const label = [hit.name, hit.admin1, hit.country].filter(Boolean).join(', ');
-    const resolved = { name: label, latitude: hit.latitude, longitude: hit.longitude };
+    // The IANA zone is kept because the MET Norway fallback reports in UTC
+    // and has to rebuild local times itself. Open-Meteo does that server
+    // side with timezone=auto, so this is unused on the primary path.
+    const resolved = {
+      name: label, latitude: hit.latitude, longitude: hit.longitude, timezone: hit.timezone ?? null,
+    };
     geocodeCache.set(cacheKey, resolved, GEOCODE_CACHE_TTL_MS);
     return resolved;
   }
@@ -234,7 +285,9 @@ export async function fetchForecast(input, days = 3, startDay = 0) {
     forecast_days: String(Math.min(offset + span, 16)),
     timezone: 'auto',
   });
-  const body = await fetchJson(`${FORECAST_URL}?${params}`, 'forecast');
+  const { body, source, degraded } = await fetchWithFallback(
+    `${FORECAST_URL}?${params}`, 'forecast', location, 'daily',
+  );
   const d = body.daily;
   if (!d?.time?.length) throw new WeatherLookupError(`no forecast data returned for '${input}'`);
 
@@ -254,7 +307,17 @@ export async function fetchForecast(input, days = 3, startDay = 0) {
   })).slice(offset, offset + span);
 
   if (daysOut.length === 0) throw new WeatherLookupError(`the forecast does not reach that far ahead for '${input}'`);
-  const result = { ...location, timezone: body.timezone ?? null, days: daysOut, fetchedAt: new Date().toISOString() };
+  const result = {
+    ...location,
+    timezone: body.timezone ?? null,
+    days: daysOut,
+    source,
+    // Set only when Open-Meteo was unavailable and MET Norway answered
+    // instead. MET publishes no precipitation probability or snowfall
+    // total outside its own region, so both read null on this path.
+    ...(degraded ? { degraded: true } : {}),
+    fetchedAt: new Date().toISOString(),
+  };
   forecastCache.set(cacheKey, result, FORECAST_CACHE_TTL_MS);
   return result;
 }
@@ -298,7 +361,9 @@ export async function fetchStormRisk(input, hours = 48) {
     forecast_days: String(Math.min(Math.ceil(span / 24) + 1, 16)),
     timezone: 'auto',
   });
-  const body = await fetchJson(`${FORECAST_URL}?${params}`, 'storm forecast');
+  const { body, source, degraded } = await fetchWithFallback(
+    `${FORECAST_URL}?${params}`, 'storm forecast', location, 'hourly',
+  );
   const h = body.hourly;
   if (!h?.time?.length) throw new WeatherLookupError(`no forecast data returned for '${input}'`);
 
@@ -375,6 +440,12 @@ export async function fetchStormRisk(input, hours = 48) {
     beaufort_force: force,
     thunderstorm_hours: thunderstormHours,
     severe_hail_hours: severeHailHours,
+    source,
+    // MET Norway publishes no gust figure outside its own region, so on the
+    // fallback path peak_gust_kmh and the LOW/MODERATE/HIGH/SEVERE grade
+    // rest on an estimate. risk_score does not: it is computed from
+    // sustained wind, which MET reports directly.
+    ...(degraded ? { degraded: true, gusts_estimated: true } : {}),
     fetchedAt: new Date().toISOString(),
   };
   // Cached briefly rather than hitting Open-Meteo on every question — see
