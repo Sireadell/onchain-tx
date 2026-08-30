@@ -124,24 +124,33 @@ function roundCoord(n) {
   return Math.round(n * 100) / 100;
 }
 
-// The local hour from which the current day counts as spent. Chosen so the
-// evening still belongs to today (a question asked at 5pm can reasonably be
-// about tonight) while the last few hours, which cannot produce a
-// meaningful daily high or low, do not consume a forecast slot.
-const SPENT_DAY_LOCAL_HOUR = 18;
+// Fewer hours than this in a day's data and it cannot state a real high or
+// low: a quarter of a day is a remnant, not a day.
+const MIN_HOURS_FOR_A_REAL_DAY = 6;
 
-// Whether `firstDate` is the local date at the forecast location and that
-// date is far enough gone to be worth skipping. Works off the offset the
-// forecast service reports for the place, not this server's clock, so a
-// miner running in one timezone answers correctly about another.
-export function isSpentToday(firstDate, utcOffsetSeconds, now = Date.now()) {
-  if (!firstDate) return false;
-  const offset = Number(utcOffsetSeconds);
-  if (!Number.isFinite(offset)) return false;
-
-  const local = new Date(now + offset * 1000);
-  const localDate = local.toISOString().slice(0, 10);
-  return firstDate === localDate && local.getUTCHours() >= SPENT_DAY_LOCAL_HOUR;
+// Whether the first day in a forecast is a truncated remnant rather than a
+// whole day. Decided from how many hours the provider actually supplied,
+// not from the clock: the two providers behave differently and only one
+// produces stubs.
+//
+// MET Norway returns only hours still ahead, so late in the evening its
+// current day is one or two readings whose max and min collapse to the same
+// number. Open-Meteo's daily row for today covers the entire calendar day
+// including hours already past, so its today is complete and must be kept.
+// Verified 2026-08-30 for New York: Open-Meteo reported today as 17.9°C to
+// 26°C, a genuine day, while MET's rows for the same place began with five
+// evening readings. Judging by clock hour alone would have discarded a good
+// day every evening on the primary provider.
+//
+// `hoursCounted` is absent on the Open-Meteo path, which is exactly the
+// signal that the day is whole, so an unknown count never drops anything.
+export function isTruncatedFirstDay(hoursCounted) {
+  // Checked before the numeric conversion, because Number(null) is 0 and
+  // would read as the emptiest possible day rather than as "not supplied".
+  if (hoursCounted == null) return false;
+  const hours = Number(hoursCounted);
+  if (!Number.isFinite(hours)) return false;
+  return hours < MIN_HOURS_FOR_A_REAL_DAY;
 }
 
 // One retry, short backoff, only for 429 — this is specifically for
@@ -294,16 +303,16 @@ export async function fetchForecast(input, days = 3, startDay = 0, { keepToday =
   const span = Math.min(Math.max(days, 1), 16);
   const offset = Math.min(Math.max(startDay, 0), 15);
 
-  // A day already mostly over cannot carry a real high, low or rain total:
-  // late in the evening the "daily" row is whatever the last hour or two
-  // happened to be, with the max and min collapsing to the same number.
+  // A truncated first day cannot carry a real high, low or rain total:
+  // on the MET Norway fallback the first row is whatever hours are still
+  // ahead, with the max and min collapsing to the same number.
   // Spending a forecast slot on it pushed the whole window a day behind the
   // one a caller means by "the next three days", and dragged that stub into
   // the headline range. Compared live 2026-08-30 at 23:00 in Makurdi: this
   // miner answered 08-30 to 09-01 with a first day reading 23.2°C to 23.2°C,
   // while the leading miner on this intent answered 08-31 to 09-02 on the
-  // same underlying MET Norway data. So today is dropped once it is spent,
-  // and one extra day is fetched to keep the window the length asked for.
+  // same underlying MET Norway data. So a stub first day is dropped, and one
+  // extra day is fetched to keep the window the length asked for.
   const mayDropToday = offset === 0 && !keepToday;
   const fetchDays = Math.min(offset + span + (mayDropToday ? 1 : 0), 16);
 
@@ -339,7 +348,7 @@ export async function fetchForecast(input, days = 3, startDay = 0, { keepToday =
     wind_direction: compassDirection(d.winddirection_10m_dominant?.[i]),
   }));
 
-  const effectiveOffset = mayDropToday && isSpentToday(d.time[0], body.utc_offset_seconds)
+  const effectiveOffset = mayDropToday && isTruncatedFirstDay(d.hours_counted?.[0])
     ? offset + 1
     : offset;
   const window = allDays.slice(effectiveOffset, effectiveOffset + span);

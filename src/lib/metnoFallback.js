@@ -219,6 +219,14 @@ export function toOpenMeteoDaily(body, { timezone = null, offsetSeconds = 0 } = 
         if (!d.winds.length) return null;
         return d.dirs[d.winds.indexOf(Math.max(...d.winds))];
       }),
+      // How many hours each day was actually built from. MET only returns
+      // hours still ahead, so the current day arrives truncated: late in the
+      // evening it can be a single reading whose "high" and "low" are the
+      // same number. Open-Meteo has no equivalent, because its daily row for
+      // today covers the whole calendar day including hours already past, so
+      // its today is a complete day and must not be treated as a stub.
+      // Callers use this to tell a real day from a remnant of one.
+      hours_counted: pick((d) => d.codes.length),
     },
   };
 }
