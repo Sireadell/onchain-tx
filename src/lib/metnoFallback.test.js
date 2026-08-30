@@ -185,3 +185,16 @@ test('when both providers fail, the caller is told it is an upstream problem', a
     },
   );
 });
+
+test('the fallback names itself readably in prose and keeps the full licence separately', async (t) => {
+  stubOpenMeteoRateLimited(t, {});
+
+  const result = await fetchForecast('London', 1, 0);
+
+  // The graded sentence embeds this mid-clause ("from the X forecast
+  // service"), so it has to read as a name, not as a citation.
+  assert.equal(result.source, 'MET Norway');
+  assert.doesNotMatch(result.source, /CC BY/);
+  // The licence still travels with the response, just not in the prose.
+  assert.match(result.attribution, /CC BY 4\.0/);
+});

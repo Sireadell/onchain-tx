@@ -5,7 +5,7 @@
 
 import { locationCandidates, parseCoordinates } from './questionParse.js';
 import {
-  METNO_URL, METNO_USER_AGENT, METNO_SOURCE,
+  METNO_URL, METNO_USER_AGENT, METNO_SOURCE, METNO_NAME,
   offsetSecondsForTimezone, toOpenMeteoDaily, toOpenMeteoHourly,
 } from './metnoFallback.js';
 
@@ -187,7 +187,7 @@ async function fetchWithFallback(url, label, location, shape) {
   } catch (err) {
     if (!(err instanceof WeatherUpstreamError)) throw err;
     try {
-      return { body: await fetchMetno(location, shape), source: METNO_SOURCE, degraded: true };
+      return { body: await fetchMetno(location, shape), source: METNO_NAME, attribution: METNO_SOURCE, degraded: true };
     } catch (fallbackErr) {
       // Both providers are down, which is a genuine outage rather than the
       // shared-IP rate limit this fallback exists for. The original failure
@@ -285,7 +285,7 @@ export async function fetchForecast(input, days = 3, startDay = 0) {
     forecast_days: String(Math.min(offset + span, 16)),
     timezone: 'auto',
   });
-  const { body, source, degraded } = await fetchWithFallback(
+  const { body, source, degraded, attribution } = await fetchWithFallback(
     `${FORECAST_URL}?${params}`, 'forecast', location, 'daily',
   );
   const d = body.daily;
@@ -315,7 +315,7 @@ export async function fetchForecast(input, days = 3, startDay = 0) {
     // Set only when Open-Meteo was unavailable and MET Norway answered
     // instead. MET publishes no precipitation probability or snowfall
     // total outside its own region, so both read null on this path.
-    ...(degraded ? { degraded: true } : {}),
+    ...(degraded ? { degraded: true, attribution } : {}),
     fetchedAt: new Date().toISOString(),
   };
   forecastCache.set(cacheKey, result, FORECAST_CACHE_TTL_MS);
@@ -361,7 +361,7 @@ export async function fetchStormRisk(input, hours = 48) {
     forecast_days: String(Math.min(Math.ceil(span / 24) + 1, 16)),
     timezone: 'auto',
   });
-  const { body, source, degraded } = await fetchWithFallback(
+  const { body, source, degraded, attribution } = await fetchWithFallback(
     `${FORECAST_URL}?${params}`, 'storm forecast', location, 'hourly',
   );
   const h = body.hourly;
@@ -445,7 +445,7 @@ export async function fetchStormRisk(input, hours = 48) {
     // fallback path peak_gust_kmh and the LOW/MODERATE/HIGH/SEVERE grade
     // rest on an estimate. risk_score does not: it is computed from
     // sustained wind, which MET reports directly.
-    ...(degraded ? { degraded: true, gusts_estimated: true } : {}),
+    ...(degraded ? { degraded: true, gusts_estimated: true, attribution } : {}),
     fetchedAt: new Date().toISOString(),
   };
   // Cached briefly rather than hitting Open-Meteo on every question — see

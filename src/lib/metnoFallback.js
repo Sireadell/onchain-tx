@@ -30,6 +30,11 @@ export const METNO_URL = 'https://api.met.no/weatherapi/locationforecast/2.0/com
 export const METNO_USER_AGENT = process.env.METNO_USER_AGENT
   || 'txlens-telegraph-miner github.com/Sireadell/onchain-tx';
 
+// Two forms on purpose. METNO_NAME is what reads naturally mid-sentence in
+// a graded answer ("from the MET Norway forecast service"); METNO_SOURCE
+// is the full CC BY 4.0 attribution the licence requires, which belongs in
+// a response field rather than jammed into the prose.
+export const METNO_NAME = 'MET Norway';
 export const METNO_SOURCE = 'MET Norway (api.met.no), CC BY 4.0';
 
 const MS_TO_KMH = 3.6;
