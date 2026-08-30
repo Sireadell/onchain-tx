@@ -801,8 +801,6 @@ output_schema:
     assessment_status:
       type: string
       enum: [ASSESSED, LIMITED, INCONCLUSIVE]
-    answer:
-      type: string
     source:
       type: object
     wallet:
