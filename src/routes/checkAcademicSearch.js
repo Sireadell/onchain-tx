@@ -22,6 +22,28 @@ function parseYearRange(text) {
   };
 }
 
+// Strips the question framing a caller wraps a topic in, leaving the topic
+// itself. Live-checked 2026-08-30: a whole question ("what papers exist on
+// mRNA vaccines?") was passed verbatim to OpenAlex, matched nothing, and
+// came back as invalid_input — a guaranteed zero on a question both of the
+// miners ranked above this one answer normally. The framing was already
+// being stripped for the answer text, but only after the search had
+// already failed on the unstripped string.
+function extractSearchTopic(rawTopic) {
+  const stripped = String(rawTopic)
+    .replace(/\?+\s*$/, '')
+    // Leading question framing: "what papers exist on X", "which studies
+    // cover X", "are there any papers about X", "can you find X".
+    .replace(/^\s*(?:what|which|who|whose|are\s+there|is\s+there|do\s+(?:you\s+)?(?:have|know)|can\s+you\s+(?:find|show|list|get))\b[^]*?\b(?:on|about|regarding|concerning|for|into)\s+/i, '')
+    .replace(/^\s*(?:find|search for|look up|get|show me|list)\s+/i, '')
+    .replace(/^\s*(?:me\s+)?(?:some\s+)?(?:recent\s+|peer[- ]reviewed\s+|academic\s+|research\s+)*(?:papers?|articles?|studies|publications?|research)\s+(?:on|about|regarding|concerning|for)\s+/i, '')
+    .replace(/\s*\b(?:since|after|from|before|prior to|up to|until)\s+(?:19|20)\d{2}\b\s*$/i, '')
+    .trim();
+  // Never return an empty search: a question that strips down to nothing
+  // (or wasn't a question at all) is searched as the caller wrote it.
+  return stripped || String(rawTopic).trim();
+}
+
 async function handleAcademicSearch(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
   const rawTopic = params?.topic ?? params?.query ?? params?.q ?? params?.question ?? params?.search;
@@ -37,9 +59,11 @@ async function handleAcademicSearch(req, res) {
     );
   }
 
+  const searchTopic = extractSearchTopic(rawTopic);
+
   let result;
   try {
-    result = await searchPapers(String(rawTopic), { limit, fromYear, toYear });
+    result = await searchPapers(searchTopic, { limit, fromYear, toYear });
   } catch (err) {
     if (err instanceof AcademicSearchError) {
       return respondUnusableInput(res, `I cannot search for papers on ${quoteParam(rawTopic)}: ${err.message}`);
@@ -59,11 +83,7 @@ async function handleAcademicSearch(req, res) {
   // wrapped it in ("find papers on X since 2020" -> "X"). Without this the
   // sentence reads "papers on papers on CRISPR since 2020 published since
   // 2020", which is the right answer said badly.
-  const topicPhrase = String(rawTopic)
-    .replace(/^\s*(?:find|search for|look up|get|show me|list)\s+/i, '')
-    .replace(/^\s*(?:me\s+)?(?:some\s+)?(?:recent\s+|peer[- ]reviewed\s+|academic\s+|research\s+)*(?:papers?|articles?|studies|publications?|research)\s+(?:on|about|regarding|concerning|for)\s+/i, '')
-    .replace(/\s*\b(?:since|after|from|before|prior to|up to|until)\s+(?:19|20)\d{2}\b\s*$/i, '')
-    .trim() || String(rawTopic);
+  const topicPhrase = searchTopic;
 
   const rangeNote = fromYear || toYear
     ? ` published ${fromYear && toYear ? `between ${fromYear} and ${toYear}` : fromYear ? `since ${fromYear}` : `before ${toYear}`}`

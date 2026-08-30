@@ -30,9 +30,61 @@ const LEADING_NOISE = /^(?:\s*(?:hi|hey|please|can you|could you|tell me|i want 
 
 // "in the next 48 hours", "over the next two days", "for the next 3 days"
 const RELATIVE_WINDOW_RE = /\b(?:in|over|for|within|during)?\s*the\s+next\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s*(hour|hours|day|days)\b/i;
+
+// The same window without "the next", e.g. "storm risk ... in 44 hours".
+// Measured on the live question feed 2026-08-30: 50 of 90 weather/storm
+// questions phrase the horizon this way, and none of them parsed, so every
+// one silently fell back to the default window instead of the one asked for.
+const BARE_WINDOW_RE = /\b(?:in|within|over)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s*(hour|hours|day|days)\b/i;
 const NUMBER_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
 
 const LAT_LON_RE = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/;
+
+// Coordinates written out in words inside a sentence, e.g. "at latitude
+// 14.6042, longitude 120.9822". Measured against the live question feed on
+// 2026-08-30: this is the dominant phrasing on WEATHER_FORECAST and
+// STORM_ALERT, 75 of 90 sampled questions, and every one of them was being
+// refused as invalid_input because the only coordinate form recognised was
+// a bare "lat,lon" string. Accepts lat/lon in either order and the common
+// abbreviations, so "lon 120.9822 lat 14.6042" reads the same as the long
+// form. Bearing suffixes (N/S/E/W) flip the sign.
+const LABELLED_LAT_RE = /\blat(?:itude)?\b[\s:=]*(-?\d+(?:\.\d+)?)\s*(?:°\s*)?([NnSs])?/;
+const LABELLED_LON_RE = /\b(?:lon(?:g(?:itude)?)?|lng)\b[\s:=]*(-?\d+(?:\.\d+)?)\s*(?:°\s*)?([EeWw])?/;
+
+function applyBearing(value, bearing, negativeLetters) {
+  if (!bearing) return value;
+  const negative = negativeLetters.includes(bearing.toLowerCase());
+  return negative ? -Math.abs(value) : Math.abs(value);
+}
+
+/**
+ * Coordinates named anywhere in `text`, or null when it names none.
+ * Returns { latitude, longitude } only when both are present and in range,
+ * so a stray number in prose can never be mistaken for a position.
+ */
+export function parseCoordinates(text) {
+  if (typeof text !== 'string') return null;
+
+  const bare = LAT_LON_RE.exec(text);
+  if (bare) {
+    const latitude = Number(bare[1]);
+    const longitude = Number(bare[2]);
+    return inRange(latitude, longitude) ? { latitude, longitude } : null;
+  }
+
+  const lat = LABELLED_LAT_RE.exec(text);
+  const lon = LABELLED_LON_RE.exec(text);
+  if (!lat || !lon) return null;
+
+  const latitude = applyBearing(Number(lat[1]), lat[2], ['s']);
+  const longitude = applyBearing(Number(lon[1]), lon[2], ['w']);
+  return inRange(latitude, longitude) ? { latitude, longitude } : null;
+}
+
+function inRange(latitude, longitude) {
+  return Number.isFinite(latitude) && Number.isFinite(longitude)
+    && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180;
+}
 
 function stripTimeWords(text) {
   let out = text;
@@ -100,7 +152,7 @@ export function parseWhen(text) {
   if (typeof text !== 'string') return null;
   const t = text.toLowerCase();
 
-  const relative = t.match(RELATIVE_WINDOW_RE);
+  const relative = t.match(RELATIVE_WINDOW_RE) ?? t.match(BARE_WINDOW_RE);
   if (relative) {
     const n = NUMBER_WORDS[relative[1]] ?? Number(relative[1]);
     if (Number.isFinite(n) && n > 0) {

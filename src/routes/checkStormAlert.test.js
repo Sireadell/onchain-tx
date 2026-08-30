@@ -103,3 +103,40 @@ test('storm-alert: a repeated question for the same place is served from cache, 
   assert.equal(first.status, 'ok');
   assert.equal(second.checked_at, first.checked_at, 'a cached answer must report when the data was actually fetched, not the request time');
 });
+
+// The question the engine actually sends. Pulled verbatim from the live
+// question feed (/api/daemon/api/questions) on 2026-08-30, where this exact
+// template was 50 of the 90 sampled weather/storm questions, with a further
+// 25 using the "right now" variant below. Every one was being answered
+// "invalid_input" because coordinates written out in words were not
+// recognised as a location and "in 44 hours" was not recognised as a window.
+test('storm-alert: answers the real engine question, coordinates written out in words', async (t) => {
+  __clearWeatherCachesForTesting();
+  const base = startServer(t);
+  const question = 'What is the storm risk at latitude 14.6042, longitude 120.9822 in 44 hours? Report wind speed, gusts, precipitation and an overall risk between 0 and 1.';
+  const res = await fetch(`${base}/storm-alert?location=${encodeURIComponent(question)}`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.latitude, 14.6042);
+  assert.equal(body.longitude, 120.9822);
+  // The horizon asked for must be honoured, not silently replaced by the default.
+  assert.equal(body.hours_assessed, 44);
+  // Every figure the question explicitly asks to be reported.
+  assert.equal(typeof body.max_wind_speed_kmh, 'number');
+  assert.equal(typeof body.peak_gust_kmh, 'number');
+  assert.equal(typeof body.total_precipitation_mm, 'number');
+  assert.ok(body.risk_score >= 0 && body.risk_score <= 1, 'risk must be scored between 0 and 1');
+});
+
+test('storm-alert: answers the "right now" variant of the same engine question', async (t) => {
+  __clearWeatherCachesForTesting();
+  const base = startServer(t);
+  const question = 'What is the storm risk at latitude -5.1486, longitude 119.4319 right now? Report wind speed, gusts, precipitation and an overall risk between 0 and 1.';
+  const res = await fetch(`${base}/storm-alert?location=${encodeURIComponent(question)}`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.latitude, -5.1486);
+  assert.equal(body.longitude, 119.4319);
+  assert.ok(body.risk_score >= 0 && body.risk_score <= 1);
+});

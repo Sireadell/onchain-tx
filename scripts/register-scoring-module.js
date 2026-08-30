@@ -4,7 +4,7 @@ import { ethers } from 'ethers';
 const DIAMOND = '0x5a2324aA18613FAD4e44bDF0d6c73Ec1f6D87ff8';
 const RPC = 'https://base-sepolia-rpc.publicnode.com';
 
-const WASM_URL = 'https://gateway.pinata.cloud/ipfs/QmSCooTVS8mzMG8avvKf5LD6DTAgW88D6mScVuimkjoSTB';
+const WASM_URL = 'https://gateway.pinata.cloud/ipfs/QmbMLfDHBmvUKJFbeWPJSrXRSgo3JJ78HgPnqoTyjT4sLX';
 const INTENT = 'ONCHAIN_TX_LOOKUP';
 const wasmPath = new URL(
   '../scoring-module/target/wasm32-unknown-unknown/release/txlens_onchain_tx_lookup_scorer.wasm',

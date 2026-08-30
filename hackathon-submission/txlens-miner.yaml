@@ -35,7 +35,7 @@ description: >
   TxLens answers on-chain and market questions with a single verifiable
   number or status, sourced live and never cached stale.
 
-  It covers thirteen canonical intents. ONCHAIN_TX_LOOKUP: given a transaction
+  It covers nine canonical intents. ONCHAIN_TX_LOOKUP: given a transaction
   hash, is it confirmed, reverted, pending or not found, and what did it do.
   GAS_PRICE: what does a transaction cost right now on a named chain.
   WALLET_BALANCE_CHECK: what native coin or ERC-20 token does a given
@@ -44,31 +44,14 @@ description: >
   chain. CRYPTO_PRICE: what is a coin or on-chain token worth in USD.
   STOCK_PRICE: what is a listed equity trading at. SSL_VERIFICATION: is a
   domain's TLS certificate valid and when does it expire, from a real live
-  handshake. WEATHER_FORECAST: what will the weather do at a named place on
-  the day or over the window asked about, answering the aspect emphasised
-  (rain, wind, snow, freeze, temperature) rather than reciting a range.
-  STORM_ALERT: how disruptive will the weather be at a place over the next
-  48 hours, graded and scored with the operational response it calls for.
-  IP_GEOLOCATION: where is an IPv4 or IPv6 address, on whose network, and
-  is it a proxy, VPN or datacenter address. ACADEMIC_SEARCH: which
-  peer-reviewed papers exist on a topic, with journal, authors, citation
-  counts and DOIs. FRAUD_DETECTION: how likely is a given address or scheme
-  to be fraudulent.
+  handshake. FRAUD_DETECTION: how likely is a given address or scheme to be
+  fraudulent.
 
-  On-chain reads run across five EVM chains (Ethereum, Base, Arbitrum,
-  Optimism, Polygon) over a shared retry, rate-limit, cache and RPC-budget
-  layer. Every signal is read live at the moment of the request, never
-  served from a stale cache, and every answer carries a complete
-  plain-language `summary` that states the verdict and then each thing
-  actually checked, a deterministic `canonical` string for hashing, and a
-  0-1 `confidence` that reflects real certainty rather than a fixed
-  constant: forecast confidence falls with range, and IP geolocation is
-  reported at 0.95 because it is reliable to the country and only
-  approximate to the city.
-
-  Every endpoint accepts the caller's whole question in place of its
-  structured parameter, and answers it, rather than refusing input that
-  is not already reduced to a bare parameter.
+  Reads run across five EVM chains (Ethereum, Base, Arbitrum, Optimism,
+  Polygon) over a shared retry, rate-limit, cache and RPC-budget layer.
+  Every answer carries a plain-language `summary`, a deterministic
+  `canonical` string for hashing, and a 0-1 `confidence` that reflects
+  real confirmation depth rather than a fixed constant.
 base_url: https://telegraph-onchain-tx-lookup-miner.onrender.com
 
 auth:
@@ -163,98 +146,12 @@ endpoints:
     description: >
       SSL_VERIFICATION. Answers "is the SSL certificate for example.com
       valid", "when does this domain's TLS certificate expire", "who issued
-      the certificate for this host". Takes a hostname and reports the
-      certificate that host is actually serving right now, from a real live
-      TLS handshake performed at request time rather than a cached or
-      certificate-transparency lookup, which disagree whenever a host still
-      serves an old certificate. Reports a named verdict (valid, expired,
-      self_signed, hostname_mismatch, untrusted), issuer, validity window,
-      days to expiry, how many certificates the server presented and
-      whether the chain reaches a trusted root, which name on the
-      certificate the request matched, and the TLS version and cipher
-      actually negotiated, flagging deprecated TLS 1.0/1.1 that will fail
-      for modern clients whatever the certificate says. Params: domain
-      (required, a bare hostname such as "example.com", a full URL, a
-      host:port pair, or a question naming the domain).
-  - path: /weather-forecast
-    external_path: /weather-forecast
-    method: GET
-    description: >
-      WEATHER_FORECAST. Answers "what's the weather in Tokyo the next
-      three days", "will it rain in London tomorrow", "how windy will it
-      be in Cape Town on Friday", "will it snow in Oslo next week", and
-      coordinate forms such as "what is the forecast at latitude 14.6042,
-      longitude 120.9822 in 44 hours?". Accepts coordinates written out in
-      full ("latitude 14.6042, longitude 120.9822"), a compact "lat,lon"
-      pair, a place name, or the whole question, and answers the specific
-      thing asked: the day or window named (right now, today, tonight,
-      tomorrow, a weekday, this weekend, this week, in N hours, the next N
-      days or hours) and the aspect emphasised (rain, wind, snow, storm,
-      freeze, temperature), leading with a direct yes or no on that aspect
-      the way a person would answer, then giving the expected condition in
-      plain words, temperature range, precipitation total and chance of
-      precipitation, snowfall, and peak wind speed with gusts and direction.
-      Read live from the forecast service at request time. Params:
-      location (required, coordinates in either form, a place name, or a
-      whole question), days (optional, 1-16), when (optional, overrides
-      the window parsed from the question), focus (optional, one of rain,
-      wind, snow, storm, freeze, temperature).
-  - path: /storm-alert
-    external_path: /storm-alert
-    method: GET
-    description: >
-      STORM_ALERT. Reports storm risk at a location over a stated window,
-      answering questions of the form "what is the storm risk at latitude
-      14.6042, longitude 120.9822 in 44 hours?" and "what is the storm risk
-      at latitude -5.1486, longitude 119.4319 right now?", as well as
-      "is there a storm risk in Miami this weekend". Reports exactly what
-      such a question asks for: wind speed, gusts, precipitation, and an
-      overall risk between 0 and 1. Accepts coordinates written out in full
-      ("latitude 14.6042, longitude 120.9822"), a compact "lat,lon" pair, a
-      place name, or the whole question, and reads the window from it
-      ("right now", "in N hours", "over the next 48 hours", "this weekend").
-      Alongside the 0-1 risk score a contract can threshold on, it returns a
-      disruption grade (LOW/MODERATE/HIGH/SEVERE) from peak wind gust and
-      its Beaufort force named in plain words, sustained wind speed and
-      direction, total precipitation, forecast thunderstorm and hail hours,
-      and the operational response that grade calls for. The window runs
-      from the current hour forward, not from midnight, so the peak gust
-      reported is always still ahead. Read live at request time.
-      Params: location (required, coordinates in either form, a place name,
-      or a whole question), hours (optional, default 48, also read from the
-      question).
-  - path: /ip-geolocate
-    external_path: /ip-geolocate
-    method: GET
-    description: >
-      IP_GEOLOCATION. Answers "where is 8.8.8.8 located", "what country is
-      this IP address from", "is this IP a VPN or a datacenter". Takes an
-      IPv4 or IPv6 address and reports its country, region, city, postal
-      code, coordinates, timezone, and network owner with ASN, plus
-      privacy and risk flags saying whether the address is a known proxy
-      or VPN exit, a hosting or datacenter network, or a mobile carrier
-      network, which is what fraud, bot-screening and geo-gating callers
-      actually need. Read live at request time. Confidence is reported as
-      0.95 rather than 1.0 because IP geolocation is reliable to the
-      country and only approximate to the city. Params: ip (required, a
-      bare IPv4 or IPv6 address such as "8.8.8.8" or
-      "2001:4860:4860::8888", or a whole question naming one).
-  - path: /academic-search
-    external_path: /academic-search
-    method: GET
-    description: >
-      ACADEMIC_SEARCH. Answers "find papers on federated learning",
-      "peer-reviewed research on fraud detection since 2020". Takes a
-      topic, or the whole question, and lists peer-reviewed journal
-      articles on it in relevance order, with preprints, theses and
-      datasets excluded, naming every paper found in the answer itself
-      with its title, authors, publishing journal, year, citation count
-      and DOI, plus a real excerpt from the leading paper's abstract and a
-      note on which of the results is the most cited. A date range stated
-      in the question ("since 2020", "between 2010 and 2020") is applied.
-      Read live from OpenAlex at request time. Params: topic (required),
-      limit (optional, 1-25, default 5), from_year (optional), to_year
-      (optional).
+      the certificate for this host". Takes a hostname and reports its
+      TLS/SSL certificate, chain and configuration from a real live
+      handshake performed at request time, not a cached or third-party
+      lookup, including issuer, validity window, days to expiry and
+      chain-completeness diagnostics. Params: domain (required, a bare
+      hostname such as "example.com", not a full URL).
   - path: /fraud-query
     external_path: /fraud-query
     method: POST
@@ -349,71 +246,11 @@ input_schema:
     domain:
       type: string
       description: >
-        Host to check on /ssl-check. A bare hostname ("example.com") is the
-        canonical form, but a full URL, a host:port pair, or a whole
-        question naming the domain are all accepted and reduced to the
-        hostname.
-    location:
-      type: string
-      description: >
-        Place to forecast for, on /weather-forecast and /storm-alert. A
-        place name ("London"), a "lat,lon" pair ("51.5,-0.13"), or the
-        whole question ("Will it rain in London tomorrow?"), in which case
-        the day or window and the aspect asked about are read from it too.
-    when:
-      type: string
-      description: >
-        Optional on /weather-forecast and /storm-alert. The day or window
-        asked about: today, tonight, tomorrow, a weekday name, this
-        weekend, this week, next week, or "the next N days"/"the next N
-        hours". Overrides whatever the question itself implies.
-    focus:
-      type: string
-      enum: [rain, wind, snow, storm, freeze, temperature]
-      description: >
-        Optional on /weather-forecast. Which aspect the answer should lead
-        with. Read from the question when omitted.
-    days:
-      type: integer
-      minimum: 1
-      maximum: 16
-      description: Forecast length in days on /weather-forecast. Defaults to 3, or to what the question asks for.
-    hours:
-      type: integer
-      minimum: 1
-      maximum: 384
-      description: Window length in hours on /storm-alert, counted from the current hour. Defaults to 48.
-    ip:
-      type: string
-      description: >
-        IPv4 or IPv6 address to locate on /ip-geolocate, e.g. "8.8.8.8" or
-        "2001:4860:4860::8888". A whole question containing one is also
-        accepted.
-    topic:
-      type: string
-      description: >
-        Research topic to search for on /academic-search. A whole question
-        is accepted, and a date range stated in it ("since 2020") is
-        applied.
-    from_year:
-      type: integer
-      description: Earliest publication year on /academic-search. Read from the question when omitted.
-    to_year:
-      type: integer
-      description: Latest publication year on /academic-search. Read from the question when omitted.
-    limit:
-      type: integer
-      minimum: 1
-      maximum: 25
-      description: How many papers to return on /academic-search. Defaults to 5.
+        Bare hostname to check, e.g. "example.com" — not a full URL (no
+        scheme, no path). Required on /ssl-check only.
     query:
       type: string
-      description: >
-        General factual fraud question for /fraud-query. Also accepted as a
-        fallback alias for the main parameter on /ssl-check,
-        /weather-forecast, /storm-alert, /ip-geolocate and
-        /academic-search, so a caller that forwards the raw question under
-        a generic name is still answered rather than refused.
+      description: General factual fraud question for /fraud-query.
     wallet:
       type: string
       pattern: "^0x[0-9a-fA-F]{40}$"
@@ -609,179 +446,6 @@ output_schema:
     days_until_expiry:
       type: integer
       description: /ssl-check only. Negative if already expired.
-    category:
-      type: string
-      enum: [valid, expired, self_signed, hostname_mismatch, untrusted]
-      description: /ssl-check only. The named certificate verdict.
-    chain_length:
-      type: integer
-      description: >
-        /ssl-check only. How many certificates the server itself presented.
-        Excludes the trust anchor the local store supplies, which the
-        server did not send.
-    matched_hostname:
-      type: [string, "null"]
-      description: /ssl-check only. Which name on the certificate the requested host matched, wildcards included. Null on a hostname mismatch.
-    covers_hostnames:
-      type: array
-      items:
-        type: string
-      description: /ssl-check only. Every DNS name and IP the certificate covers.
-    protocol:
-      type: [string, "null"]
-      description: /ssl-check only. TLS version actually negotiated, e.g. TLSv1.3.
-    cipher:
-      type: [string, "null"]
-      description: /ssl-check only. Cipher suite actually negotiated.
-    protocol_deprecated:
-      type: boolean
-      description: /ssl-check only. True for TLS 1.0/1.1, which most modern clients refuse regardless of certificate validity.
-    key_bits:
-      type: [integer, "null"]
-      description: /ssl-check only. Certificate public key size in bits.
-    fingerprint_sha256:
-      type: [string, "null"]
-      description: /ssl-check only. SHA-256 fingerprint of the leaf certificate.
-    checked_at:
-      type: string
-      description: >
-        ISO timestamp of the live read, on /ssl-check, /weather-forecast,
-        /storm-alert, /ip-geolocate and /academic-search.
-    location:
-      type: string
-      description: /weather-forecast and /storm-alert. The resolved place, as name, region, country.
-    when:
-      type: [string, "null"]
-      description: /weather-forecast only. The day or window the answer covers, as understood from the request.
-    focus:
-      type: [string, "null"]
-      description: /weather-forecast only. The aspect the answer leads with, as understood from the request.
-    condition:
-      type: string
-      description: /weather-forecast only. Expected condition in plain words, from the WMO weather code.
-    temp_min_c:
-      type: number
-      description: /weather-forecast only. Lowest temperature across the window, Celsius.
-    temp_max_c:
-      type: number
-      description: /weather-forecast only. Highest temperature across the window, Celsius.
-    precipitation_total_mm:
-      type: number
-      description: /weather-forecast only. Total precipitation across the window.
-    precipitation_probability_max_pct:
-      type: number
-      description: /weather-forecast only. Peak chance of precipitation across the window.
-    snowfall_total_cm:
-      type: number
-      description: /weather-forecast only. Total snowfall across the window.
-    peak_wind_kmh:
-      type: number
-      description: /weather-forecast only. Highest sustained wind across the window.
-    days:
-      type: array
-      items:
-        type: object
-      description: /weather-forecast only. Day-by-day breakdown of every field above.
-    hours_assessed:
-      type: integer
-      description: /storm-alert only. Length of the assessed window in hours.
-    window_start:
-      type: string
-      description: /storm-alert only. Local time of the first assessed hour. Starts at the current hour, not midnight.
-    window_end:
-      type: string
-      description: /storm-alert only. Local time of the last assessed hour.
-    peak_gust_kmh:
-      type: number
-      description: /storm-alert and /weather-forecast. Strongest wind gust in the window.
-    peak_gust_time:
-      type: string
-      description: /storm-alert only. Local time of the strongest gust. Always inside the future window.
-    max_wind_speed_kmh:
-      type: [number, "null"]
-      description: /storm-alert only. Strongest sustained wind in the window.
-    wind_direction:
-      type: [string, "null"]
-      description: /storm-alert only. Prevailing wind direction at the peak, as a compass word.
-    beaufort_force:
-      type: integer
-      minimum: 0
-      maximum: 12
-      description: /storm-alert only. Beaufort force of the peak gust.
-    beaufort_description:
-      type: string
-      description: /storm-alert only. That Beaufort force in plain words, e.g. "gale".
-    thunderstorm_hours:
-      type: integer
-      description: /storm-alert only. Forecast hours with a thunderstorm in the window.
-    severe_hail_hours:
-      type: integer
-      description: /storm-alert only. Forecast hours with a hail-bearing thunderstorm.
-    recommended_action:
-      type: string
-      description: /storm-alert only. The operational response the risk grade calls for.
-    country:
-      type: string
-      description: /ip-geolocate only.
-    country_code:
-      type: string
-      description: /ip-geolocate only. ISO 3166-1 alpha-2.
-    region:
-      type: string
-      description: /ip-geolocate only.
-    city:
-      type: string
-      description: /ip-geolocate only. Approximate, see confidence.
-    zip:
-      type: [string, "null"]
-      description: /ip-geolocate only.
-    latitude:
-      type: number
-      description: /ip-geolocate, /weather-forecast and /storm-alert.
-    longitude:
-      type: number
-      description: /ip-geolocate, /weather-forecast and /storm-alert.
-    timezone:
-      type: [string, "null"]
-      description: /ip-geolocate, /weather-forecast and /storm-alert. IANA timezone name.
-    isp:
-      type: string
-      description: /ip-geolocate only. Network operator.
-    org:
-      type: [string, "null"]
-      description: /ip-geolocate only. Registrant organization, when it differs from the operator.
-    asn:
-      type: [string, "null"]
-      description: /ip-geolocate only. Autonomous system number and name.
-    is_mobile:
-      type: boolean
-      description: /ip-geolocate only. Address belongs to a mobile carrier network.
-    is_proxy_or_vpn:
-      type: boolean
-      description: /ip-geolocate only. Address is a known proxy or VPN exit.
-    is_hosting:
-      type: boolean
-      description: /ip-geolocate only. Address belongs to a hosting or datacenter network rather than a residential connection.
-    total_matches:
-      type: integer
-      description: /academic-search only. How many peer-reviewed articles matched, of which `papers` is the returned page.
-    papers:
-      type: array
-      items:
-        type: object
-      description: >
-        /academic-search only. Each entry carries title, year,
-        citation_count, authors, venue, doi and abstract_snippet. Listed in
-        relevance order.
-    most_cited:
-      type: [object, "null"]
-      description: /academic-search only. Whichever returned paper carries the most citations. Reported alongside the results, not used to order them.
-    from_year:
-      type: [integer, "null"]
-      description: /academic-search only. Earliest publication year applied, whether passed or read from the question.
-    to_year:
-      type: [integer, "null"]
-      description: /academic-search only. Latest publication year applied, whether passed or read from the question.
     mode:
       type: string
       enum: [fraud_knowledge, wallet_risk]
@@ -804,16 +468,9 @@ output_schema:
       type: number
       minimum: 0
       maximum: 1
-      description: >
-        Wallet fraud risk on /assess-wallet. On /storm-alert, weather
-        disruption risk on the same 0-1 scale, for callers that threshold
-        rather than branch on the named grade.
     risk_level:
       type: string
-      enum: [LOW, ELEVATED, HIGH, NOT_APPLICABLE, MODERATE, SEVERE]
-      description: >
-        Named risk grade. LOW/ELEVATED/HIGH/NOT_APPLICABLE on
-        /assess-wallet; LOW/MODERATE/HIGH/SEVERE on /storm-alert.
+      enum: [LOW, ELEVATED, HIGH, NOT_APPLICABLE]
     reason_codes:
       type: array
       items:
@@ -844,10 +501,6 @@ semantics:
     - CRYPTO_PRICE
     - STOCK_PRICE
     - SSL_VERIFICATION
-    - WEATHER_FORECAST
-    - STORM_ALERT
-    - IP_GEOLOCATION
-    - ACADEMIC_SEARCH
     - FRAUD_DETECTION
 
 docs:

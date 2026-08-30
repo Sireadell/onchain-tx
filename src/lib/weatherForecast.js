@@ -3,7 +3,7 @@
 // the place name to coordinates, then pull the daily forecast for those
 // coordinates.
 
-import { locationCandidates } from './questionParse.js';
+import { locationCandidates, parseCoordinates } from './questionParse.js';
 
 const GEOCODE_URL = 'https://geocoding-api.open-meteo.com/v1/search';
 const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
@@ -157,9 +157,17 @@ async function fetchJson(url, label, attempt = 1) {
 // questionParse pulls out, in order, and keeping the first that geocodes:
 // a wrong guess costs one extra geocode call rather than a failed answer.
 export async function resolveLocation(input) {
-  const latLonMatch = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(input);
-  if (latLonMatch) {
-    return { name: input.trim(), latitude: Number(latLonMatch[1]), longitude: Number(latLonMatch[2]) };
+  // Coordinates win over any place name in the same sentence, and cost no
+  // geocode call at all. Covers both a bare "lat,lon" and the long form
+  // ("at latitude 14.6042, longitude 120.9822") that dominates real
+  // traffic on these intents. See parseCoordinates in questionParse.js.
+  const coords = parseCoordinates(input);
+  if (coords) {
+    return {
+      name: `${coords.latitude}, ${coords.longitude}`,
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+    };
   }
 
   const candidates = locationCandidates(input);

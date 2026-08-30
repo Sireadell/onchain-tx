@@ -100,6 +100,152 @@
       "ground_truth": "rating: elevated. Static analysis found a reentrancy pattern in an external call path, along with unchecked return values in two token transfer helpers.",
       "good_answer": "This contract's rating is elevated. Static analysis found a reentrancy pattern in an external call path, plus unchecked return values in two token transfer helpers.",
       "bad_answer": "This contract's rating is clean. Static analysis found a reentrancy pattern in an external call path, plus unchecked return values in two token transfer helpers."
+    },
+    {
+      "id": "wrong-conclusion-correct-transaction-facts",
+      "question": "What is the status of transaction 0x9090000000000000000000000000000000000000000000000000000000009090 on eth?",
+      "ground_truth": "Transaction reverted in block 21000909, from 0x9099000000000000000000000000000000000099 to 0xa0a00000000000000000000000000000000000a0, value 1250000000000000000 wei (1.25 ETH).",
+      "good_answer": "The transaction reverted in block 21000909. It was sent from 0x9099000000000000000000000000000000000099 to 0xa0a00000000000000000000000000000000000a0 with a value of 1.25 ETH.",
+      "bad_answer": "The transaction confirmed successfully in block 21000909. It was sent from 0x9099000000000000000000000000000000000099 to 0xa0a00000000000000000000000000000000000a0 with a value of 1.25 ETH."
+    },
+    {
+      "id": "one-digit-block-number-near-miss",
+      "question": "What is the status of transaction 0xa1a0000000000000000000000000000000000000000000000000000000000a1a on base?",
+      "ground_truth": "Transaction confirmed in block 21010101, from 0xa1b1000000000000000000000000000000000a1b to 0xb1c1000000000000000000000000000000000b1c, value 420000000000000000 wei (0.42 ETH).",
+      "good_answer": "Confirmed in block 21,010,101, from 0xa1b1000000000000000000000000000000000a1b to 0xb1c1000000000000000000000000000000000b1c, with a value of 0.42 ETH.",
+      "bad_answer": "Confirmed in block 21,010,102, from 0xa1b1000000000000000000000000000000000a1b to 0xb1c1000000000000000000000000000000000b1c, with a value of 0.42 ETH."
+    },
+    {
+      "id": "two-digit-wei-near-miss",
+      "question": "What is the status of transaction 0xb2b0000000000000000000000000000000000000000000000000000000000b2b on arbitrum?",
+      "ground_truth": "Transaction confirmed in block 21020202, from 0xb2c2000000000000000000000000000000000b2c to 0xc2d2000000000000000000000000000000000c2d, value 1234567890123456789 wei.",
+      "good_answer": "Confirmed in block 21020202. The transaction moved exactly 1234567890123456789 wei from 0xb2c2000000000000000000000000000000000b2c to 0xc2d2000000000000000000000000000000000c2d.",
+      "bad_answer": "Confirmed in block 21020202. The transaction moved exactly 1234567890123456700 wei from 0xb2c2000000000000000000000000000000000b2c to 0xc2d2000000000000000000000000000000000c2d."
+    },
+    {
+      "id": "fake-json-api-dump-with-decoy-facts",
+      "question": "What is the status of transaction 0xc3c0000000000000000000000000000000000000000000000000000000000c3c on eth?",
+      "ground_truth": "Transaction confirmed in block 21030303, from 0xc3d3000000000000000000000000000000000c3d to 0xd3e3000000000000000000000000000000000d3e, value 2000000000000000000 wei (2 ETH).",
+      "good_answer": "Confirmed in block 21030303. It transferred 2 ETH from 0xc3d3000000000000000000000000000000000c3d to 0xd3e3000000000000000000000000000000000d3e.",
+      "bad_answer": "API response: {\"status\":\"confirmed\",\"blockNumber\":21030303,\"from\":\"0xc3d3000000000000000000000000000000000c3d\",\"to\":\"0xd3e3000000000000000000000000000000000d3e\",\"value\":\"2000000000000000000\",\"debug\":{\"status\":\"reverted\",\"blockNumber\":21030304,\"value\":\"9000000000000000000\",\"from\":\"0xeeee000000000000000000000000000000000000\"}}"
+    },
+    {
+      "id": "query-hash-echo-is-optional",
+      "question": "What is the status of transaction 0xd4d0000000000000000000000000000000000000000000000000000000000d4d on eth?",
+      "ground_truth": "Transaction pending and not yet mined, from 0xd4e4000000000000000000000000000000000d4e to 0xe4f4000000000000000000000000000000000e4f.",
+      "good_answer": "The transaction is pending and has not yet been mined. It is from 0xd4e4000000000000000000000000000000000d4e to 0xe4f4000000000000000000000000000000000e4f.",
+      "good_answer_reworded": "Transaction 0xd4d0000000000000000000000000000000000000000000000000000000000d4d is still pending, from 0xd4e4000000000000000000000000000000000d4e to 0xe4f4000000000000000000000000000000000e4f.",
+      "bad_answer": "Transaction 0xd4d0000000000000000000000000000000000000000000000000000000000d4d was confirmed in block 21040404."
+    },
+    {
+      "id": "natural-language-sender-recipient-orientation-swap",
+      "question": "What is the status of transaction 0xe5e0000000000000000000000000000000000000000000000000000000000e5e on base?",
+      "ground_truth": "Transaction confirmed in block 21050505, from 0xe5f5000000000000000000000000000000000e5f to 0xf506000000000000000000000000000000000f50, value 750000000000000000 wei (0.75 ETH).",
+      "good_answer": "Confirmed in block 21050505. The sender 0xe5f5000000000000000000000000000000000e5f sent 0.75 ETH to recipient 0xf506000000000000000000000000000000000f50.",
+      "bad_answer": "Confirmed in block 21050505. The sender 0xf506000000000000000000000000000000000f50 sent 0.75 ETH to recipient 0xe5f5000000000000000000000000000000000e5f."
+    },
+    {
+      "id": "self-transfer-is-not-a-role-swap",
+      "question": "What is the status of transaction 0xf6f0000000000000000000000000000000000000000000000000000000000f6f on eth?",
+      "ground_truth": "Transaction confirmed in block 21060606, from 0xf6a6000000000000000000000000000000000f6a to 0xf6a6000000000000000000000000000000000f6a, value 100000000000000000 wei (0.1 ETH).",
+      "good_answer": "Confirmed in block 21060606. The transaction sent 0.1 ETH from 0xf6a6000000000000000000000000000000000f6a back to the same recipient 0xf6a6000000000000000000000000000000000f6a.",
+      "bad_answer": "Transaction reverted in block 21060606."
+    },
+    {
+      "id": "supporting-confirmations-vs-fabricated-block",
+      "question": "What is the status of transaction 0xabababababababababababababababababababababababababababababababab on eth?",
+      "ground_truth": "Transaction confirmed in block 23000001, from 0x1111111111111111111111111111111111111111 to 0x2222222222222222222222222222222222222222, value 1000000000000000000 wei (1 ETH).",
+      "good_answer": "Confirmed in block 23000001. It sent 1 ETH from 0x1111111111111111111111111111111111111111 to 0x2222222222222222222222222222222222222222 and has 12 confirmations.",
+      "bad_answer": "Confirmed in block 23000002. It sent 1 ETH from 0x1111111111111111111111111111111111111111 to 0x2222222222222222222222222222222222222222.",
+      "min_good_score": 0.8
+    },
+    {
+      "id": "query-hash-echo-in-compact-json",
+      "question": "What is the status of transaction 0x1212121212121212121212121212121212121212121212121212121212121212 on eth?",
+      "ground_truth": "Transaction pending, from 0x1111111111111111111111111111111111111111 to 0x2222222222222222222222222222222222222222.",
+      "good_answer": "The transaction is still pending and has not been mined. It is from 0x1111111111111111111111111111111111111111 to 0x2222222222222222222222222222222222222222. Reference: {\"txHash\":\"0X1212121212121212121212121212121212121212121212121212121212121212\"}.",
+      "bad_answer": "Transaction confirmed in block 23001001.",
+      "min_good_score": 0.41
+    },
+    {
+      "id": "fake-full-address-in-compact-json",
+      "question": "What is the status of transaction 0x1313131313131313131313131313131313131313131313131313131313131313 on eth?",
+      "ground_truth": "Transaction confirmed in block 23001002, from 0x3333333333333333333333333333333333333333 to 0x4444444444444444444444444444444444444444, value 1 ETH.",
+      "good_answer": "Confirmed in block 23001002, from 0x3333333333333333333333333333333333333333 to 0x4444444444444444444444444444444444444444, value 1 ETH.",
+      "bad_answer": "{\"status\":\"confirmed\",\"from\":\"0x3333333333333333333333333333333333333333\",\"to\":\"0x4444444444444444444444444444444444444444\",\"debug\":{\"related\":\"0x9999999999999999999999999999999999999999\"}}",
+      "max_bad_score": 0.4
+    },
+    {
+      "id": "prose-with-fake-full-address-in-json-fragment",
+      "question": "What is the status of transaction 0x1919191919191919191919191919191919191919191919191919191919191919 on eth?",
+      "ground_truth": "Transaction confirmed in block 23001008, from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, value 1 ETH.",
+      "good_answer": "The transaction is confirmed in block 23001008. It sent 1 ETH from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.",
+      "bad_answer": "The transaction is confirmed in block 23001008. It sent 1 ETH from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb. Extra diagnostic data: {\"related\":\"0x9999999999999999999999999999999999999999\"}.",
+      "max_bad_score": 0.4
+    },
+    {
+      "id": "fake-full-transaction-hash",
+      "question": "What is the status of transaction 0x1414141414141414141414141414141414141414141414141414141414141414 on eth?",
+      "ground_truth": "Transaction confirmed in block 23001003, from 0x5555555555555555555555555555555555555555 to 0x6666666666666666666666666666666666666666.",
+      "good_answer": "Confirmed in block 23001003, from 0x5555555555555555555555555555555555555555 to 0x6666666666666666666666666666666666666666.",
+      "bad_answer": "Confirmed in block 23001003, from 0x5555555555555555555555555555555555555555 to 0x6666666666666666666666666666666666666666. Related transaction: 0xabababababababababababababababababababababababababababababababab.",
+      "max_bad_score": 0.4
+    },
+    {
+      "id": "fake-address-after-two-hundred-words",
+      "question": "What is the status of transaction 0x1515151515151515151515151515151515151515151515151515151515151515 on eth?",
+      "ground_truth": "Transaction confirmed in block 23001004, from 0x7777777777777777777777777777777777777777 to 0x8888888888888888888888888888888888888888.",
+      "good_answer": "Confirmed in block 23001004, from 0x7777777777777777777777777777777777777777 to 0x8888888888888888888888888888888888888888.",
+      "bad_answer": "Confirmed in block 23001004, from 0x7777777777777777777777777777777777777777 to 0x8888888888888888888888888888888888888888. note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note note related 0x9999999999999999999999999999999999999999.",
+      "max_bad_score": 0.4
+    },
+    {
+      "id": "malformed-41-character-address-is-not-capped",
+      "question": "What is the status of transaction 0x1616161616161616161616161616161616161616161616161616161616161616 on eth?",
+      "ground_truth": "Transaction confirmed in block 23001005, from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.",
+      "good_answer": "Confirmed in block 23001005, from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb. Diagnostic reference 0xccccccccccccccccccccccccccccccccccccccccc.",
+      "bad_answer": "Transaction reverted in block 23001005.",
+      "min_good_score": 0.41
+    },
+    {
+      "id": "malformed-65-character-hash-is-not-capped",
+      "question": "What is the status of transaction 0x1717171717171717171717171717171717171717171717171717171717171717 on eth?",
+      "ground_truth": "Transaction pending, from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.",
+      "good_answer": "Pending, from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb. Diagnostic reference 0xddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.",
+      "bad_answer": "Transaction confirmed in block 23001006.",
+      "min_good_score": 0.41
+    },
+    {
+      "id": "uppercase-full-address-matches-lowercase-truth",
+      "question": "What is the status of transaction 0x1818181818181818181818181818181818181818181818181818181818181818 on eth?",
+      "ground_truth": "Transaction confirmed in block 23001007, from 0xabcdefabcdefabcdefabcdefabcdefabcdefabcd to 0x1234567890abcdef1234567890abcdef12345678.",
+      "good_answer": "Confirmed in block 23001007, from 0XABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD to 0X1234567890ABCDEF1234567890ABCDEF12345678.",
+      "bad_answer": "Transaction reverted in block 23001007.",
+      "min_good_score": 0.41
+    },
+    {
+      "id": "fake-address-glued-after-letter-is-capped",
+      "question": "What is the status of transaction 0x2020202020202020202020202020202020202020202020202020202020202020 on eth?",
+      "ground_truth": "Transaction confirmed in block 23001009, from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, value 1 ETH.",
+      "good_answer": "The transaction is confirmed in block 23001009. It sent 1 ETH from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.",
+      "bad_answer": "The transaction is confirmed in block 23001009. It sent 1 ETH from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb. Debug ref0x9999999999999999999999999999999999999999.",
+      "max_bad_score": 0.4
+    },
+    {
+      "id": "hex-run-followed-by-underscore-is-not-capped",
+      "question": "What is the status of transaction 0x2121212121212121212121212121212121212121212121212121212121212121 on eth?",
+      "ground_truth": "Transaction confirmed in block 23001010, from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, value 1 ETH.",
+      "good_answer": "The transaction is confirmed in block 23001010. It sent 1 ETH from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb. Diagnostic 0xcccccccccccccccccccccccccccccccccccccccc_debug.",
+      "bad_answer": "Transaction reverted in block 23001010.",
+      "min_good_score": 0.41
+    },
+    {
+      "id": "fake-hash-glued-after-digit-is-capped",
+      "question": "What is the status of transaction 0x2222222222222222222222222222222222222222222222222222222222222222 on eth?",
+      "ground_truth": "Transaction confirmed in block 23001011, from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, value 1 ETH.",
+      "good_answer": "The transaction is confirmed in block 23001011. It sent 1 ETH from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.",
+      "bad_answer": "The transaction is confirmed in block 23001011. It sent 1 ETH from 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb. Debug 7ref0xabababababababababababababababababababababababababababababababab.",
+      "max_bad_score": 0.4
     }
   ]
 }

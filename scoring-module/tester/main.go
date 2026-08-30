@@ -18,6 +18,8 @@ type Case struct {
 	GoodAnswer       string `json:"good_answer"`
 	GoodAnswerReword string `json:"good_answer_reworded"`
 	BadAnswer        string `json:"bad_answer"`
+	MinGoodScore     *float32 `json:"min_good_score"`
+	MaxBadScore      *float32 `json:"max_bad_score"`
 }
 
 type Fixtures struct {
@@ -42,6 +44,14 @@ func main() {
 	var fixtures Fixtures
 	if err := json.Unmarshal(fixtureBytes, &fixtures); err != nil {
 		panic(err)
+	}
+	requestedIDs := map[string]bool{}
+	if requested := os.Getenv("ONLY_CASES"); requested != "" {
+		for _, id := range strings.Split(requested, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				requestedIDs[id] = true
+			}
+		}
 	}
 
 	ctx := context.Background()
@@ -154,6 +164,9 @@ func main() {
 	fmt.Println("\n=== Fixture cases ===")
 	var scores []float32
 	for _, c := range fixtures.Cases {
+		if len(requestedIDs) > 0 && !requestedIDs[c.ID] {
+			continue
+		}
 		fmt.Printf("--- %s ---\n", c.ID)
 		self := rank(c.Question, c.GroundTruth, c.GroundTruth)
 		good := rank(c.Question, c.GroundTruth, c.GoodAnswer)
@@ -168,6 +181,18 @@ func main() {
 		}
 		if !(good > bad) {
 			fail("%s: good_answer (%.4f) did not beat bad_answer (%.4f)", c.ID, good, bad)
+		}
+		if c.MinGoodScore != nil {
+			fmt.Printf("  minimum good score: %.4f\n", *c.MinGoodScore)
+			if good < *c.MinGoodScore {
+				fail("%s: good_answer %.4f < required minimum %.4f", c.ID, good, *c.MinGoodScore)
+			}
+		}
+		if c.MaxBadScore != nil {
+			fmt.Printf("  maximum bad score: %.4f\n", *c.MaxBadScore)
+			if bad > *c.MaxBadScore {
+				fail("%s: bad_answer %.4f > required maximum %.4f", c.ID, bad, *c.MaxBadScore)
+			}
 		}
 
 		if c.GoodAnswerReword != "" {

@@ -763,6 +763,173 @@ fn hallucination_ratio(answer: &str, ground_truth: &str, question: &str) -> f32 
     }
 }
 
+// Returns the byte index just after a standalone full Ethereum address or
+// transaction hash that starts at `start`. The scanner intentionally finds
+// `0x` anywhere in the answer: `ref0x...` is still an embedded fabricated
+// identifier and must not bypass the ceiling. The right edge, however, must
+// end an ASCII token. This prevents `0x<40 hex>_debug` from being mistaken
+// for a standalone address just because its hex run has a valid length.
+fn full_hex_fact_end(bytes: &[u8], start: usize) -> Option<usize> {
+    if start + 2 > bytes.len()
+        || bytes[start] != b'0'
+        || !(bytes[start + 1] == b'x' || bytes[start + 1] == b'X')
+    {
+        return None;
+    }
+
+    let mut end = start + 2;
+    while end < bytes.len() && bytes[end].is_ascii_hexdigit() {
+        end += 1;
+    }
+    let hex_len = end - (start + 2);
+    let right_boundary = end >= bytes.len()
+        || (!bytes[end].is_ascii_alphanumeric() && bytes[end] != b'_');
+    if (hex_len == 40 || hex_len == 64) && right_boundary {
+        Some(end)
+    } else {
+        None
+    }
+}
+
+fn ascii_equal_ignore_case(left: &[u8], right: &[u8]) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right.iter()).all(|(a, b)| a.eq_ignore_ascii_case(b))
+}
+
+fn text_contains_same_full_hex_fact(text: &str, fact: &[u8]) -> bool {
+    let bytes = text.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if let Some(end) = full_hex_fact_end(bytes, i) {
+            if ascii_equal_ignore_case(&bytes[i..end], fact) {
+                return true;
+            }
+            i = end;
+        } else {
+            i += 1;
+        }
+    }
+    false
+}
+
+// A made-up full address or transaction hash changes the factual meaning of
+// an on-chain answer. This byte scanner covers prose and compact JSON without
+// Numeric hard caps are handled separately by role-aware label scanning below.
+fn has_untrusted_full_hex_fact(answer: &str, ground_truth: &str, question: &str) -> bool {
+    let bytes = answer.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if let Some(end) = full_hex_fact_end(bytes, i) {
+            let fact = &bytes[i..end];
+            if !text_contains_same_full_hex_fact(ground_truth, fact)
+                && !text_contains_same_full_hex_fact(question, fact)
+            {
+                return true;
+            }
+            i = end;
+        } else {
+            i += 1;
+        }
+    }
+    false
+}
+
+const AMOUNT_LABELS: [&str; 6] = ["value_wei", "amount_wei", "value", "amount", "eth", "wei"];
+const BLOCK_LABELS: [&str; 3] = ["block_number", "blocknumber", "block"];
+
+fn label_at(bytes: &[u8], start: usize, label: &[u8]) -> bool {
+    if start + label.len() > bytes.len() {
+        return false;
+    }
+    if !ascii_equal_ignore_case(&bytes[start..start + label.len()], label) {
+        return false;
+    }
+    let before_ok = start == 0 || !bytes[start - 1].is_ascii_alphanumeric() && bytes[start - 1] != b'_';
+    let end = start + label.len();
+    let after_ok = end >= bytes.len() || !bytes[end].is_ascii_alphanumeric() && bytes[end] != b'_';
+    before_ok && after_ok
+}
+
+// Finds numbers attached to a semantic label, rather than treating every
+// digit as interchangeable. This handles prose and compact JSON alike:
+// "value 1.5 ETH", "value_wei":"1500...", and "blockNumber":123.
+// Unit labels are also accepted so "amount 7 ETH" and "900 wei" are tied to
+// the amount role without confusing them with confirmation counts.
+fn find_label_number_pairs<'a>(text: &'a str, labels: &[&str], out: &mut [(u8, &'a str)]) -> usize {
+    let bytes = text.as_bytes();
+    let mut n = 0usize;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let mut matched_label: Option<&str> = None;
+        for &label in labels {
+            if label_at(bytes, i, label.as_bytes()) {
+                matched_label = Some(label);
+                break;
+            }
+        }
+        if let Some(label) = matched_label {
+            let role = if labels.as_ptr() == AMOUNT_LABELS.as_ptr() { 0 } else { 1 };
+            let label_end = i + label.len();
+            if label == "eth" || label == "wei" {
+                // Unit labels bind only to the immediately preceding number.
+                let mut end = i;
+                while end > 0 && bytes[end - 1].is_ascii_whitespace() { end -= 1; }
+                let mut begin = end;
+                while begin > 0 && (bytes[begin - 1].is_ascii_digit() || bytes[begin - 1] == b',' || bytes[begin - 1] == b'.') { begin -= 1; }
+                if begin < end && n < out.len() {
+                    out[n] = (role, &text[begin..end]);
+                    n += 1;
+                }
+            } else {
+                let window_end = (label_end + 80).min(bytes.len());
+                let mut start = label_end;
+                while start < window_end && !bytes[start].is_ascii_digit() { start += 1; }
+                let mut end = start;
+                while end < window_end
+                    && (bytes[end].is_ascii_digit()
+                        || bytes[end] == b','
+                        || (role == 0 && bytes[end] == b'.'))
+                {
+                    end += 1;
+                }
+                if start < end && n < out.len() {
+                    out[n] = (role, &text[start..end]);
+                    n += 1;
+                }
+            }
+            i = label_end;
+        } else {
+            i += 1;
+        }
+    }
+    n
+}
+
+fn has_wrong_labeled_number(answer: &str, ground_truth: &str) -> bool {
+    let mut gt: [(u8, &str); 24] = [(0, ""); 24];
+    let gt_n = find_label_number_pairs(ground_truth, &AMOUNT_LABELS, &mut gt);
+    let mut gt_blocks: [(u8, &str); 8] = [(0, ""); 8];
+    let gt_bn = find_label_number_pairs(ground_truth, &BLOCK_LABELS, &mut gt_blocks);
+    let mut ma: [(u8, &str); 32] = [(0, ""); 32];
+    let ma_n = find_label_number_pairs(answer, &AMOUNT_LABELS, &mut ma);
+    let mut ma_blocks: [(u8, &str); 12] = [(0, ""); 12];
+    let ma_bn = find_label_number_pairs(answer, &BLOCK_LABELS, &mut ma_blocks);
+
+    // The first amount pair is the primary labeled fact (value/value_wei or
+    // the first unit-bearing amount). Later pairs are usually an ETH/wei
+    // restatement of that same fact, so they must not create a false cap.
+    if gt_n > 0 {
+        let g = gt[0].1;
+        if !ma.iter().take(ma_n).any(|&(_, a)| numeric_tokens_equivalent(a, g))
+            && ma_n > 0 { return true; }
+    }
+    for &(_, g) in gt_blocks.iter().take(gt_bn) {
+        if !ma_blocks.iter().take(ma_bn).any(|&(_, a)| tokens_eq_ignoring_commas(a, g))
+            && ma_blocks.iter().take(ma_bn).any(|&(_, a)| !tokens_eq_ignoring_commas(a, g)) { return true; }
+    }
+    false
+}
+
 const SENDER_WORDS: [&str; 3] = ["from", "sender", "originator"];
 const RECIPIENT_WORDS: [&str; 4] = ["to", "recipient", "receiver", "destination"];
 
@@ -830,6 +997,18 @@ fn role_violation_ratio(answer: &str, ground_truth: &str) -> f32 {
     let mut checked = 0u32;
     let mut violations = 0u32;
     for &(grole, gaddr) in gt_pairs.iter().take(gt_n) {
+        // A self-transfer legitimately binds the same address to both roles.
+        // Its direction cannot be reversed, so it must not be counted as an
+        // unambiguous sender/recipient fact.
+        let ambiguous_self_transfer = gt_pairs
+            .iter()
+            .take(gt_n)
+            .any(|&(other_role, other_addr)| {
+                other_role != grole && tokens_eq_ignoring_commas(gaddr, other_addr)
+            });
+        if ambiguous_self_transfer {
+            continue;
+        }
         for &(mrole, maddr) in ma_pairs.iter().take(ma_n) {
             if tokens_eq_ignoring_commas(gaddr, maddr) {
                 checked += 1;
@@ -957,21 +1136,39 @@ fn score(question: &str, ground_truth: &str, miner_answer: &str) -> f32 {
     // its own, since it only ever measures recall (ground_truth ->
     // answer). A right status word plus fabricated or swapped facts is
     // still a wrong answer.
+    // Facts already present in the question remain exempt inside
+    // hallucination_ratio, preserving concise answers that simply echo the
+    // requested transaction hash. Keep this penalty moderate because a
+    // correct answer can include useful, truthful supporting detail absent
+    // from a short ground-truth statement.
     base -= hallucination_ratio(miner_answer, ground_truth, question) * 0.40;
-    base -= role_violation_ratio(miner_answer, ground_truth) * 0.45;
+
+    // Reversing sender and recipient changes the meaning of a transaction
+    // even when every address and amount is otherwise correct. Treat it as a
+    // stronger factual error than an ordinary omission.
+    base -= role_violation_ratio(miner_answer, ground_truth) * 0.65;
 
     // A fixed, non-dilutable cost per missing/wrong salient fact — the
     // direct fix for the dilution problem: this doesn't shrink as
     // ground_truth grows longer, unlike salient_ratio's denominator.
     base -= (cb.salient_missing.min(3) as f32) * 0.14;
 
-    if base < 0.0 {
+    let mut final_score = if base < 0.0 {
         0.0
     } else if base > 1.0 {
         1.0
     } else {
         base
+    };
+
+    // Preserve the moderate ratio deduction above for ordinary supporting
+    // details. A fabricated full identifier, or a confidently stated wrong
+    // amount/block fact, receives the same hard ceiling after normal scoring.
+    if has_untrusted_full_hex_fact(miner_answer, ground_truth, question)
+        || has_wrong_labeled_number(miner_answer, ground_truth) {
+        final_score = final_score.min(0.40);
     }
+    final_score
 }
 
 #[unsafe(no_mangle)]

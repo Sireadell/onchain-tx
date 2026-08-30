@@ -1,0 +1,194 @@
+# Telegraph Protocol miner config — schema follows the pattern confirmed
+# for the sibling miners in this account (see
+# C:\Users\DELL\telegraph-onchain-tx-lookup\miner.yaml and
+# C:\Users\DELL\telegraph\miner.yaml), verified against
+# docs.telegraphprotocol.com/docs/miners/yaml-config.
+#
+# `id: 0` was WRONG — conflates this field with the on-chain registrationId.
+# They are two different keys. This YAML `id` is the routing key for
+# /engine/v1/ask/{id} and must be globally unused; `id: 0` collided with
+# active miner "lacre-meteo" and caused registration 120 to be REJECTED
+# (confirmed live on explorer.telegraphprotocol.com/miners/120 — same root
+# cause already found and fixed for the sibling txlens miner). First fix
+# attempt (id: 9006) ALSO collided -- with active miner
+# "verity-current-weather" -- and got registration 187 rejected too (small
+# sequential-looking ids like 9006 are apparently a popular choice band).
+# Fixed for real 2026-08-24: id changed to 94217603, a deliberately
+# distinctive 8-digit id checked unused against the full current
+# /api/integrations list (80 entries) to minimize any further collision
+# risk.
+#
+# Registration is live under routing id 94217603. The base_url was
+# confirmed live 2026-08-18: Render assigned
+#     telegraph-sentinel-40vp.onrender.com (not the plain telegraph-sentinel
+#     name assumed earlier), verified via GET /health returning 200.
+#
+# NOTE on evidence field casing: `semantics.signal_mapping` below points
+# at Sentinel's shared top-level fields (label, reason, confidence). The
+# nested `evidence[]` array's own fields
+# (evidenceId, signalCode, txHashes, ...) are still camelCase in the
+# current implementation (src/core/evidence/model.js). Per the 2026-08-16
+# audit, whether that nested casing is actually incompatible with any
+# downstream consumer is unconfirmed, not fixed either way. Do not change
+# output_schema.evidence below to snake_case without also changing the
+# implementation, and don't do that without a separate decision.
+
+version: "1"
+kind: miner
+id: 94217603
+slug: telegraph-sentinel
+protocol: generic
+name: Telegraph Sentinel
+description: >
+  Source-backed factual fraud knowledge and evidence-backed Ethereum wallet
+  fraud-risk assessment. Answers questions about documented fraud schemes,
+  cases, and perpetrators. For wallet questions, checks sanctions and scam
+  registries, direct and circular funding, coordinated relay funding, funder
+  fan-out and clusters, known exchange and bridge context, burn/null and known
+  mixer applicability, and dangerous contract controls. Also reports live
+  Aave v3 debt health as financial context without treating distress alone as
+  fraud. Returns confidence and coverage limits, with transaction evidence
+  where available.
+base_url: https://telegraph-sentinel-40vp.onrender.com
+
+auth:
+  type: none
+
+# input_schema/output_schema are top-level-only fields, not per-endpoint
+# (endpoints[] has additionalProperties: false — only path, external_path,
+# method, description, endpoint_base_url, content_type, multipart_fields,
+# param_map are allowed there). This is the exact bug that got TxLens
+# (telegraph-onchain-tx-lookup) silently rejected on-chain; see
+# LEARNINGS.md. Fixed here 2026-08-18, before ever registering.
+endpoints:
+  - path: /fraud-query
+    external_path: /fraud-query
+    method: POST
+    description: >
+      Answers source-backed factual questions about known fraud schemes,
+      fraud cases, and perpetrators. JSON body: { "query": "..." }.
+  - path: /assess-wallet
+    external_path: /assess-wallet
+    method: GET
+    description: >
+      Assesses an Ethereum address for fraud risk using registries, funding
+      relationships, contract controls, and bounded on-chain evidence.
+      Query param: wallet (EVM address, required).
+  - path: /assess-wallet
+    external_path: /assess-wallet
+    method: POST
+    description: >
+      Assesses an Ethereum address for fraud risk using registries, funding
+      relationships, contract controls, and bounded on-chain evidence. JSON body:
+      { "wallet": "0x..." } (required).
+
+input_schema:
+  type: object
+  properties:
+    query:
+      type: string
+      description: General factual fraud question for the /fraud-query endpoint.
+    wallet:
+      type: string
+      description: EVM wallet address to assess (0x-prefixed, 40 hex characters).
+
+output_schema:
+  type: object
+  properties:
+    mode:
+      type: string
+      enum: [fraud_knowledge, wallet_risk]
+      description: Identifies which Sentinel capability produced the response.
+    label:
+      type: string
+      description: ANSWERED or INCONCLUSIVE for fraud knowledge; the existing risk_level for wallet assessment.
+    reason:
+      type: string
+      description: Complete factual answer or complete wallet-risk explanation used by Telegraph's shared mapping.
+    confidence:
+      type: number
+      minimum: 0
+      maximum: 1
+    assessment_status:
+      type: string
+      enum: [ASSESSED, LIMITED, INCONCLUSIVE]
+    answer:
+      type: string
+      description: Source-backed factual answer returned by the fraud-knowledge endpoint.
+    source:
+      type: object
+      description: Source metadata included when a fraud-knowledge answer is available.
+    wallet:
+      type: string
+    risk_score:
+      type: number
+      minimum: 0
+      maximum: 1
+    risk_level:
+      type: string
+      enum: [LOW, ELEVATED, HIGH, NOT_APPLICABLE]
+    reason_codes:
+      type: array
+      items:
+        type: string
+    explanation:
+      type: string
+      description: >
+        Human-readable, self-sufficient explanation. This is the field
+        most likely read for downstream text extraction; see
+        docs/EVALUATOR_NOTES.md (extraction mechanism not yet
+        confirmed by Telegraph).
+    evidence:
+      type: array
+      description: >
+        Structured on-chain evidence items. Field names are currently
+        camelCase (evidenceId, signalCode, txHashes, blockNumbers,
+        retrievedAt, rpcMethod, derivationMethod, ...), unlike the
+        snake_case top-level fields on this object. See the casing
+        note at the top of this file.
+      items:
+        type: object
+    coverage:
+      type: object
+      description: Per-signal completeness, keyed by signal name.
+      additionalProperties:
+        type: object
+        properties:
+          status:
+            type: string
+            enum: [complete, partial, skipped]
+          reason:
+            type: string
+    latency_ms:
+      type: number
+    analysis_tier:
+      type: string
+      enum: [fast, deep]
+  required:
+    - mode
+    - label
+    - reason
+    - confidence
+    - assessment_status
+
+semantics:
+  signal_mapping:
+    label_field: label
+    reason_field: reason
+    confidence_field: confidence
+  supported_intents:
+    - FRAUD_DETECTION
+
+limitations:
+  - code: MAX_PARAM_VALUE
+    message: wallet must be a valid 0x-prefixed, 40 hex character EVM address (EIP-55 checksum enforced when mixed-case).
+    param: wallet
+    property: length
+    value_num: 42
+    operator: eq
+  - code: BOUNDED_SCAN
+    message: >
+      Funding-relationship and circular-funding history is scanned up to a
+      bounded page cap per source, not exhaustively. Incomplete scans are
+      reported via assessment_status (LIMITED/INCONCLUSIVE) and per-signal
+      coverage, not silently treated as clean history.
