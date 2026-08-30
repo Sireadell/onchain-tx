@@ -17,6 +17,30 @@ const router = Router();
 
 const round = (n, dp = 1) => (Number.isFinite(n) ? Number(n.toFixed(dp)) : null);
 
+// The peak chance of precipitation, or null when no day carries a real
+// figure. Deliberately not `?? 0`: a missing probability is not a zero
+// probability, and collapsing the two produced the contradiction below.
+export function maxProbability(days) {
+  const known = days
+    .map((d) => d.precipitation_probability_pct)
+    .filter((v) => typeof v === 'number' && Number.isFinite(v));
+  return known.length ? Math.max(...known) : null;
+}
+
+// Open-Meteo publishes precipitation probability only for some regions and
+// reports 0 elsewhere, and MET Norway publishes none at all outside the
+// Nordics. Stating that zero produced answers like "10.1 mm in total, with
+// the chance of precipitation peaking at 0%", which contradicts itself in
+// the same breath. Live example 2026-08-30 at 14.6042, 120.9822 (Manila).
+// So the clause is dropped when the figure is unknown, and when a flat 0%
+// is contradicted by rain actually being forecast. Saying less is better
+// than saying something the rest of the sentence disproves.
+export function precipProbabilityClause(maxProb, totalPrecip) {
+  if (maxProb == null) return '';
+  if (maxProb === 0 && totalPrecip > 0.05) return '';
+  return `, with the chance of precipitation peaking at ${maxProb}%`;
+}
+
 function windPhrase(day) {
   const gust = day.wind_gust_max_kmh ? `, gusting to ${day.wind_gust_max_kmh.toFixed(0)} km/h` : '';
   const dir = day.wind_direction ? ` from the ${day.wind_direction}` : '';
@@ -28,7 +52,7 @@ function windPhrase(day) {
 // answering "will it rain tomorrow" and reciting a forecast at the caller.
 function focusSentence(focus, days, spanLabel) {
   const totalPrecip = days.reduce((sum, d) => sum + (d.precipitation_mm ?? 0), 0);
-  const maxProb = Math.max(...days.map((d) => d.precipitation_probability_pct ?? 0));
+  const maxProb = maxProbability(days);
   const totalSnow = days.reduce((sum, d) => sum + (d.snowfall_cm ?? 0), 0);
   const peakGust = Math.max(...days.map((d) => d.wind_gust_max_kmh ?? d.wind_max_kmh ?? 0));
   const peakWind = Math.max(...days.map((d) => d.wind_max_kmh ?? 0));
@@ -38,9 +62,9 @@ function focusSentence(focus, days, spanLabel) {
 
   switch (focus) {
     case 'rain':
-      return totalPrecip > 0.05 || maxProb >= 50
-        ? `Yes, rain is expected ${spanLabel}: ${round(totalPrecip)} mm in total across about ${wetHours} wet hour(s), with the chance of precipitation peaking at ${maxProb}%.`
-        : `No, rain is not expected ${spanLabel}: ${round(totalPrecip)} mm forecast in total, with the chance of precipitation peaking at ${maxProb}%.`;
+      return totalPrecip > 0.05 || (maxProb ?? 0) >= 50
+        ? `Yes, rain is expected ${spanLabel}: ${round(totalPrecip)} mm in total across about ${wetHours} wet hour(s)${precipProbabilityClause(maxProb, totalPrecip)}.`
+        : `No, rain is not expected ${spanLabel}: ${round(totalPrecip)} mm forecast in total${precipProbabilityClause(maxProb, totalPrecip)}.`;
     case 'snow':
       return totalSnow > 0.05
         ? `Yes, snow is expected ${spanLabel}: ${round(totalSnow)} cm forecast in total.`
@@ -66,7 +90,7 @@ function focusSentence(focus, days, spanLabel) {
 // this field, and the competing miner that leads this intent answers in a
 // full paragraph that names every dimension it checked; a terse range
 // loses to that even when the underlying numbers are identical.
-function summarize(location, days, when, focus) {
+function summarize(location, days, when, focus, source) {
   const spanLabel = when
     ? (when.label === 'tomorrow' || when.label === 'today' || when.label === 'tonight' ? when.label : `over ${when.label}`)
     : (days.length === 1 ? 'today' : `over the next ${days.length} days`);
@@ -75,7 +99,7 @@ function summarize(location, days, when, focus) {
   const minTemp = Math.min(...days.map((d) => d.temp_min));
   const maxTemp = Math.max(...days.map((d) => d.temp_max));
   const totalPrecip = days.reduce((sum, d) => sum + (d.precipitation_mm ?? 0), 0);
-  const maxProb = Math.max(...days.map((d) => d.precipitation_probability_pct ?? 0));
+  const maxProb = maxProbability(days);
   const peakDay = days.reduce((best, d) => ((d.wind_gust_max_kmh ?? d.wind_max_kmh) > (best.wind_gust_max_kmh ?? best.wind_max_kmh) ? d : best), days[0]);
 
   const opening = focusSentence(focus, days, spanLabel);
@@ -85,12 +109,15 @@ function summarize(location, days, when, focus) {
     opening ? `${opening} ${head}` : head,
     `Conditions: ${days[0].condition}${days.length > 1 && days[days.length - 1].condition !== days[0].condition ? `, turning to ${days[days.length - 1].condition} by ${days[days.length - 1].date}` : ''}.`,
     `Temperature: ${round(minTemp)}°C to ${round(maxTemp)}°C.`,
-    `Precipitation: ${round(totalPrecip)} mm in total, with the chance of precipitation peaking at ${maxProb}%.`,
+    `Precipitation: ${round(totalPrecip)} mm in total${precipProbabilityClause(maxProb, totalPrecip)}.`,
     `Wind: ${windPhrase(peakDay)}.`,
   ];
   const totalSnow = days.reduce((sum, d) => sum + (d.snowfall_cm ?? 0), 0);
   if (totalSnow > 0.05) parts.push(`Snowfall: ${round(totalSnow)} cm.`);
-  parts.push('Read live from the Open-Meteo forecast service at request time, not from a cache.');
+  // Name the service that actually answered. On an Open-Meteo rate limit
+  // the reading comes from MET Norway instead, and crediting Open-Meteo for
+  // it would be a false statement inside the graded sentence.
+  parts.push(`Read live from the ${source ?? 'Open-Meteo'} forecast service at request time, not from a cache.`);
 
   return parts.join(' ');
 }
@@ -150,7 +177,7 @@ async function handleWeatherForecast(req, res) {
     });
   }
 
-  const summary = summarize(result.name, result.days, when, focus);
+  const summary = summarize(result.name, result.days, when, focus, result.source);
   res.json({
     query: rawLocation,
     status: 'ok',
@@ -167,7 +194,7 @@ async function handleWeatherForecast(req, res) {
     temp_min_c: Math.min(...result.days.map((d) => d.temp_min)),
     temp_max_c: Math.max(...result.days.map((d) => d.temp_max)),
     precipitation_total_mm: round(result.days.reduce((sum, d) => sum + (d.precipitation_mm ?? 0), 0)),
-    precipitation_probability_max_pct: Math.max(...result.days.map((d) => d.precipitation_probability_pct ?? 0)),
+    precipitation_probability_max_pct: maxProbability(result.days),
     snowfall_total_cm: round(result.days.reduce((sum, d) => sum + (d.snowfall_cm ?? 0), 0)),
     peak_wind_kmh: Math.max(...result.days.map((d) => d.wind_max_kmh ?? 0)),
     peak_gust_kmh: Math.max(...result.days.map((d) => d.wind_gust_max_kmh ?? 0)),

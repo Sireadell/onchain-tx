@@ -23,6 +23,7 @@
 // wrong confident sentence is worse than an honest empty one.
 
 import { getBalance, getCode } from './ankrRpc.js';
+import { CHAINS } from './chains.js';
 import { amountToDecimalString } from './formatAmount.js';
 
 export const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
@@ -73,8 +74,11 @@ export async function describeAddressMiss(chainSegment, address, chainLabel, mis
   if (info.kind === 'contract') {
     return `${address} is a contract on ${chainLabel}, but no ${missing} is available for it.`;
   }
-  const held = info.balanceEth != null
-    ? ` It currently holds ${info.balanceEth} ${chainLabel === 'Ethereum' ? 'ETH' : `native ${chainLabel} tokens`}.`
+  // Name the gas token by its ticker on every chain, not just Ethereum: a
+  // ground truth says "0.5 ETH" or "12 POL", never "native Base tokens".
+  const symbol = CHAINS[chainSegment]?.nativeSymbol;
+  const held = info.balanceEth != null && symbol
+    ? ` It currently holds ${info.balanceEth} ${symbol}.`
     : '';
   return `${address} is a wallet address on ${chainLabel}, not a token contract or a DeFi protocol, so it has no ${missing}.${held}`;
 }

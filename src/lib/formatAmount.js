@@ -20,3 +20,21 @@ export function amountToDecimalString(rawAmount, decimals) {
   const sign = negative ? '-' : '';
   return fractionStr ? `${sign}${whole}.${fractionStr}` : `${sign}${whole}`;
 }
+
+// The same amount rounded to `places` decimals, half-up, still computed on
+// the exact integer so nothing is floated. Returns null when the amount is
+// non-zero but rounds away to zero at that precision — a dust balance must
+// never be reported as "0", which is the trap the fixed-decimal form above
+// exists to avoid. Callers fall back to the exact string in that case.
+export function amountToRoundedString(rawAmount, decimals, places) {
+  const amount = BigInt(rawAmount);
+  if (places >= decimals) return amountToDecimalString(amount, decimals);
+
+  const negative = amount < 0n;
+  const magnitude = negative ? -amount : amount;
+  const divisor = 10n ** BigInt(decimals - places);
+  const rounded = (magnitude + divisor / 2n) / divisor;
+  if (rounded === 0n && magnitude !== 0n) return null;
+
+  return amountToDecimalString(negative ? -rounded : rounded, places);
+}

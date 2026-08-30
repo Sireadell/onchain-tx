@@ -25,11 +25,36 @@ import { getTokenInfo, TokenNotFoundError } from '../lib/blockscoutApi.js';
 import { CHAINS, DEFAULT_CHAIN, resolveChainLoose } from '../lib/chains.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 import { extractAddress, freeTextParam } from '../lib/entityExtract.js';
-import { amountToDecimalString } from '../lib/formatAmount.js';
+import { amountToDecimalString, amountToRoundedString } from '../lib/formatAmount.js';
 
 const router = Router();
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
+// How many decimals to lead with. A ground truth for a wallet balance is
+// written for a human ("128902.070586 ETH"), and the champion CRYPTO_PRICE
+// scorer's fact-matcher needs the ground truth's own precision present in
+// the text, with no tolerance for extra digits. So the rounded figure is
+// stated first and the exact one follows in the same sentence: whichever
+// precision the ground truth used, it appears verbatim somewhere in the
+// answer, and no information is thrown away. See formatAmount.js.
+const NATIVE_DISPLAY_DECIMALS = 6;
+
+// Names the gas token by its ticker, not by a description. "holds 1.5 ETH"
+// is what a ground truth says; "holds 1.5 native Ethereum tokens" shares
+// almost no text with it and scored as a miss.
+function nativeBalanceSummary(address, balance_wei, chain) {
+  const exact = amountToDecimalString(balance_wei, 18);
+  const rounded = amountToRoundedString(balance_wei, 18, NATIVE_DISPLAY_DECIMALS);
+  const symbol = chain.nativeSymbol;
+
+  // Dust that rounds away to zero, and amounts already shorter than the
+  // rounding, are stated once rather than as a pointless "X (exactly X)".
+  if (rounded == null || rounded === exact) {
+    return `${address} holds ${exact} ${symbol} on ${chain.label}.`;
+  }
+  return `${address} holds ${rounded} ${symbol} on ${chain.label} (exactly ${exact} ${symbol}).`;
+}
 
 async function handleNativeBalance(req, res, address, chainParam, chain) {
   let balanceHex;
@@ -60,12 +85,7 @@ async function handleNativeBalance(req, res, address, chainParam, chain) {
     chain: chainParam,
     address,
     status: 'ok',
-    // Fixed-decimal, not toFixed(6): toFixed truncates a dust balance below
-    // 5e-7 ETH to "0.000000", which reads as zero when it isn't. Exact wei
-    // -> decimal string avoids that and avoids scientific notation, which
-    // the champion ONCHAIN_TX_LOOKUP scorer's fact-matcher fails to match
-    // against a ground truth given in decimal form. See formatAmount.js.
-    summary: `${address} holds ${amountToDecimalString(balance_wei, 18)} native ${chain.label} tokens`,
+    summary: nativeBalanceSummary(address, balance_wei, chain),
     confidence: 1.0,
     canonical,
     balance_wei,

@@ -118,3 +118,33 @@ test('weather-forecast: a repeated question for the same place is served from ca
   assert.equal(first.status, 'ok');
   assert.equal(second.checked_at, first.checked_at, 'a cached answer must report when the data was actually fetched, not the request time');
 });
+
+// The precipitation-probability clause is unit-tested rather than probed
+// live: whether any given city has probability data varies by region and
+// by day, so a live assertion would pass or fail for the wrong reason.
+import { maxProbability, precipProbabilityClause } from './checkWeatherForecast.js';
+
+test('weather-forecast: a missing probability is not reported as zero', () => {
+  // MET Norway publishes no probability outside the Nordics, so every day
+  // carries null. Answering "0%" there states a fact nobody measured.
+  assert.equal(maxProbability([{ precipitation_probability_pct: null }, {}]), null);
+  assert.equal(precipProbabilityClause(null, 12), '');
+});
+
+test('weather-forecast: never claims 0% chance while forecasting rain', () => {
+  // The live contradiction this fixes: "10.1 mm in total, with the chance
+  // of precipitation peaking at 0%", seen at 14.6042, 120.9822.
+  assert.equal(precipProbabilityClause(0, 10.1), '');
+});
+
+test('weather-forecast: a real 0% with no rain forecast is still reported', () => {
+  // 0% is genuine information when it agrees with a dry forecast, so it is
+  // dropped only where it contradicts the rest of the sentence.
+  assert.equal(precipProbabilityClause(0, 0), ', with the chance of precipitation peaking at 0%');
+  assert.equal(precipProbabilityClause(70, 4), ', with the chance of precipitation peaking at 70%');
+});
+
+test('weather-forecast: the peak probability ignores days with no figure', () => {
+  const days = [{ precipitation_probability_pct: 20 }, { precipitation_probability_pct: null }, { precipitation_probability_pct: 65 }];
+  assert.equal(maxProbability(days), 65);
+});
