@@ -31,6 +31,8 @@ import { getCoinPaprikaPrice } from '../lib/coinPaprikaApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 import { extractSubject, freeTextParam } from '../lib/entityExtract.js';
+import { resolveChainLoose } from '../lib/chains.js';
+import { describeAddressMiss } from '../lib/addressContext.js';
 
 // Tries both sources at once; either failing (rate limit, timeout,
 // unrecognized id) just drops that source rather than failing the whole
@@ -115,11 +117,27 @@ async function handleCryptoPrice(req, res) {
     priceInfo = coinId ? await getFreshestCoinPrice(coinId) : await getCoinPrice(coinKey);
   } catch (err) {
     if (err instanceof CoinNotFoundError) {
+      // A contract-address lookup that finds no price is usually a question
+      // about an address that was never a priced token at all. Saying what
+      // the address actually is answers the question; "no price found" only
+      // restates the failure, and is graded against a real sentence it
+      // shares almost nothing with. See addressContext.js for the live
+      // signal that prompted this.
+      let summary = `no price found for '${query}'`;
+      if (chainTokenMode) {
+        const resolved = resolveChainLoose(String(priceChain));
+        if (resolved) {
+          const described = await describeAddressMiss(
+            resolved.segment, token, resolved.label, 'token price',
+          );
+          if (described) summary = described;
+        }
+      }
       return res.json({
         query_type: queryType,
         query,
         status: 'not_found',
-        summary: `no price found for '${query}'`,
+        summary,
         confidence: 1.0,
         canonical: [queryType, query, 'not_found'].join(':'),
         price_usd: null,

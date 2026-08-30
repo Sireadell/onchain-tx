@@ -10,6 +10,7 @@ import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { CHAINS, DEFAULT_CHAIN, resolveChainLoose } from '../lib/chains.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 import { extractAddress, freeTextParam } from '../lib/entityExtract.js';
+import { describeAddressMiss } from '../lib/addressContext.js';
 
 const router = Router();
 
@@ -53,11 +54,16 @@ async function handleTokenHolders(req, res) {
     info = await getTokenInfo(chain.blockscoutHost, token);
   } catch (err) {
     if (err instanceof TokenNotFoundError) {
+      // "No token found here" is true but says nothing about what is
+      // actually at the address. One eth_getCode call separates a wallet
+      // from a contract that simply is not an ERC-20, and either is a real
+      // answer to the question. See addressContext.js.
+      const described = await describeAddressMiss(chain.segment, token, chain.label, 'holder count');
       return res.json({
         chain: chainParam,
         token,
         status: 'not_found',
-        summary: `no ERC-20 token found at ${token} on ${chain.label}`,
+        summary: described ?? `no ERC-20 token found at ${token} on ${chain.label}`,
         confidence: 1.0,
         canonical: [chainParam, token, 'not_found'].join(':'),
         holders_count: null,

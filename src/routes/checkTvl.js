@@ -28,6 +28,8 @@ import {
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { respondUnusableInput } from '../lib/unusableInput.js';
 import { extractSubject, freeTextParam } from '../lib/entityExtract.js';
+import { resolveChainLoose } from '../lib/chains.js';
+import { describeAddressMiss, ADDRESS_RE } from '../lib/addressContext.js';
 
 const router = Router();
 
@@ -73,11 +75,26 @@ async function handleTvl(req, res) {
     }
   } catch (err) {
     if (err instanceof ProtocolNotFoundError || err instanceof ChainNotFoundError) {
+      // DefiLlama is keyed on protocol names, so a contract or wallet
+      // address never matches and the caller gets told nothing they did not
+      // already know. When an address was passed, say what it actually is.
+      // The chain is only consulted when the caller named one that resolves;
+      // guessing which chain an address lives on would be a coin flip, so
+      // without one the answer stays at the level that is certainly true.
+      let summary = `no DefiLlama ${queryType} found for '${query}'`;
+      if (protocol && ADDRESS_RE.test(protocol)) {
+        const chain = tvlChain ? resolveChainLoose(String(tvlChain)) : null;
+        const described = chain
+          ? await describeAddressMiss(chain.segment, protocol, chain.label, 'total value locked')
+          : null;
+        summary = described
+          ?? `${protocol} is a contract or wallet address, not a DeFi protocol name, so it has no total value locked. DefiLlama reports total value locked by protocol, such as "aave" or "uniswap".`;
+      }
       return res.json({
         query_type: queryType,
         query,
         status: 'not_found',
-        summary: `no DefiLlama ${queryType} found for '${query}'`,
+        summary,
         confidence: 1.0,
         canonical: [queryType, query, 'not_found'].join(':'),
         tvl_usd: null,

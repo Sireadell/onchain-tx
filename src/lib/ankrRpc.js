@@ -234,6 +234,18 @@ export async function getBalance(chainSegment, address) {
   );
 }
 
+// Whether an address holds contract code. "0x" means it does not, which
+// makes it an ordinary wallet rather than a token or protocol contract.
+// Used to answer questions that name an address the caller believed was a
+// token, so a miss can say what the address actually is instead of only
+// what it is not. Flows through the same cache, retry and budget machinery
+// as every other call here.
+export async function getCode(chainSegment, address) {
+  return cachedFetch(chainSegment, 'eth_getCode', [address], () =>
+    fetchAnkrRpc(chainSegment, 'eth_getCode', [address, 'latest'])
+  );
+}
+
 // ERC-20 balance via eth_call to balanceOf(address) — standard ABI
 // function selector 0x70a08231, single left-padded 32-byte address arg.
 // Same eth_call params shape as any other JSON-RPC call, so it flows
