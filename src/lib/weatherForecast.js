@@ -124,6 +124,26 @@ function roundCoord(n) {
   return Math.round(n * 100) / 100;
 }
 
+// The local hour from which the current day counts as spent. Chosen so the
+// evening still belongs to today (a question asked at 5pm can reasonably be
+// about tonight) while the last few hours, which cannot produce a
+// meaningful daily high or low, do not consume a forecast slot.
+const SPENT_DAY_LOCAL_HOUR = 18;
+
+// Whether `firstDate` is the local date at the forecast location and that
+// date is far enough gone to be worth skipping. Works off the offset the
+// forecast service reports for the place, not this server's clock, so a
+// miner running in one timezone answers correctly about another.
+export function isSpentToday(firstDate, utcOffsetSeconds, now = Date.now()) {
+  if (!firstDate) return false;
+  const offset = Number(utcOffsetSeconds);
+  if (!Number.isFinite(offset)) return false;
+
+  const local = new Date(now + offset * 1000);
+  const localDate = local.toISOString().slice(0, 10);
+  return firstDate === localDate && local.getUTCHours() >= SPENT_DAY_LOCAL_HOUR;
+}
+
 // One retry, short backoff, only for 429 — this is specifically for
 // Render's shared egress IP getting rate-limited by Open-Meteo, which
 // clears within seconds far more often than it persists. Anything else
@@ -269,12 +289,25 @@ export function compassDirection(degrees) {
 // Precipitation probability, gusts and wind direction are included
 // because the questions on this intent are mostly "will it rain" and
 // "how windy", which a temperature range alone does not answer.
-export async function fetchForecast(input, days = 3, startDay = 0) {
+export async function fetchForecast(input, days = 3, startDay = 0, { keepToday = false } = {}) {
   const location = await resolveLocation(input);
   const span = Math.min(Math.max(days, 1), 16);
   const offset = Math.min(Math.max(startDay, 0), 15);
 
-  const cacheKey = `${roundCoord(location.latitude)},${roundCoord(location.longitude)}|${span}|${offset}`;
+  // A day already mostly over cannot carry a real high, low or rain total:
+  // late in the evening the "daily" row is whatever the last hour or two
+  // happened to be, with the max and min collapsing to the same number.
+  // Spending a forecast slot on it pushed the whole window a day behind the
+  // one a caller means by "the next three days", and dragged that stub into
+  // the headline range. Compared live 2026-08-30 at 23:00 in Makurdi: this
+  // miner answered 08-30 to 09-01 with a first day reading 23.2°C to 23.2°C,
+  // while the leading miner on this intent answered 08-31 to 09-02 on the
+  // same underlying MET Norway data. So today is dropped once it is spent,
+  // and one extra day is fetched to keep the window the length asked for.
+  const mayDropToday = offset === 0 && !keepToday;
+  const fetchDays = Math.min(offset + span + (mayDropToday ? 1 : 0), 16);
+
+  const cacheKey = `${roundCoord(location.latitude)},${roundCoord(location.longitude)}|${span}|${offset}|${keepToday ? 'today' : 'auto'}`;
   const cached = forecastCache.get(cacheKey);
   if (cached) return { ...cached, name: location.name };
 
@@ -282,7 +315,7 @@ export async function fetchForecast(input, days = 3, startDay = 0) {
     latitude: location.latitude,
     longitude: location.longitude,
     daily: 'weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,precipitation_hours,snowfall_sum,windspeed_10m_max,windgusts_10m_max,winddirection_10m_dominant',
-    forecast_days: String(Math.min(offset + span, 16)),
+    forecast_days: String(fetchDays),
     timezone: 'auto',
   });
   const { body, source, degraded, attribution } = await fetchWithFallback(
@@ -291,7 +324,7 @@ export async function fetchForecast(input, days = 3, startDay = 0) {
   const d = body.daily;
   if (!d?.time?.length) throw new WeatherLookupError(`no forecast data returned for '${input}'`);
 
-  const daysOut = d.time.map((date, i) => ({
+  const allDays = d.time.map((date, i) => ({
     date,
     code: d.weathercode[i],
     condition: describeWeatherCode(d.weathercode[i]),
@@ -304,7 +337,15 @@ export async function fetchForecast(input, days = 3, startDay = 0) {
     wind_max_kmh: d.windspeed_10m_max[i],
     wind_gust_max_kmh: d.windgusts_10m_max?.[i] ?? null,
     wind_direction: compassDirection(d.winddirection_10m_dominant?.[i]),
-  })).slice(offset, offset + span);
+  }));
+
+  const effectiveOffset = mayDropToday && isSpentToday(d.time[0], body.utc_offset_seconds)
+    ? offset + 1
+    : offset;
+  const window = allDays.slice(effectiveOffset, effectiveOffset + span);
+  // Never return nothing just because today was dropped: if the extra day
+  // was not available, fall back to the window including it.
+  const daysOut = window.length ? window : allDays.slice(offset, offset + span);
 
   if (daysOut.length === 0) throw new WeatherLookupError(`the forecast does not reach that far ahead for '${input}'`);
   const result = {

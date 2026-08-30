@@ -154,7 +154,11 @@ async function handleWeatherForecast(req, res) {
 
   let result;
   try {
-    result = await fetchForecast(text, days, startDay);
+    // A caller who explicitly said "today" or "tonight" means today even at
+    // 11pm, so the spent-day skip is suppressed for them and only applies
+    // where no particular day was named.
+    const keepToday = when?.label === 'today' || when?.label === 'tonight';
+    result = await fetchForecast(text, days, startDay, { keepToday });
   } catch (err) {
     if (err instanceof WeatherLookupError) {
       return respondUnusableInput(
