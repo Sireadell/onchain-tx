@@ -39,6 +39,12 @@ const PROTOCOL_ALIASES = {
   makerdao: 'sky-lending',
   anyswap: 'multichain',
 };
+// The current name each retired name now trades under, for the answer text.
+const PROTOCOL_REBRAND_NAMES = {
+  maker: 'Sky Lending (formerly MakerDAO)',
+  makerdao: 'Sky Lending (formerly MakerDAO)',
+  anyswap: 'Multichain (formerly Anyswap)',
+};
 const CHAIN_ALIASES = {
   matic: 'Polygon',
   'bnb chain': 'BSC',
@@ -99,7 +105,7 @@ async function resolveProtocolSlug(rawSlug) {
     protocolListCache = { value: list, storedAt: Date.now() };
   }
 
-  const needle = rawSlug.toLowerCase();
+  const needle = rawSlug.trim().toLowerCase();
   const candidates = protocolListCache.value.filter(
     (p) => p.slug?.toLowerCase() === needle
       || p.name?.toLowerCase() === needle
@@ -109,7 +115,16 @@ async function resolveProtocolSlug(rawSlug) {
   if (candidates.length === 0) return null;
 
   candidates.sort((a, b) => (b.tvl ?? 0) - (a.tvl ?? 0));
-  return candidates[0].slug;
+  return { slug: candidates[0].slug, name: candidates[0].name };
+}
+
+// The name to report a rebranded protocol under, so an answer states the
+// number beside the entity DefiLlama actually measured. Only rewrites the
+// retired names in PROTOCOL_ALIASES; anything else is returned as the
+// caller wrote it. A static lookup, so no network call.
+export function protocolDisplayName(rawSlug) {
+  const trimmed = String(rawSlug).trim();
+  return PROTOCOL_REBRAND_NAMES[trimmed.toLowerCase()] ?? trimmed;
 }
 
 // DefiLlama splits its public API across multiple hosts by product —
@@ -168,7 +183,8 @@ async function fetchDefiLlama(host, path) {
 // "uniswap"), or throws ProtocolNotFoundError. /tvl/{slug} returns a bare
 // number on success, plain text "Protocol not found" on failure.
 export async function getProtocolTvl(rawSlug) {
-  const slug = PROTOCOL_ALIASES[rawSlug.toLowerCase()] ?? rawSlug;
+  const trimmed = String(rawSlug).trim();
+  const slug = PROTOCOL_ALIASES[trimmed.toLowerCase()] ?? trimmed;
   const key = `protocol:${slug}`;
   const hit = protocolCache.get(key);
   if (hit && Date.now() - hit.storedAt < PROTOCOL_CACHE_TTL_MS) {
@@ -182,7 +198,7 @@ export async function getProtocolTvl(rawSlug) {
   if (res.status !== 200 || !Number.isFinite(tvl)) {
     const resolved = await resolveProtocolSlug(slug);
     if (resolved) {
-      res = await fetchDefiLlama('api.llama.fi', `/tvl/${encodeURIComponent(resolved)}`);
+      res = await fetchDefiLlama('api.llama.fi', `/tvl/${encodeURIComponent(resolved.slug)}`);
       text = res.status === 200 ? await res.text() : null;
       tvl = text !== null ? Number(text) : NaN;
     }
@@ -204,8 +220,10 @@ export async function getProtocolTvl(rawSlug) {
 // aggregate-only, so questions such as "Aave V3 on Ethereum" require the
 // richer /protocol/{slug} response and its currentChainTvls map.
 export async function getProtocolChainTvl(rawSlug, rawChainName) {
-  const slug = PROTOCOL_ALIASES[rawSlug.toLowerCase()] ?? rawSlug;
-  const chainName = CHAIN_ALIASES[rawChainName.toLowerCase()] ?? rawChainName;
+  const trimmedSlug = String(rawSlug).trim();
+  const trimmedChain = String(rawChainName).trim();
+  const slug = PROTOCOL_ALIASES[trimmedSlug.toLowerCase()] ?? trimmedSlug;
+  const chainName = CHAIN_ALIASES[trimmedChain.toLowerCase()] ?? trimmedChain;
   const key = `protocol-chain:${slug}:${chainName.toLowerCase()}`;
   const hit = protocolCache.get(key);
   if (hit && Date.now() - hit.storedAt < PROTOCOL_CACHE_TTL_MS) return hit.value;
@@ -213,7 +231,7 @@ export async function getProtocolChainTvl(rawSlug, rawChainName) {
   let res = await fetchDefiLlama('api.llama.fi', `/protocol/${encodeURIComponent(slug)}`);
   if (res.status !== 200) {
     const resolved = await resolveProtocolSlug(slug);
-    if (resolved) res = await fetchDefiLlama('api.llama.fi', `/protocol/${encodeURIComponent(resolved)}`);
+    if (resolved) res = await fetchDefiLlama('api.llama.fi', `/protocol/${encodeURIComponent(resolved.slug)}`);
   }
   if (res.status !== 200) {
     throw new ProtocolNotFoundError(`no DefiLlama protocol found for slug '${rawSlug}'`);
@@ -239,7 +257,8 @@ export async function getProtocolChainTvl(rawSlug, rawChainName) {
 // is cached together since it's one call regardless of which chain is
 // asked for.
 export async function getChainTvl(rawChainName) {
-  const chainName = CHAIN_ALIASES[rawChainName.toLowerCase()] ?? rawChainName;
+  const trimmed = String(rawChainName).trim();
+  const chainName = CHAIN_ALIASES[trimmed.toLowerCase()] ?? trimmed;
   if (!chainListCache || Date.now() - chainListCache.storedAt >= CHAIN_LIST_CACHE_TTL_MS) {
     const res = await fetchDefiLlama('api.llama.fi', '/v2/chains');
     if (res.status !== 200) {

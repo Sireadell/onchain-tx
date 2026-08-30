@@ -21,6 +21,7 @@ import {
   getProtocolTvl,
   getProtocolChainTvl,
   getChainTvl,
+  protocolDisplayName,
   ProtocolNotFoundError,
   ChainNotFoundError,
 } from '../lib/defiLlamaApi.js';
@@ -31,8 +32,11 @@ const router = Router();
 
 async function handleTvl(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
-  const protocol = params?.protocol;
-  const tvlChain = params?.tvl_chain;
+  // Trimmed here, not just in the transport: an untrimmed value still
+  // reached the answer text and the canonical string, so a caller sending
+  // " Base " got the right number reported under a ragged name.
+  const protocol = typeof params?.protocol === 'string' ? params.protocol.trim() : params?.protocol;
+  const tvlChain = typeof params?.tvl_chain === 'string' ? params.tvl_chain.trim() : params?.tvl_chain;
 
   if (!protocol && !tvlChain) {
     return respondUnusableInput(
@@ -81,9 +85,16 @@ async function handleTvl(req, res) {
   // same value written as a plain decimal ("$18032065663.82") scores 0.9711.
   // Same root cause as the ONCHAIN_TX_LOOKUP fix: the scorer can't parse a
   // comma-grouped number as a single value.
+  // Name the protocol DefiLlama actually measured when the caller used a
+  // retired name: asking for "maker" reports Sky Lending's TVL, and stating
+  // that number under the retired name is misleading on its own terms and
+  // unlikely to match a ground truth using the current name. Only rebrands
+  // are rewritten (a lookup in a static table, no extra network call) —
+  // a name that resolves normally is echoed back as the caller wrote it.
+  const protocolName = protocol ? protocolDisplayName(protocol) : null;
   const summary = protocol && tvlChain
-    ? `${protocol} on ${tvlChain} has $${tvlUsd.toFixed(2)} TVL; the protocol has $${protocolTotalTvlUsd.toFixed(2)} total TVL across all chains, according to DefiLlama.`
-    : `${query} has $${tvlUsd.toFixed(2)} TVL according to DefiLlama.`;
+    ? `${protocolName} on ${tvlChain} has $${tvlUsd.toFixed(2)} TVL; the protocol has $${protocolTotalTvlUsd.toFixed(2)} total TVL across all chains, according to DefiLlama.`
+    : `${protocolName ?? query} has $${tvlUsd.toFixed(2)} TVL according to DefiLlama.`;
   res.json({
     query_type: queryType,
     query,
