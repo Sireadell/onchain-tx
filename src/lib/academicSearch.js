@@ -1,5 +1,6 @@
-// ACADEMIC_SEARCH signal — peer-reviewed papers on a topic, via OpenAlex's
-// free /works endpoint (no key, no rate limit but our own). What separates
+// ACADEMIC_SEARCH signal — peer-reviewed papers on a topic, primarily via
+// OpenAlex's free /works endpoint, with Crossref as a live fallback when
+// OpenAlex temporarily throttles the shared deployment address. What separates
 // this from the two dedicated OpenAlex/Semantic Scholar competitors on the
 // intent: results are restricted to actual peer-reviewed articles
 // (type:article, so preprints, theses and datasets are excluded), and each
@@ -18,6 +19,7 @@
 // standing rather than as the ordering.
 
 const WORKS_URL = 'https://api.openalex.org/works';
+const CROSSREF_WORKS_URL = 'https://api.crossref.org/works';
 const CALL_TIMEOUT_MS = Number(process.env.ACADEMIC_SEARCH_TIMEOUT_MS) || 8_000;
 const SELECT_FIELDS = 'id,doi,title,publication_year,cited_by_count,authorships,primary_location,abstract_inverted_index';
 
@@ -26,6 +28,58 @@ export class AcademicSearchError extends Error {
     super(message);
     this.name = 'AcademicSearchError';
   }
+}
+
+function yearFromCrossref(work) {
+  const dates = [work.published_print, work.published_online, work.issued, work.created];
+  for (const date of dates) {
+    const year = date?.['date-parts']?.[0]?.[0];
+    if (Number.isInteger(year)) return year;
+  }
+  return null;
+}
+
+function crossrefAuthors(work) {
+  return (work.author ?? []).map((author) =>
+    [author.given, author.family].filter(Boolean).join(' ') || author.name
+  ).filter(Boolean);
+}
+
+async function searchCrossref(topic, { limit, fromYear, toYear }) {
+  const filters = ['type:journal-article'];
+  if (fromYear) filters.push(`from-pub-date:${fromYear}-01-01`);
+  if (toYear) filters.push(`until-pub-date:${toYear}-12-31`);
+  const params = new URLSearchParams({
+    'query.bibliographic': topic,
+    filter: filters.join(','),
+    rows: String(Math.min(Math.max(limit, 1), 25)),
+    select: 'DOI,title,author,container-title,published-print,published-online,issued,created,is-referenced-by-count,type',
+  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CALL_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(`${CROSSREF_WORKS_URL}?${params}`, { signal: controller.signal });
+  } catch (err) {
+    if (err.name === 'AbortError') throw new AcademicSearchError(`fallback search for '${topic}' timed out after ${CALL_TIMEOUT_MS}ms`);
+    throw new AcademicSearchError(`fallback search for '${topic}' failed: ${err.message}`);
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!res.ok) throw new AcademicSearchError(`fallback search for '${topic}' failed with status ${res.status}`);
+  const body = await res.json();
+  const results = (body.message?.items ?? []).map((work) => ({
+    title: work.title?.[0] ?? null,
+    year: yearFromCrossref(work),
+    citation_count: work['is-referenced-by-count'] ?? 0,
+    authors: crossrefAuthors(work),
+    venue: work['container-title']?.[0] ?? null,
+    doi: work.DOI ? `https://doi.org/${work.DOI}` : null,
+    abstract_snippet: null,
+  })).filter((work) => work.title);
+  const mostCited = results.reduce((best, paper) =>
+    best && best.citation_count >= paper.citation_count ? best : paper, null);
+  return { total_matches: body.message?.['total-results'] ?? results.length, results, most_cited: mostCited };
 }
 
 // OpenAlex stores the abstract as a word -> [positions] inverted index
@@ -63,12 +117,11 @@ export async function searchPapers(topic, { limit = 5, fromYear, toYear } = {}) 
   try {
     res = await fetch(`${WORKS_URL}?${params}`, { signal: controller.signal });
   } catch (err) {
-    if (err.name === 'AbortError') throw new AcademicSearchError(`search for '${topic}' timed out after ${CALL_TIMEOUT_MS}ms`);
-    throw new AcademicSearchError(`search for '${topic}' failed: ${err.message}`);
+    return searchCrossref(topic, { limit, fromYear, toYear });
   } finally {
     clearTimeout(timer);
   }
-  if (!res.ok) throw new AcademicSearchError(`search for '${topic}' failed with status ${res.status}`);
+  if (!res.ok) return searchCrossref(topic, { limit, fromYear, toYear });
 
   const body = await res.json();
   const results = (body.results ?? []).map((w) => ({

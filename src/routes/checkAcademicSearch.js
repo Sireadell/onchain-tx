@@ -100,7 +100,7 @@ async function handleAcademicSearch(req, res) {
     `Here ${result.results.length === 1 ? 'is 1 peer-reviewed paper' : `are ${result.results.length} peer-reviewed papers`} on ${topicPhrase}${rangeNote}, out of ${result.total_matches.toLocaleString('en-US')} matching articles: ${list}.`,
     result.most_cited && result.results.length > 1 ? `The most cited of these is "${result.most_cited.title}" at ${result.most_cited.citation_count.toLocaleString('en-US')} citations.` : null,
     top.abstract_snippet ? `From the leading paper's abstract: ${top.abstract_snippet}` : null,
-    'Results are peer-reviewed journal articles only, with preprints, theses and datasets excluded, read live from OpenAlex at request time and listed in relevance order.',
+    'Results are peer-reviewed journal articles only, with preprints, theses and datasets excluded, read live from OpenAlex or Crossref at request time and listed in relevance order.',
   ].filter(Boolean).join(' ');
 
   res.json({

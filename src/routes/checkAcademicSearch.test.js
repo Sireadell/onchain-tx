@@ -41,6 +41,39 @@ test('academic-search: results are actually about the topic asked for', async (t
   );
 });
 
+test('academic-search: Crossref keeps the route working when OpenAlex throttles', async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    if (String(url).startsWith('https://api.openalex.org/')) {
+      return new Response('{}', { status: 429 });
+    }
+    if (String(url).startsWith('https://api.crossref.org/')) {
+      return new Response(JSON.stringify({
+        message: {
+          'total-results': 1,
+          items: [{
+            DOI: '10.1000/example',
+            title: ['Federated learning for clinical research'],
+            author: [{ given: 'Ada', family: 'Lovelace' }],
+            'container-title': ['Journal of Example Research'],
+            issued: { 'date-parts': [[2024]] },
+            'is-referenced-by-count': 12,
+            type: 'journal-article',
+          }],
+        },
+      }), { status: 200 });
+    }
+    return originalFetch(url, options);
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const base = startServer(t);
+  const res = await fetch(`${base}/academic-search?topic=${encodeURIComponent('federated learning')}`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.papers[0].title, 'Federated learning for clinical research');
+  assert.equal(body.papers[0].venue, 'Journal of Example Research');
+});
+
 test('academic-search: a date range in the question is honoured', async (t) => {
   const base = startServer(t);
   const res = await fetch(`${base}/academic-search?topic=${encodeURIComponent('papers on CRISPR since 2020')}`);

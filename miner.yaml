@@ -264,7 +264,7 @@ endpoints:
       and DOI, plus a real excerpt from the leading paper's abstract and a
       note on which of the results is the most cited. A date range stated
       in the question ("since 2020", "between 2010 and 2020") is applied.
-      Read live from OpenAlex at request time. Params: topic (required),
+      Read live from OpenAlex, with Crossref as a fallback, at request time. Params: topic (required),
       limit (optional, 1-25, default 5), from_year (optional), to_year
       (optional).
   - path: /fraud-query
