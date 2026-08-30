@@ -20,6 +20,7 @@ import checkStormAlertRouter from './routes/checkStormAlert.js';
 import checkIpGeolocationRouter from './routes/checkIpGeolocation.js';
 import checkAcademicSearchRouter from './routes/checkAcademicSearch.js';
 import sentinelFraudRouter from './routes/sentinelFraud.js';
+import { misrouteWatchMiddleware } from './lib/misrouteWatch.js';
 
 // Same limit/window on all six signal routes — each spends its own
 // upstream quota (Ankr, Blockscout, or DefiLlama), no reason to size them
@@ -119,6 +120,7 @@ export function buildApp() {
   app.use(corsMiddleware);
   app.use(express.json());
   app.use(answerFieldMiddleware);
+  app.use(misrouteWatchMiddleware);
 
   app.use('/health', healthRouter);
   app.use('/check-tx', checkTxRateLimit, checkTxRouter);
