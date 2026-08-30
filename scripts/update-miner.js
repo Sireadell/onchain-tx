@@ -3,15 +3,17 @@ import { ethers } from 'ethers';
 
 const DIAMOND = '0x5a2324aA18613FAD4e44bDF0d6c73Ec1f6D87ff8';
 const RPC = 'https://sepolia.base.org';
-// Verified live 2026-08-29 against /api/miners/{id}: this is the actual
-// current active registration for slug txlens. The previous draft of this
-// script assumed 261, which is deregistered (superseded by 267 at the same
-// timestamp) — trusting that would have failed the pre-flight or, worse,
-// updated the wrong registration.
-const OLD_REGISTRATION_ID = 267;
-const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/21f2fc830033c58c7966b5dcfdda6fe659fd5c64/miner.yaml';
-const YAML_HASH = '0x20741d32611e4da8d4116f1c8b4f6575a913be96845bf2beef2c67bcfffb0359';
-const PREVIOUS_YAML_HASH = '2b6153ce6e67d8ba3185379e0c9410071bf41b926d7f2449c02bb9118370b2f5';
+// Verified live 2026-08-30 by scanning /api/miners/{id} for slug txlens and
+// taking the one whose activation_status is active: 313. Every earlier id
+// this script has carried (246, 261, 267) is now deregistered — each update
+// mints a new registration and retires the previous one, so this constant is
+// stale by definition after every run and MUST be re-verified before each
+// one. Updating a deregistered id fails pre-flight rather than silently
+// writing to a dead record.
+const OLD_REGISTRATION_ID = 313;
+const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/664b62d2ad220e1e8e71462448e3382e1775ba08/miner.yaml';
+const YAML_HASH = '0xeea39162c91b399da440c461fe46cc5b5feaedce6fd1d21be6a450404e8cf1aa';
+const PREVIOUS_YAML_HASH = '20741d32611e4da8d4116f1c8b4f6575a913be96845bf2beef2c67bcfffb0359';
 const FEE_ADDRESS = '0x6f477610A93C5B255C29c489760045272BCeDa99';
 const MIN_PRICE_USDC = 10000;
 const CONFIRMATION_PHRASE = `update-txlens-${OLD_REGISTRATION_ID}-${YAML_HASH.slice(2, 10)}`;
@@ -66,6 +68,12 @@ if (!/^slug:\s*txlens\s*$/m.test(yamlText)) fail('YAML slug is not txlens');
 for (const intent of SUPPORTED_INTENTS) {
   if (!new RegExp(`^\\s*- ${intent}\\s*$`, 'm').test(yamlText)) fail(`YAML is missing ${intent}`);
 }
+// The whole point of this update. label_field names the single field the
+// engine grades; it was `status`, holding one word ("confirmed", "ok"),
+// which the live ONCHAIN_TX_LOOKUP grader scored 0.0050 where the summary
+// sentence scored 0.9982. Registering a YAML that still points at `status`
+// would spend gas and change nothing.
+if (!/^\s*label_field:\s*answer\s*$/m.test(yamlText)) fail('YAML label_field is not `answer`');
 
 const BASE = 'https://telegraph-onchain-tx-lookup-miner.onrender.com';
 
@@ -89,6 +97,15 @@ console.log('5/9 exercising an existing TxLens route');
 const gas = await requireJson(`${BASE}/gas-price?chain=eth`);
 if (gas.status !== 'ok' || !gas.gas_price_wei) fail('existing gas-price route is not working');
 
+// The YAML is about to promise the engine that `answer` carries the graded
+// text. Check the deployment actually delivers it, and that it is a real
+// sentence rather than the old one-word status.
+console.log('5b/9 checking the graded `answer` field is live on the deployment');
+for (const [label, body] of [['gas-price', gas], ['fraud-query', fraud], ['assess-wallet', walletRisk]]) {
+  if (typeof body.answer !== 'string' || !body.answer.trim()) fail(`${label} does not return a graded answer field`);
+  if (body.answer === body.status) fail(`${label} answer is still the bare status word`);
+}
+
 // The four intents being added in this update. Each must actually answer
 // before we claim to support it on-chain — a registered intent nobody can
 // reach scores zero and wastes every question routed to it.
@@ -103,8 +120,25 @@ if (gas.status !== 'ok' || !gas.gas_price_wei) fail('existing gas-price route is
 // block registration if the shared IP is still throttled after that.
 async function checkWithRetry(label, url, verify, { attempts = 4, delayMs = 15_000 } = {}) {
   for (let i = 1; i <= attempts; i += 1) {
-    const res = await fetch(url);
-    const body = await res.json();
+    // A connect timeout or a non-JSON body must not kill the run: this
+    // helper sits before the transaction step, and on 2026-08-30 a transient
+    // Render connect timeout threw straight out of here and aborted the
+    // whole update. Treat a network failure exactly like a throttle — retry,
+    // then warn and continue, rather than crashing.
+    let res;
+    let body;
+    try {
+      res = await fetch(url);
+      body = await res.json();
+    } catch (err) {
+      if (i === attempts) {
+        console.warn(`WARNING: ${label} could not be reached (${err.message}). Continuing — this is a transport failure, not a code defect.`);
+        return false;
+      }
+      console.log(`  ${label}: request failed (${err.message}) (attempt ${i}/${attempts}), retrying in ${delayMs / 1000}s`);
+      await new Promise((r) => setTimeout(r, delayMs));
+      continue;
+    }
     if (res.ok && verify(body)) return true;
     const throttled = body.summary?.includes('status 429');
     if (i === attempts || !throttled) {
