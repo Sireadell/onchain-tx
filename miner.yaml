@@ -78,6 +78,7 @@ endpoints:
   - path: /check-tx
     external_path: /check-tx
     method: GET
+    intents: [ONCHAIN_TX_LOOKUP]
     description: >
       ONCHAIN_TX_LOOKUP. Answers "is transaction 0xabc... confirmed or did
       it fail", "what did this tx hash do", "what is the status of this
@@ -91,6 +92,7 @@ endpoints:
   - path: /gas-price
     external_path: /gas-price
     method: GET
+    intents: [GAS_PRICE]
     description: >
       GAS_PRICE. Answers "what is gas right now on Ethereum", "how much does
       a transfer cost on Polygon", "are fees high on Base". Returns the
@@ -102,6 +104,7 @@ endpoints:
   - path: /wallet-balance
     external_path: /wallet-balance
     method: GET
+    intents: [WALLET_BALANCE_CHECK]
     description: >
       WALLET_BALANCE_CHECK. Answers "how much ETH does 0xabc... hold", "what
       is the USDC balance of this address on Arbitrum". Takes a specific
@@ -114,6 +117,7 @@ endpoints:
   - path: /token-holders
     external_path: /token-holders
     method: GET
+    intents: [TOKEN_HOLDER_COUNT]
     description: >
       TOKEN_HOLDER_COUNT. Answers "how many wallets hold this token", "how
       many distinct addresses own 0xabc...". Takes a specific token contract
@@ -124,6 +128,7 @@ endpoints:
   - path: /tvl
     external_path: /tvl
     method: GET
+    intents: [TVL_LOOKUP]
     description: >
       TVL_LOOKUP. Answers "what is the TVL of Aave", "how much value is
       locked in Uniswap", "what is total value locked on Ethereum". Takes a
@@ -138,6 +143,7 @@ endpoints:
   - path: /crypto-price
     external_path: /crypto-price
     method: GET
+    intents: [CRYPTO_PRICE]
     description: >
       CRYPTO_PRICE. Answers "what is Bitcoin worth", "price of ETH in USD",
       "how much is the token at 0xabc... trading for". Names a
@@ -152,6 +158,7 @@ endpoints:
   - path: /stock-price
     external_path: /stock-price
     method: GET
+    intents: [STOCK_PRICE]
     description: >
       STOCK_PRICE. Answers "what is Apple trading at", "current share price
       of TSLA", "how much is NVDA stock". Names a listed equity or ticker
@@ -160,6 +167,7 @@ endpoints:
   - path: /ssl-check
     external_path: /ssl-check
     method: GET
+    intents: [SSL_VERIFICATION]
     description: >
       SSL_VERIFICATION. Answers "is the SSL certificate for example.com
       valid", "when does this domain's TLS certificate expire", "who issued
@@ -179,6 +187,7 @@ endpoints:
   - path: /weather-forecast
     external_path: /weather-forecast
     method: GET
+    intents: [WEATHER_FORECAST]
     description: >
       WEATHER_FORECAST. Answers "what's the weather in Tokyo the next
       three days", "will it rain in London tomorrow", "how windy will it
@@ -202,6 +211,7 @@ endpoints:
   - path: /storm-alert
     external_path: /storm-alert
     method: GET
+    intents: [STORM_ALERT]
     description: >
       STORM_ALERT. Reports storm risk at a location over a stated window,
       answering questions of the form "what is the storm risk at latitude
@@ -226,6 +236,7 @@ endpoints:
   - path: /ip-geolocate
     external_path: /ip-geolocate
     method: GET
+    intents: [IP_GEOLOCATION]
     description: >
       IP_GEOLOCATION. Answers "where is 8.8.8.8 located", "what country is
       this IP address from", "is this IP a VPN or a datacenter". Takes an
@@ -242,6 +253,7 @@ endpoints:
   - path: /academic-search
     external_path: /academic-search
     method: GET
+    intents: [ACADEMIC_SEARCH]
     description: >
       ACADEMIC_SEARCH. Answers "find papers on federated learning",
       "peer-reviewed research on fraud detection since 2020". Takes a
@@ -258,6 +270,7 @@ endpoints:
   - path: /fraud-query
     external_path: /fraud-query
     method: POST
+    intents: [FRAUD_DETECTION]
     description: >
       FRAUD_DETECTION. Answers "was BitConnect a scam", "is this scheme
       fraudulent", "what happened in the FTX fraud". Assesses how likely a
@@ -268,6 +281,7 @@ endpoints:
   - path: /assess-wallet
     external_path: /assess-wallet
     method: GET
+    intents: [FRAUD_DETECTION]
     description: >
       FRAUD_DETECTION for a specific address. Answers "is 0xabc... a scam
       wallet", "how risky is this address", "is it safe to receive funds
@@ -282,6 +296,7 @@ endpoints:
   - path: /assess-wallet
     external_path: /assess-wallet
     method: POST
+    intents: [FRAUD_DETECTION]
     description: >
       FRAUD_DETECTION for a specific address, identical to the GET form
       above and accepting the address in a JSON body instead of the query
