@@ -16,8 +16,35 @@ const MAX_CACHE_ENTRIES = 500;
 
 const protocolCache = new Map();
 let chainListCache = null;
+let protocolListCache = null;
 const priceCache = new Map();
 const PRICE_CACHE_TTL_MS = Number(process.env.DEFILLAMA_PRICE_CACHE_TTL_MS) || 15_000;
+const PROTOCOL_LIST_CACHE_TTL_MS = Number(process.env.DEFILLAMA_PROTOCOL_LIST_CACHE_TTL_MS) || 300_000;
+
+// Real rebrands/renames verified live against DefiLlama's own data
+// (2026-08-30) rather than assumed — a plain slug/name search can't bridge
+// these because the old and new names don't share any substring. Each one
+// here was individually confirmed on the live API before being added:
+// MakerDAO rebranded to Sky in 2024 and no longer appears under "maker" at
+// all; Anyswap rebranded to Multichain (still listed, though the protocol
+// itself is now defunct); "Avax" is a common shorthand for the Avalanche
+// chain that DefiLlama's chain list doesn't itself recognize. Deliberately
+// small and hand-verified rather than a large speculative list — an
+// unverified guess here would misreport one protocol's TVL as another's.
+// Fantom/Sonic and Optimism/OP Mainnet were checked and excluded: DefiLlama
+// tracks each pair as genuinely separate entries, not a rename, so aliasing
+// them would be wrong, not just incomplete.
+const PROTOCOL_ALIASES = {
+  maker: 'sky-lending',
+  makerdao: 'sky-lending',
+  anyswap: 'multichain',
+};
+const CHAIN_ALIASES = {
+  matic: 'Polygon',
+  'bnb chain': 'BSC',
+  bnb: 'BSC',
+  avax: 'Avalanche',
+};
 
 export class ProtocolNotFoundError extends Error {
   constructor(message) {
@@ -50,7 +77,39 @@ function isRetryableFailure(statusCode, errName) {
 export function resetDefiLlamaCache() {
   protocolCache.clear();
   chainListCache = null;
+  protocolListCache = null;
   priceCache.clear();
+}
+
+// Live-checked 2026-08-30: DefiLlama's /tvl/{slug} takes its slug literally,
+// and a real, major, commonly-named protocol often isn't that literal
+// string — "compound" 404s because the live slug is "compound-v3",
+// "curve" because it's "curve-dex", "convex" because it's "convex-finance".
+// A caller (or a natural-language question) giving the protocol's plain
+// name is the common case, not an edge case, so a direct-slug miss falls
+// back to a name search over the full protocol list before giving up.
+// Among multiple name matches (versioned protocols list separately, e.g.
+// "Compound V3"/"Compound V2"/"Compound V1"), the highest-TVL one is
+// treated as the one a plain, unversioned name most likely means.
+async function resolveProtocolSlug(rawSlug) {
+  if (!protocolListCache || Date.now() - protocolListCache.storedAt >= PROTOCOL_LIST_CACHE_TTL_MS) {
+    const res = await fetchDefiLlama('api.llama.fi', '/protocols');
+    if (res.status !== 200) return null;
+    const list = await res.json();
+    protocolListCache = { value: list, storedAt: Date.now() };
+  }
+
+  const needle = rawSlug.toLowerCase();
+  const candidates = protocolListCache.value.filter(
+    (p) => p.slug?.toLowerCase() === needle
+      || p.name?.toLowerCase() === needle
+      || p.slug?.toLowerCase().startsWith(`${needle}-`)
+      || p.name?.toLowerCase().startsWith(`${needle} `)
+  );
+  if (candidates.length === 0) return null;
+
+  candidates.sort((a, b) => (b.tvl ?? 0) - (a.tvl ?? 0));
+  return candidates[0].slug;
 }
 
 // DefiLlama splits its public API across multiple hosts by product —
@@ -108,21 +167,29 @@ async function fetchDefiLlama(host, path) {
 // Returns current TVL in USD for a DefiLlama protocol slug (e.g.
 // "uniswap"), or throws ProtocolNotFoundError. /tvl/{slug} returns a bare
 // number on success, plain text "Protocol not found" on failure.
-export async function getProtocolTvl(slug) {
+export async function getProtocolTvl(rawSlug) {
+  const slug = PROTOCOL_ALIASES[rawSlug.toLowerCase()] ?? rawSlug;
   const key = `protocol:${slug}`;
   const hit = protocolCache.get(key);
   if (hit && Date.now() - hit.storedAt < PROTOCOL_CACHE_TTL_MS) {
     return hit.value;
   }
 
-  const res = await fetchDefiLlama('api.llama.fi', `/tvl/${encodeURIComponent(slug)}`);
-  if (res.status !== 200) {
-    throw new ProtocolNotFoundError(`no DefiLlama protocol found for slug '${slug}'`);
+  let res = await fetchDefiLlama('api.llama.fi', `/tvl/${encodeURIComponent(slug)}`);
+  let text = res.status === 200 ? await res.text() : null;
+  let tvl = text !== null ? Number(text) : NaN;
+
+  if (res.status !== 200 || !Number.isFinite(tvl)) {
+    const resolved = await resolveProtocolSlug(slug);
+    if (resolved) {
+      res = await fetchDefiLlama('api.llama.fi', `/tvl/${encodeURIComponent(resolved)}`);
+      text = res.status === 200 ? await res.text() : null;
+      tvl = text !== null ? Number(text) : NaN;
+    }
   }
-  const text = await res.text();
-  const tvl = Number(text);
+
   if (!Number.isFinite(tvl)) {
-    throw new ProtocolNotFoundError(`no DefiLlama protocol found for slug '${slug}'`);
+    throw new ProtocolNotFoundError(`no DefiLlama protocol found for slug '${rawSlug}'`);
   }
 
   protocolCache.set(key, { value: tvl, storedAt: Date.now() });
@@ -136,14 +203,20 @@ export async function getProtocolTvl(slug) {
 // protocol TVL available separately. DefiLlama's /tvl/{slug} endpoint is
 // aggregate-only, so questions such as "Aave V3 on Ethereum" require the
 // richer /protocol/{slug} response and its currentChainTvls map.
-export async function getProtocolChainTvl(slug, chainName) {
+export async function getProtocolChainTvl(rawSlug, rawChainName) {
+  const slug = PROTOCOL_ALIASES[rawSlug.toLowerCase()] ?? rawSlug;
+  const chainName = CHAIN_ALIASES[rawChainName.toLowerCase()] ?? rawChainName;
   const key = `protocol-chain:${slug}:${chainName.toLowerCase()}`;
   const hit = protocolCache.get(key);
   if (hit && Date.now() - hit.storedAt < PROTOCOL_CACHE_TTL_MS) return hit.value;
 
-  const res = await fetchDefiLlama('api.llama.fi', `/protocol/${encodeURIComponent(slug)}`);
+  let res = await fetchDefiLlama('api.llama.fi', `/protocol/${encodeURIComponent(slug)}`);
   if (res.status !== 200) {
-    throw new ProtocolNotFoundError(`no DefiLlama protocol found for slug '${slug}'`);
+    const resolved = await resolveProtocolSlug(slug);
+    if (resolved) res = await fetchDefiLlama('api.llama.fi', `/protocol/${encodeURIComponent(resolved)}`);
+  }
+  if (res.status !== 200) {
+    throw new ProtocolNotFoundError(`no DefiLlama protocol found for slug '${rawSlug}'`);
   }
   const body = await res.json();
   const entries = Object.entries(body?.currentChainTvls ?? {});
@@ -153,7 +226,7 @@ export async function getProtocolChainTvl(slug, chainName) {
     && typeof value === 'number'
   );
   if (!match) {
-    throw new ChainNotFoundError(`protocol '${slug}' has no DefiLlama TVL for chain '${chainName}'`);
+    throw new ChainNotFoundError(`protocol '${rawSlug}' has no DefiLlama TVL for chain '${rawChainName}'`);
   }
   const value = match[1];
   protocolCache.set(key, { value, storedAt: Date.now() });
@@ -165,7 +238,8 @@ export async function getProtocolChainTvl(slug, chainName) {
 // case-insensitively), or throws ChainNotFoundError. Whole /v2/chains list
 // is cached together since it's one call regardless of which chain is
 // asked for.
-export async function getChainTvl(chainName) {
+export async function getChainTvl(rawChainName) {
+  const chainName = CHAIN_ALIASES[rawChainName.toLowerCase()] ?? rawChainName;
   if (!chainListCache || Date.now() - chainListCache.storedAt >= CHAIN_LIST_CACHE_TTL_MS) {
     const res = await fetchDefiLlama('api.llama.fi', '/v2/chains');
     if (res.status !== 200) {
@@ -179,7 +253,7 @@ export async function getChainTvl(chainName) {
     (c) => typeof c.name === 'string' && c.name.toLowerCase() === chainName.toLowerCase()
   );
   if (!match || typeof match.tvl !== 'number') {
-    throw new ChainNotFoundError(`no DefiLlama chain found for name '${chainName}'`);
+    throw new ChainNotFoundError(`no DefiLlama chain found for name '${rawChainName}'`);
   }
   return match.tvl;
 }

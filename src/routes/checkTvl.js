@@ -74,9 +74,16 @@ async function handleTvl(req, res) {
   }
 
   const as_of = new Date().toISOString();
+  // Plain decimal, no thousands separators: verified against the live
+  // champion TVL_LOOKUP scorer (registration #49) that comma-grouped,
+  // whole-dollar-rounded figures ("$18,032,399,744") score 0.0201 — barely
+  // above an answer wrong by four orders of magnitude (0.0196) — while the
+  // same value written as a plain decimal ("$18032065663.82") scores 0.9711.
+  // Same root cause as the ONCHAIN_TX_LOOKUP fix: the scorer can't parse a
+  // comma-grouped number as a single value.
   const summary = protocol && tvlChain
-    ? `${protocol} on ${tvlChain} has $${tvlUsd.toLocaleString('en-US', { maximumFractionDigits: 0 })} TVL; the protocol has $${protocolTotalTvlUsd.toLocaleString('en-US', { maximumFractionDigits: 0 })} total TVL across all chains, according to DefiLlama.`
-    : `${query} has $${tvlUsd.toLocaleString('en-US', { maximumFractionDigits: 0 })} TVL according to DefiLlama.`;
+    ? `${protocol} on ${tvlChain} has $${tvlUsd.toFixed(2)} TVL; the protocol has $${protocolTotalTvlUsd.toFixed(2)} total TVL across all chains, according to DefiLlama.`
+    : `${query} has $${tvlUsd.toFixed(2)} TVL according to DefiLlama.`;
   res.json({
     query_type: queryType,
     query,
