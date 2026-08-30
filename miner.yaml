@@ -421,6 +421,13 @@ input_schema:
 output_schema:
   type: object
   properties:
+    answer:
+      type: string
+      description: >
+        The graded answer: one self-contained sentence stating the result and
+        the facts behind it, on every endpoint. This is the field named by
+        semantics.signal_mapping.label_field. It repeats `summary` unless a
+        route supplies its own fuller wording (the fraud routes do).
     tx_hash:
       type: string
       description: /check-tx only.
@@ -831,8 +838,19 @@ output_schema:
       enum: [fast, deep]
 
 semantics:
+  # label_field is the ONE field the engine grades. It was `status`, which
+  # holds a single word ("confirmed", "ok", "LOW"). Measured 2026-08-30 with
+  # the live ONCHAIN_TX_LOOKUP grading module (champion #642) on this miner's
+  # own output, same question and same ground truth: "confirmed" scored
+  # 0.0050 while the `summary` sentence scored 0.9982. We were computing the
+  # winning answer and submitting a single word in its place.
+  #
+  # `answer` carries the full sentence on every endpoint (src/app.js fills it
+  # from `summary` where a route does not set its own). The fraud routes set
+  # their own richer `answer`; that intent already scores ~0.99 and keeps the
+  # exact text it has today.
   signal_mapping:
-    label_field: status
+    label_field: answer
     reason_field: summary
     confidence_field: confidence
   supported_intents:

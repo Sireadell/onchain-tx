@@ -75,6 +75,40 @@ const corsMiddleware = (req, res, next) => {
   next();
 };
 
+// The Telegraph engine grades exactly ONE field of the response body — the
+// one named by signal_mapping.label_field in miner.yaml. That field was
+// `status`, whose value is a single word: "confirmed", "ok", "LOW".
+//
+// Measured 2026-08-30 by running the live ONCHAIN_TX_LOOKUP grading module
+// (champion #642) over this miner's own output for the same transaction,
+// against the same ground truth:
+//
+//   "confirmed"          (the `status` we submit)  -> 0.0050
+//   the `summary` sentence (computed, not submitted) -> 0.9982
+//
+// So the answer that wins was already being produced and then thrown away
+// in favour of a single word. label_field now points at `answer`, and this
+// fills `answer` in from `summary` for every route that does not set one.
+//
+// The fraud routes already return their own, richer `answer` and are left
+// untouched: FRAUD_DETECTION is the only intent already scoring ~0.99, and
+// it is the one endpoint with no `status` field at all — which is very
+// likely why it alone escaped this bug.
+const answerFieldMiddleware = (req, res, next) => {
+  const sendJson = res.json.bind(res);
+  res.json = (body) => {
+    if (
+      body && typeof body === 'object' && !Array.isArray(body)
+      && body.answer === undefined
+      && typeof body.summary === 'string' && body.summary.trim()
+    ) {
+      return sendJson({ ...body, answer: body.summary });
+    }
+    return sendJson(body);
+  };
+  next();
+};
+
 export function buildApp() {
   const app = express();
   // Same reasoning as Miner #1: exactly one proxy hop on Render, `1` not
@@ -84,6 +118,7 @@ export function buildApp() {
   app.use(requestLogMiddleware);
   app.use(corsMiddleware);
   app.use(express.json());
+  app.use(answerFieldMiddleware);
 
   app.use('/health', healthRouter);
   app.use('/check-tx', checkTxRateLimit, checkTxRouter);
