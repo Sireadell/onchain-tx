@@ -3,17 +3,19 @@ import { ethers } from 'ethers';
 
 const DIAMOND = '0x5a2324aA18613FAD4e44bDF0d6c73Ec1f6D87ff8';
 const RPC = 'https://sepolia.base.org';
-// Verified live 2026-08-30 by scanning /api/miners/{id} for slug txlens and
-// taking the one whose activation_status is active: 313. Every earlier id
-// this script has carried (246, 261, 267) is now deregistered — each update
-// mints a new registration and retires the previous one, so this constant is
-// stale by definition after every run and MUST be re-verified before each
-// one. Updating a deregistered id fails pre-flight rather than silently
-// writing to a dead record.
-const OLD_REGISTRATION_ID = 313;
-const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/664b62d2ad220e1e8e71462448e3382e1775ba08/miner.yaml';
-const YAML_HASH = '0xeea39162c91b399da440c461fe46cc5b5feaedce6fd1d21be6a450404e8cf1aa';
-const PREVIOUS_YAML_HASH = '20741d32611e4da8d4116f1c8b4f6575a913be96845bf2beef2c67bcfffb0359';
+// 313 was retired on-chain by the run that minted 341 (confirmed 2026-08-30:
+// updateMiner.staticCall(313, ...) reverts "already deregistered"). 341 is
+// what that run actually produced — it's live on-chain and owned by this
+// wallet, just marked "rejected" by the explorer's off-chain YAML validator
+// because that YAML had a duplicate `answer` key. Updating 341 (not
+// registering fresh) is what carries the slot forward. Every id this script
+// has carried before (246, 261, 267, 313) is now dead, so this constant is
+// stale by definition after every run and MUST be re-verified before the
+// next one: confirm with a staticCall, not just the explorer's status field.
+const OLD_REGISTRATION_ID = 341;
+const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/d41b197c20e79c072d724f9524b32b1cacfd83e4/miner.yaml';
+const YAML_HASH = '0x03d0c41d1ca910cfba256f50713adcbc17fc2a155a12c129123b934413734e3e';
+const PREVIOUS_YAML_HASH = 'eea39162c91b399da440c461fe46cc5b5feaedce6fd1d21be6a450404e8cf1aa';
 const FEE_ADDRESS = '0x6f477610A93C5B255C29c489760045272BCeDa99';
 const MIN_PRICE_USDC = 10000;
 const CONFIRMATION_PHRASE = `update-txlens-${OLD_REGISTRATION_ID}-${YAML_HASH.slice(2, 10)}`;
@@ -53,7 +55,14 @@ console.log('1/9 checking the current live registration');
 const current = (await requireJson(`https://explorer.telegraphprotocol.com/api/miners/${OLD_REGISTRATION_ID}`)).miner;
 if (current.registration_id !== OLD_REGISTRATION_ID) fail('registration ID does not match');
 if (current.slug !== 'txlens') fail(`registration ${OLD_REGISTRATION_ID} belongs to ${current.slug}`);
-if (current.activation_status !== 'active') fail(`current TxLens status is ${current.activation_status}`);
+// 'active' is the normal case. 'rejected' is also updatable: the explorer's
+// off-chain YAML validator flagged the last submission bad, but the
+// on-chain registration itself still exists and is owned by this wallet —
+// confirmed 2026-08-30 via updateMiner.staticCall succeeding on a rejected
+// id. Only a genuinely dead status (deregistered, or anything else) blocks.
+if (!['active', 'rejected'].includes(current.activation_status)) {
+  fail(`current TxLens status is ${current.activation_status}`);
+}
 if (current.yaml_hash.toLowerCase() !== PREVIOUS_YAML_HASH) fail('current on-chain YAML hash changed');
 
 console.log('2/9 downloading and hashing the exact proposed YAML');
