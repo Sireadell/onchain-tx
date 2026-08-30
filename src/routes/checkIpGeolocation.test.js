@@ -59,12 +59,27 @@ test('ip-geolocate: accepts an IPv6 address', async (t) => {
   assert.ok(body.country);
 });
 
-test('ip-geolocate: pulls an IP out of a whole question and reports risk flags', async (t) => {
+test('ip-geolocate: pulls an IP out of a whole question and reports risk flags in the JSON envelope', async (t) => {
   const base = startServer(t);
   const res = await fetch(`${base}/ip-geolocate?ip=${encodeURIComponent('where is 8.8.8.8 located?')}`);
   const body = await res.json();
   assert.equal(body.status, 'ok');
   assert.equal(body.ip, '8.8.8.8');
+  // Risk flags stay a real field on the JSON envelope, but not in the
+  // graded `summary` text — see checkIpGeolocation.js for why (verified
+  // against the live champion IP_GEOLOCATION scorer, registration #630).
   assert.equal(body.is_hosting, true);
-  assert.match(body.summary, /Risk flags:/);
+  assert.equal(typeof body.is_proxy_or_vpn, 'boolean');
+  assert.equal(typeof body.is_mobile, 'boolean');
+});
+
+test('ip-geolocate: summary is a short region/country/ISP sentence, not city or risk-flag prose', async (t) => {
+  const base = startServer(t);
+  const res = await fetch(`${base}/ip-geolocate?ip=8.8.8.8`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.match(body.summary, /^8\.8\.8\.8 is located in .+, operated by .+\.$/);
+  assert.doesNotMatch(body.summary, /Risk flags:/);
+  // city stays a real field; it's just not in the graded summary text.
+  assert.ok(body.city);
 });

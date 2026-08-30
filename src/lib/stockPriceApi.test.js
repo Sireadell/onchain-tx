@@ -117,6 +117,25 @@ test('getStockQuote does not 502 when a name cannot be resolved by search or pro
   await assert.rejects(getStockQuote('Not A Real Company'), TickerNotFoundError);
 });
 
+test('getStockQuote reports not_found, not a 502, when Twelve Data confirms not-found but Yahoo is only rate-limited', async (t) => {
+  // Live-checked 2026-08-29: ticker="What is Apple trading at?" produced a
+  // definitive not-found from Twelve Data and a 429 from Yahoo (rate-limited,
+  // not evidence the ticker exists), but the old `errors.every(isNotFoundError)`
+  // check required every error to be not-found, so Yahoo's inconclusive 429
+  // poisoned a legitimate not-found verdict into a generic 502.
+  withTwelveDataKey(t);
+  withFetchMock(t, async (url) => {
+    if (url.includes('symbol_search')) {
+      return { ok: true, json: async () => ({ data: [] }) };
+    }
+    if (url.includes('twelvedata')) {
+      return { ok: true, json: async () => ({ status: 'error', code: 400, message: 'symbol not found' }) };
+    }
+    return { ok: false, status: 429, statusText: 'Too Many Requests' };
+  });
+  await assert.rejects(getStockQuote('Not A Real Company'), TickerNotFoundError);
+});
+
 test('getStockQuote skips symbol search entirely without a configured key', async (t) => {
   const original = process.env.TWELVE_DATA_API_KEY;
   delete process.env.TWELVE_DATA_API_KEY;

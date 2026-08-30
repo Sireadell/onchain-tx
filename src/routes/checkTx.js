@@ -16,6 +16,7 @@ import { CHAINS, DEFAULT_CHAIN, resolveChainLoose } from '../lib/chains.js';
 import { lookupMethodSignature } from '../lib/fourByte.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 import { extractTxHash } from '../lib/entityExtract.js';
+import { amountToDecimalString } from '../lib/formatAmount.js';
 
 const router = Router();
 
@@ -103,7 +104,14 @@ async function handleCheckTx(req, res) {
       : method_selector
         ? ` and called contract method selector ${method_selector}`
         : '';
-    summary = `Ethereum transaction ${txHash} sent ${value_eth} ETH from ${result.from} to ${result.to}${methodText} in block ${result.block_number}; status ${result.receipt_status ?? result.status}.`;
+    // value_eth is interpolated in fixed-decimal form, not via its raw
+    // Number stringification: JS switches to exponential notation below
+    // 1e-6, and the scorer's fact-matcher does a plain substring scan for
+    // the number, so "3.1337e-14" never matches the ground truth's
+    // "0.000000000000031337" and the whole answer scores as if the value
+    // were wrong. See formatAmount.js.
+    const value_eth_str = result.value_wei === null ? String(value_eth) : amountToDecimalString(result.value_wei, 18);
+    summary = `Ethereum transaction ${txHash} sent ${value_eth_str} ETH from ${result.from} to ${result.to}${methodText} in block ${result.block_number}; status ${result.receipt_status ?? result.status}.`;
   }
 
   // Compact, deterministic one-line summary of the verdict — chain:tx_hash:

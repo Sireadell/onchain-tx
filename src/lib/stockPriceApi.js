@@ -29,6 +29,7 @@ async function tryQuote(ticker, errors) {
     try {
       return { ...(await getTwelveDataStockQuote(ticker)), resolvedTicker: ticker };
     } catch (err) {
+      err.provider = 'twelve_data';
       errors.push(err);
     }
   }
@@ -37,6 +38,7 @@ async function tryQuote(ticker, errors) {
     const quote = await getYahooStockQuote(ticker);
     return { ...quote, source: 'yahoo_finance', resolvedTicker: ticker };
   } catch (err) {
+    err.provider = 'yahoo';
     errors.push(err);
   }
 
@@ -64,7 +66,18 @@ export async function getStockQuote(rawTicker) {
     if (viaSearch) return viaSearch;
   }
 
-  if (errors.every(isNotFoundError)) {
+  // Live-checked 2026-08-29: a garbage ticker while Yahoo happened to be
+  // rate-limited (429) produced neither `errors.every(isNotFoundError)` —
+  // Yahoo's 429 isn't a not-found error — nor a real quote, so this fell
+  // through to a generic 502 on what was really just an unrecognized
+  // ticker. A 429 from the fallback provider is inconclusive about
+  // whether the ticker exists, not evidence that it does, so it shouldn't
+  // be able to override a definitive not-found verdict from Twelve Data
+  // (the primary source). Trust that verdict on its own.
+  const twelveDataConfirmedNotFound = errors.some(
+    (err) => err.provider === 'twelve_data' && err instanceof TwelveDataTickerNotFoundError,
+  );
+  if (twelveDataConfirmedNotFound || errors.every(isNotFoundError)) {
     throw new TickerNotFoundError(`no stock quote found for '${rawTicker}'`);
   }
 

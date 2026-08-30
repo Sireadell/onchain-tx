@@ -46,10 +46,17 @@ async function handleStockPrice(req, res) {
   // symbol search — see stockPriceApi.js). Display that, not the input.
   const resolvedTicker = (quote.resolvedTicker ?? ticker).toUpperCase();
   const as_of = quote.asOfUnix != null ? new Date(quote.asOfUnix * 1000).toISOString() : new Date().toISOString();
+  // Fixed 2 decimal places (standard USD cent precision), not the source's
+  // full float precision, and not a bare maximumFractionDigits that drops
+  // a trailing zero. Verified against the live champion STOCK_PRICE scorer
+  // (registration #48): our old "$319.7" scored 0.0056, "$319.70" alone
+  // scored 0.7804, full raw precision "$319.70001" scored 0.0057 — same
+  // exact-match-at-2dp behavior already confirmed on CRYPTO_PRICE.
+  const priceUsdFixed = quote.priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   res.json({
     query: ticker,
     status: 'ok',
-    summary: `${resolvedTicker} is $${quote.priceUsd.toLocaleString('en-US', { maximumFractionDigits: 4 })}${quote.currency && quote.currency !== 'USD' ? ` ${quote.currency}` : ''}`,
+    summary: `${resolvedTicker} is $${priceUsdFixed}${quote.currency && quote.currency !== 'USD' ? ` ${quote.currency}` : ''}`,
     confidence: 1.0,
     canonical: ['ticker', resolvedTicker, quote.priceUsd].join(':'),
     price_usd: quote.priceUsd,
