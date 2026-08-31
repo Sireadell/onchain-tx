@@ -37,7 +37,12 @@ description: >
   repeated provider calls, and freshness timestamps identify when the data
   was fetched.
 
-  It covers thirteen canonical intents. ONCHAIN_TX_LOOKUP: given a transaction
+  It covers thirteen canonical intents. WEATHER_FORECAST: what will the
+  weather do at a named place on the day or over the window asked about,
+  answering the aspect emphasised (rain, wind, snow, freeze, temperature)
+  rather than reciting a range. STORM_ALERT: how disruptive will the
+  weather be at a place over the next 48 hours, graded and scored with the
+  operational response it calls for. ONCHAIN_TX_LOOKUP: given a transaction
   hash, is it confirmed, reverted, pending or not found, and what did it do.
   GAS_PRICE: what does a transaction cost right now on a named chain.
   WALLET_BALANCE_CHECK: what native coin or ERC-20 token does a given
@@ -46,16 +51,11 @@ description: >
   chain. CRYPTO_PRICE: what is a coin or on-chain token worth in USD.
   STOCK_PRICE: what is a listed equity trading at. SSL_VERIFICATION: is a
   domain's TLS certificate valid and when does it expire, from a real live
-  handshake. WEATHER_FORECAST: what will the weather do at a named place on
-  the day or over the window asked about, answering the aspect emphasised
-  (rain, wind, snow, freeze, temperature) rather than reciting a range.
-  STORM_ALERT: how disruptive will the weather be at a place over the next
-  48 hours, graded and scored with the operational response it calls for.
-  IP_GEOLOCATION: where is an IPv4 or IPv6 address, on whose network, and
-  is it a proxy, VPN or datacenter address. ACADEMIC_SEARCH: which
-  peer-reviewed papers exist on a topic, with journal, authors, citation
-  counts and DOIs. FRAUD_DETECTION: how likely is a given address or scheme
-  to be fraudulent.
+  handshake. IP_GEOLOCATION: where is an IPv4 or IPv6 address, on whose
+  network, and is it a proxy, VPN or datacenter address. ACADEMIC_SEARCH:
+  which peer-reviewed papers exist on a topic, with journal, authors,
+  citation counts and DOIs. FRAUD_DETECTION: how likely is a given address
+  or scheme to be fraudulent.
 
   Blockscout-backed reads cover five EVM chains (Ethereum, Base, Arbitrum,
   Optimism, Polygon). RPC-backed reads currently cover Ethereum, Base,
