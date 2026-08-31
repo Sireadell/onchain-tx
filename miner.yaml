@@ -33,7 +33,9 @@ protocol: generic
 name: TxLens
 description: >
   TxLens answers on-chain and market questions with a single verifiable
-  number or status, sourced live and never cached stale.
+  number or status sourced from live providers. Short-lived caches reduce
+  repeated provider calls, and freshness timestamps identify when the data
+  was fetched.
 
   It covers thirteen canonical intents. ONCHAIN_TX_LOOKUP: given a transaction
   hash, is it confirmed, reverted, pending or not found, and what did it do.
@@ -55,10 +57,11 @@ description: >
   counts and DOIs. FRAUD_DETECTION: how likely is a given address or scheme
   to be fraudulent.
 
-  On-chain reads run across five EVM chains (Ethereum, Base, Arbitrum,
-  Optimism, Polygon) over a shared retry, rate-limit, cache and RPC-budget
-  layer. Every signal is read live at the moment of the request, never
-  served from a stale cache, and every answer carries a complete
+  Blockscout-backed reads cover five EVM chains (Ethereum, Base, Arbitrum,
+  Optimism, Polygon). RPC-backed reads currently cover Ethereum, Base,
+  Arbitrum and Polygon because the current Ankr key does not include
+  Optimism. Each signal comes from a live provider or a bounded short-lived
+  cache, and every answer carries a complete
   plain-language `summary` that states the verdict and then each thing
   actually checked, a deterministic `canonical` string for hashing, and a
   0-1 `confidence` that reflects real certainty rather than a fixed
@@ -88,7 +91,7 @@ endpoints:
       block_hash, receipt_status, and the decoded contract method where the
       calldata identifies one. Confidence scales with confirmation depth.
       Params: tx_hash (required, 0x-prefixed, 64 hex characters), chain
-      (optional, one of eth, base, arbitrum, optimism, polygon, default eth).
+      (optional, one of eth, base, arbitrum, polygon, default eth).
   - path: /gas-price
     external_path: /gas-price
     method: GET
@@ -100,7 +103,7 @@ endpoints:
       the estimated USD cost of a standard 21,000-gas transfer. This is the
       fee to transact, not the price of the chain's token, which is
       CRYPTO_PRICE. Params: chain (optional, one of eth, base, arbitrum,
-      optimism, polygon, default eth).
+      polygon, default eth).
   - path: /wallet-balance
     external_path: /wallet-balance
     method: GET
@@ -111,7 +114,7 @@ endpoints:
       blockchain address and returns its current native-coin or ERC-20 token
       balance on a named chain. Params: address (required, 0x-prefixed, 40
       hex characters), chain (optional, one of eth, base, arbitrum,
-      optimism, polygon, default eth), token (optional, 0x-prefixed, 40 hex
+      polygon, default eth), token (optional, 0x-prefixed, 40 hex
       characters, an ERC-20 contract address; when supplied, returns that
       token's balance instead of the chain's native coin).
   - path: /token-holders
@@ -463,16 +466,17 @@ output_schema:
     query:
       type: string
       description: >
-        /tvl and /crypto-price only. Echoes back the protocol slug, chain
-        name, coin id, or chain:token pair that was looked up.
+        Echoes the main lookup value on routes that return it, including
+        TVL, crypto, stock, weather and academic search.
     status:
       type: string
-      enum: [confirmed, reverted, pending, not_found, error, ok, invalid_input]
       description: >
         confirmed/reverted/pending/not_found/error on /check-tx; ok/error
         on /gas-price and /wallet-balance (live reads have no confirmation
         states); ok/not_found/error on /token-holders (not_found means the
         address isn't a known ERC-20 token on that chain, not a failure).
+        Fraud routes may use Sentinel's named verdict. A Sentinel outage is
+        inconclusive rather than a failed HTTP request.
         invalid_input can be returned by any endpoint and is an answer, not
         a failure: it means the parameters supplied could not identify
         anything to look up, and summary explains in plain language what the
@@ -491,8 +495,12 @@ output_schema:
         Compact deterministic one-line verdict summary, shape varies per
         endpoint (documented in each route's description).
     as_of:
-      type: string
-      description: ISO timestamp of the read. /gas-price, /wallet-balance, and /tvl only.
+      type: [string, "null"]
+      description: >
+        ISO timestamp of the source reading on gas, balance, holders, TVL,
+        crypto and stock routes. On /stock-price this is the provider's
+        quote observation time and is null when the provider did not supply
+        one; it is never replaced by the response retrieval time.
     from:
       type: [string, "null"]
       description: /check-tx only.
@@ -504,7 +512,7 @@ output_schema:
       description: /check-tx only.
     value_eth:
       type: [number, "null"]
-      description: /check-tx only. Native ETH value in human-readable units.
+      description: /check-tx only. Native-token value in human-readable units. The legacy field name is value_eth, including on Polygon where the native token is POL.
     method:
       type: [string, "null"]
       description: /check-tx only. Decoded contract method name when available.
@@ -574,13 +582,22 @@ output_schema:
       description: /tvl only. Total protocol TVL across all chains when both protocol and tvl_chain are supplied.
     price_usd:
       type: [number, "null"]
-      description: /crypto-price only. Null when status is not_found.
+      description: >
+        /crypto-price and /stock-price. On /stock-price this is populated
+        only when the provider quote is denominated in USD; it is null for
+        non-USD listings and when status is not_found.
+    price:
+      type: [number, "null"]
+      description: /stock-price only. The listing price in the units named by currency.
+    company_name:
+      type: [string, "null"]
+      description: /stock-price only. Provider-supplied company name, or null when the provider omitted it.
     change_24h_pct:
       type: [number, "null"]
-      description: /crypto-price only. CoinGecko 24-hour USD price change percentage when available.
+      description: /crypto-price only. CoinPaprika 24-hour USD price change percentage when available.
     market_cap_usd:
       type: [number, "null"]
-      description: /crypto-price only. Current CoinGecko market capitalization when available.
+      description: /crypto-price only. Current CoinPaprika market capitalization when available.
     source_count:
       type: integer
       description: /crypto-price only. Number of independent price feeds that answered.
@@ -590,17 +607,21 @@ output_schema:
         type: object
     price_source:
       type: string
-      enum: [coingecko, defillama]
+      enum: [coinpaprika, defillama, twelve_data, yahoo_finance]
       description: >
-        /crypto-price, coin_id mode only. Which upstream actually served
-        the price — coingecko unless that call failed, in which case it
-        falls back to defillama.
+        /crypto-price and /stock-price. Which upstream actually supplied
+        the selected price.
     currency:
       type: [string, "null"]
-      description: /stock-price only. Non-null and non-"USD" for tickers priced in another currency (foreign exchanges).
+      description: >
+        /stock-price only. Exact provider denomination, including case when
+        it distinguishes units such as GBp (pence) from GBP (pounds).
     exchange:
       type: [string, "null"]
       description: /stock-price only. The exchange the ticker trades on.
+    retrieved_at:
+      type: string
+      description: /stock-price only. ISO timestamp when TxLens retrieved the quote, distinct from provider observation time in as_of.
     valid:
       type: [boolean, "null"]
       description: /ssl-check only. Null when status is unreachable (the handshake itself failed, so validity is unknown, not false).

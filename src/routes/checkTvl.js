@@ -1,11 +1,10 @@
 // TVL_LOOKUP signal endpoint. Uses DefiLlama's public API, not
 // Ankr/Blockscout — TVL is an aggregated/indexed figure no chain RPC
 // exposes directly. Accepts `protocol` (a DefiLlama protocol slug, e.g.
-// "uniswap") and/or `tvl_chain` (a free-text DefiLlama chain name, e.g.
-// "Ethereum"). Deliberately not named `chain` — that param is already
-// enum-restricted to the five EVM slugs the other four endpoints use, and
-// DefiLlama's chain names (~460 of them, capitalized, not limited to EVM)
-// don't fit that enum.
+// "uniswap") and/or `tvl_chain` or `chain` (a free-text DefiLlama chain name, e.g.
+// "Ethereum"). `tvl_chain` remains the preferred broad DefiLlama field,
+// while `chain` is accepted because dispatchers also use that ordinary
+// field for explicit protocol-on-chain requests.
 //
 // Used to reject the request outright when both were supplied. Confirmed
 // live 2026-08-25 via Render request logs that Telegraph's dispatcher
@@ -39,7 +38,8 @@ async function handleTvl(req, res) {
   // reached the answer text and the canonical string, so a caller sending
   // " Base " got the right number reported under a ragged name.
   const rawProtocol = typeof params?.protocol === 'string' ? params.protocol.trim() : params?.protocol;
-  const rawTvlChain = typeof params?.tvl_chain === 'string' ? params.tvl_chain.trim() : params?.tvl_chain;
+  const suppliedChain = params?.tvl_chain ?? params?.chain;
+  const rawTvlChain = typeof suppliedChain === 'string' ? suppliedChain.trim() : suppliedChain;
   // Free-text fallback. "How much TVL does Curve have on Ethereum?" arrives
   // as a question rather than protocol=curve&tvl_chain=Ethereum, and this
   // route used to answer invalid_input to all of it. The question reduces

@@ -52,13 +52,29 @@ test('stock-price: missing ticker rejected before any call', async (t) => {
   assert.equal(called, false);
 });
 
+test('stock-price: unrelated free-text question is refused before any call', async (t) => {
+  let called = false;
+  const original = globalThis.fetch;
+  globalThis.fetch = (url, ...rest) => {
+    if (String(url).startsWith('http://127.0.0.1:')) return original(url, ...rest);
+    called = true;
+    throw new Error('should not be called');
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/stock-price?question=${encodeURIComponent('What is ETH worth?')}`);
+  assert.equal((await res.json()).status, 'invalid_input');
+  assert.equal(called, false);
+});
+
 test('stock-price: successful lookup returns price_usd and canonical', async (t) => {
   mockFetch(t, async () => ({
     status: 200,
     json: async () => ({
       chart: {
         result: [{
-          meta: { regularMarketPrice: 309.69, currency: 'USD', fullExchangeName: 'NasdaqGS', regularMarketTime: 1787676478 },
+          meta: { regularMarketPrice: 309.69, currency: 'USD', fullExchangeName: 'NasdaqGS', regularMarketTime: 1787676478, longName: 'Apple Inc.' },
         }],
       },
     }),
@@ -72,8 +88,92 @@ test('stock-price: successful lookup returns price_usd and canonical', async (t)
   assert.equal(body.price_usd, 309.69);
   assert.equal(body.currency, 'USD');
   assert.equal(body.exchange, 'NasdaqGS');
+  assert.equal(body.company_name, 'Apple Inc.');
   assert.equal(body.canonical, 'ticker:AAPL:309.69');
   assert.ok(body.as_of);
+  assert.equal(body.summary, `Apple Inc. (AAPL) is $309.69 USD as of ${body.as_of}.`);
+});
+
+test('stock-price: missing company and provider timestamp are not invented', async (t) => {
+  mockFetch(t, async () => ({
+    status: 200,
+    json: async () => ({
+      chart: {
+        result: [{
+          meta: { regularMarketPrice: 309.69, currency: 'USD', fullExchangeName: 'NasdaqGS' },
+        }],
+      },
+    }),
+  }));
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/stock-price?ticker=AAPL`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.company_name, null);
+  assert.equal(body.as_of, null);
+  assert.ok(body.retrieved_at);
+  assert.equal(body.summary, 'AAPL is $309.69 USD.');
+  assert.doesNotMatch(body.summary, /as of/);
+});
+
+test('stock-price: non-USD listing keeps its provider currency and does not populate price_usd', async (t) => {
+  mockFetch(t, async () => ({
+    status: 200,
+    json: async () => ({
+      chart: {
+        result: [{
+          meta: {
+            regularMarketPrice: 123.45,
+            currency: 'EUR',
+            fullExchangeName: 'XETRA',
+            regularMarketTime: 1787676478,
+            longName: 'SAP SE',
+          },
+        }],
+      },
+    }),
+  }));
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/stock-price?ticker=SAP.DE`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.price, 123.45);
+  assert.equal(body.price_usd, null);
+  assert.equal(body.currency, 'EUR');
+  assert.equal(body.company_name, 'SAP SE');
+  assert.equal(body.summary, `SAP SE (SAP.DE) is 123.45 EUR as of ${body.as_of}.`);
+  assert.doesNotMatch(body.summary, /USD|\$/);
+});
+
+test('stock-price: GBp remains pence and is not relabeled as GBP', async (t) => {
+  mockFetch(t, async () => ({
+    status: 200,
+    json: async () => ({
+      chart: {
+        result: [{
+          meta: {
+            regularMarketPrice: 72.34,
+            currency: 'GBp',
+            fullExchangeName: 'London Stock Exchange',
+            regularMarketTime: 1787676478,
+            longName: 'Vodafone Group Plc',
+          },
+        }],
+      },
+    }),
+  }));
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/stock-price?ticker=VOD.L`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.price, 72.34);
+  assert.equal(body.price_usd, null);
+  assert.equal(body.currency, 'GBp');
+  assert.equal(body.summary, `Vodafone Group Plc (VOD.L) is 72.34 GBp as of ${body.as_of}.`);
+  assert.doesNotMatch(body.summary, /\bGBP\b|USD|\$/);
 });
 
 test('stock-price: unknown ticker returns not_found, not an error', async (t) => {
@@ -105,7 +205,7 @@ test('stock-price: Twelve Data is preferred when configured', async (t) => {
       status: 200,
       ok: true,
       json: async () => ({
-        symbol: 'AAPL', close: '311.42', currency: 'USD', exchange: 'NASDAQ', timestamp: 1787680000,
+        symbol: 'AAPL', name: 'Apple Inc.', close: '311.42', currency: 'USD', exchange: 'NASDAQ', timestamp: 1787680000,
       }),
     };
   });
@@ -116,5 +216,7 @@ test('stock-price: Twelve Data is preferred when configured', async (t) => {
   const body = await res.json();
   assert.equal(body.price_usd, 311.42);
   assert.equal(body.exchange, 'NASDAQ');
+  assert.equal(body.company_name, 'Apple Inc.');
   assert.equal(body.price_source, 'twelve_data');
+  assert.equal(body.summary, `Apple Inc. (AAPL) is $311.42 USD as of ${body.as_of}.`);
 });

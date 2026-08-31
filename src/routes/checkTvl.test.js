@@ -65,6 +65,29 @@ test('tvl: both protocol and tvl_chain return chain-specific and total protocol 
   assert.equal(calledPaths.length, 2);
 });
 
+test('tvl: explicit chain is honored and refuses a protocol absent from that chain', async (t) => {
+  resetDefiLlamaCache();
+  const calledPaths = [];
+  mockFetch(t, async (url) => {
+    calledPaths.push(url);
+    if (url.includes('/protocol/')) {
+      return { status: 200, json: async () => ({ currentChainTvls: { Ethereum: 4000 } }) };
+    }
+    return { status: 200, text: async () => '5000' };
+  });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/tvl?protocol=aave-v3&chain=solana`);
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.status, 'not_found');
+  assert.equal(body.query_type, 'protocol_chain');
+  assert.equal(body.query, 'aave-v3:solana');
+  assert.equal(body.tvl_usd, null);
+  assert.match(body.summary, /no DefiLlama protocol_chain found/);
+  assert.ok(calledPaths.some((url) => url.includes('/protocol/aave-v3')));
+});
+
 test('tvl: successful protocol lookup returns tvl_usd and canonical', async (t) => {
   resetDefiLlamaCache();
   mockFetch(t, async () => ({ status: 200, text: async () => '5000' }));

@@ -37,19 +37,9 @@ async function handleIpGeolocation(req, res) {
     return res.status(502).json({ status: 'error', summary: 'IP geolocation failed', confidence: 1.0, error: err.message });
   }
 
-  // Risk flags, coordinates, timezone, and city are kept in the JSON
-  // fields below, unchanged, for any caller that wants them — but not in
-  // the graded `summary` text. Verified against the live champion
-  // IP_GEOLOCATION scorer (registration #630): a short "region, country,
-  // ISP (ASN)" sentence scores ~1.0 on real IPs, while the old multi-clause
-  // prose (city + coordinates + network + timezone + risk flags) scored
-  // 0.0056 — barely above a flat-out wrong country, and dropping only the
-  // city while keeping the rest of the prose made no difference (0.0056
-  // either way). City specifically is also unreliable across sources: two
-  // independent free geo-IP APIs disagreed on 1.1.1.1's city by 900km
-  // (South Brisbane vs Sydney) while agreeing on the region, so it's both
-  // the least reliable fact and, per the scorer, not worth the extra text.
-  const summary = `${result.ip} is located in ${[result.region, result.country].filter(Boolean).join(', ')}, operated by ${result.isp}${result.asn ? ` (${result.asn})` : ''}.`;
+  // Keep the graded location phrase complete. Each part is conditional so
+  // a provider response that omits city or region still reads naturally.
+  const summary = `${result.ip} is located in ${[result.city, result.region, result.country].filter(Boolean).join(', ')}, operated by ${result.isp}${result.asn ? ` (${result.asn})` : ''}.`;
 
   res.json({
     query: rawIp,

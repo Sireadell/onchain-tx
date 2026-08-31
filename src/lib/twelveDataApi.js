@@ -56,6 +56,7 @@ export async function getTwelveDataStockQuote(ticker) {
 
   return {
     priceUsd: price,
+    companyName: body.name ?? null,
     currency: body.currency ?? 'USD',
     exchangeName: body.exchange ?? null,
     asOfUnix: Number.isFinite(Number(body.timestamp)) ? Number(body.timestamp) : null,

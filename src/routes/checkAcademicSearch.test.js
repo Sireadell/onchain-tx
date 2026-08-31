@@ -19,6 +19,22 @@ test('academic-search: missing topic answered with guidance', async (t) => {
   assert.equal((await res.json()).status, 'invalid_input');
 });
 
+test('academic-search: unrelated free-text question is refused before any call', async (t) => {
+  let called = false;
+  const original = globalThis.fetch;
+  globalThis.fetch = (url, ...rest) => {
+    if (String(url).startsWith('http://127.0.0.1:')) return original(url, ...rest);
+    called = true;
+    throw new Error('should not be called');
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/academic-search?query=${encodeURIComponent('What is the Bitcoin price?')}`);
+  assert.equal((await res.json()).status, 'invalid_input');
+  assert.equal(called, false);
+});
+
 // Guards the defect an adversarial review found on 2026-08-29: results were
 // sorted by citation count across the whole match set, which surfaced
 // enormously-cited papers that had nothing to do with the topic ("federated
@@ -72,6 +88,63 @@ test('academic-search: Crossref keeps the route working when OpenAlex throttles'
   assert.equal(body.status, 'ok');
   assert.equal(body.papers[0].title, 'Federated learning for clinical research');
   assert.equal(body.papers[0].venue, 'Journal of Example Research');
+});
+
+test('academic-search: extracts result count and topic from a natural-language request', async (t) => {
+  const originalFetch = globalThis.fetch;
+  let requestedSearch;
+  let requestedCount;
+  globalThis.fetch = async (url, options) => {
+    if (String(url).startsWith('https://api.openalex.org/')) {
+      const parsed = new URL(url);
+      requestedSearch = parsed.searchParams.get('search');
+      requestedCount = parsed.searchParams.get('per_page');
+      return new Response(JSON.stringify({
+        meta: { count: 5 },
+        results: Array.from({ length: 5 }, (_, index) => ({
+          title: `Paper ${index + 1}`,
+          publication_year: 2025,
+          cited_by_count: index,
+          authorships: [],
+          primary_location: null,
+          abstract_inverted_index: null,
+        })),
+      }), { status: 200 });
+    }
+    return originalFetch(url, options);
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/academic-search?query=${encodeURIComponent('Find 5 peer-reviewed papers on federated learning')}`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(requestedSearch, 'federated learning');
+  assert.equal(requestedCount, '5');
+  assert.equal(body.papers.length, 5);
+  assert.match(body.summary, /5 peer-reviewed papers on federated learning/);
+});
+
+test('academic-search: upstream failures are errors with zero confidence', async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url).startsWith('https://api.openalex.org/')) {
+      return new Response('{}', { status: 429 });
+    }
+    if (String(url).startsWith('https://api.crossref.org/')) {
+      return new Response('{}', { status: 503 });
+    }
+    return originalFetch(url);
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/academic-search?query=${encodeURIComponent('Find papers on federated learning')}`);
+  const body = await res.json();
+  assert.equal(res.status, 502);
+  assert.equal(body.status, 'error');
+  assert.equal(body.confidence, 0);
+  assert.notEqual(body.status, 'invalid_input');
 });
 
 test('academic-search: a date range in the question is honoured', async (t) => {

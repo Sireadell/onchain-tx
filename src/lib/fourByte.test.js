@@ -19,3 +19,20 @@ test('decodes a contract method selector', async (t) => {
 test('returns null for a plain ETH transfer', async () => {
   assert.equal(await lookupMethodSignature('0x'), null);
 });
+
+test('uses the canonical ERC-20 transfer signature instead of a guessed directory result', async (t) => {
+  resetMethodSignatureCache();
+  const originalFetch = global.fetch;
+  let called = false;
+  global.fetch = async () => {
+    called = true;
+    return new Response(JSON.stringify({ results: [{ text_signature: 'workMyDirefulOwner(uint256,uint256)' }] }));
+  };
+  t.after(() => { global.fetch = originalFetch; });
+
+  assert.equal(
+    await lookupMethodSignature(`0xa9059cbb${'0'.repeat(128)}`),
+    'transfer(address,uint256)',
+  );
+  assert.equal(called, false);
+});

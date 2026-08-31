@@ -3,7 +3,7 @@ import { respondUnusableInput } from '../lib/unusableInput.js';
 
 const router = express.Router();
 const DEFAULT_SENTINEL_BASE_URL = 'https://telegraph-sentinel-40vp.onrender.com';
-const DEFAULT_TIMEOUT_MS = 55_000;
+const DEFAULT_TIMEOUT_MS = 12_000;
 
 function sentinelBaseUrl() {
   return (process.env.SENTINEL_BASE_URL || DEFAULT_SENTINEL_BASE_URL).replace(/\/$/, '');
@@ -12,6 +12,15 @@ function sentinelBaseUrl() {
 function timeoutMs() {
   const configured = Number(process.env.SENTINEL_TIMEOUT_MS);
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_TIMEOUT_MS;
+}
+
+function respondSentinelUnavailable(res, detail) {
+  return res.json({
+    status: 'inconclusive',
+    assessment_status: 'INCONCLUSIVE',
+    summary: `The fraud assessment is inconclusive because Sentinel is temporarily unavailable${detail ? `: ${detail}` : ''}. Retry shortly.`,
+    confidence: 0,
+  });
 }
 
 async function proxySentinel(req, res, path) {
@@ -52,7 +61,10 @@ async function proxySentinel(req, res, path) {
       );
     }
 
-    if (!upstream.ok) return res.status(upstream.status).json(body);
+    if (!upstream.ok) {
+      const detail = body?.summary ?? body?.error ?? body?.message ?? `status ${upstream.status}`;
+      return respondSentinelUnavailable(res, detail);
+    }
 
     return res.status(upstream.status).json({
       ...body,
@@ -61,10 +73,10 @@ async function proxySentinel(req, res, path) {
     });
   } catch (error) {
     if (error?.name === 'AbortError') {
-      return res.status(504).json({ error: 'Sentinel request timed out' });
+      return respondSentinelUnavailable(res, `request timed out after ${timeoutMs()}ms`);
     }
     console.error(`Sentinel proxy failed for ${path}:`, error);
-    return res.status(502).json({ error: 'Sentinel is temporarily unavailable' });
+    return respondSentinelUnavailable(res, error.message);
   } finally {
     clearTimeout(timeout);
   }

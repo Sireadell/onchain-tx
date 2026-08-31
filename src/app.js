@@ -22,16 +22,15 @@ import checkAcademicSearchRouter from './routes/checkAcademicSearch.js';
 import sentinelFraudRouter from './routes/sentinelFraud.js';
 import { misrouteWatchMiddleware } from './lib/misrouteWatch.js';
 
-// Same limit/window on all six signal routes — each spends its own
-// upstream quota (Ankr, Blockscout, or DefiLlama), no reason to size them
-// differently.
+// Each route has its own bucket. The default allows dispatcher bursts while
+// the provider-specific clients still enforce their own tighter quotas.
 function signalRateLimit() {
   return rateLimit({
     windowMs: 60_000,
-    limit: 30,
+    limit: Number(process.env.SIGNAL_RATE_LIMIT_PER_MIN) || 120,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'too many requests — slow down and try again shortly' },
+    message: { error: 'too many requests; slow down and try again shortly' },
   });
 }
 

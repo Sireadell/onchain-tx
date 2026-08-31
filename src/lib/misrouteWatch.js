@@ -70,7 +70,7 @@ const SAFE_SIGNALS = [
   },
 ];
 
-function detectIntents(text) {
+export function detectIntents(text) {
   if (!text) return [];
   const words = new Set(tokenize(text));
   const lower = text.toLowerCase();
@@ -97,9 +97,22 @@ function logSummary() {
   console.log(`[misroute-watch]   likely misroutes (called -> detected): ${JSON.stringify(misrouteCounts)}`);
 }
 
-function extractQuestionText(req) {
+export function extractRequestText(req) {
   const params = req.method === 'GET' ? req.query : req.body;
-  return freeTextParam(params) ?? null;
+  if (!params || typeof params !== 'object') return null;
+
+  // The engine often puts its whole question in a route's primary field,
+  // such as location or topic, instead of question/query. Include every
+  // top-level string so the watcher measures those real request shapes too.
+  const values = [];
+  const freeText = freeTextParam(params);
+  if (freeText) values.push(freeText.trim());
+  for (const value of Object.values(params)) {
+    if (typeof value !== 'string' || !value.trim()) continue;
+    const cleaned = value.trim();
+    if (!values.includes(cleaned)) values.push(cleaned);
+  }
+  return values.length ? values.join(' ') : null;
 }
 
 // Mount once, before the intent routers, so it sees every call regardless of
@@ -111,7 +124,7 @@ export function misrouteWatchMiddleware(req, res, next) {
   totalCalls += 1;
   callCounts[intent] = (callCounts[intent] ?? 0) + 1;
 
-  const question = extractQuestionText(req);
+  const question = extractRequestText(req);
   const detected = detectIntents(question).filter((hit) => hit.intent !== intent);
   for (const hit of detected) {
     const key = `${intent} -> ${hit.intent}`;

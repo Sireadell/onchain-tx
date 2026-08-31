@@ -34,17 +34,39 @@ import { extractSubject, freeTextParam } from '../lib/entityExtract.js';
 import { resolveChainLoose } from '../lib/chains.js';
 import { describeAddressMiss } from '../lib/addressContext.js';
 
-// Tries both sources at once; either failing (rate limit, timeout,
-// unrecognized id) just drops that source rather than failing the whole
-// request — a partial answer beats no answer. CoinPaprika's numbers lead
-// when available.
+// Tries both sources at once. Once one answers, the other gets a short
+// cross-check window. A slow provider cannot hold a good
+// answer until its full timeout expires.
+const SOURCE_CROSS_CHECK_MS = Number(process.env.CRYPTO_SOURCE_CROSS_CHECK_MS) || 250;
+
 async function getFreshestCoinPrice(coinId) {
-  const [coinPaprika, defiLlama] = await Promise.allSettled([
-    getCoinPaprikaPrice(coinId),
-    getCoinPrice(`coingecko:${coinId}`),
-  ]);
+  const wrap = (source, promise) => promise.then(
+    (value) => ({ source, status: 'fulfilled', value }),
+    (reason) => ({ source, status: 'rejected', reason }),
+  );
+  const coinPaprikaPromise = wrap('coinpaprika', getCoinPaprikaPrice(coinId));
+  const defiLlamaPromise = wrap('defillama', getCoinPrice(`coingecko:${coinId}`));
+  const first = await Promise.race([coinPaprikaPromise, defiLlamaPromise]);
+  const otherPromise = first.source === 'coinpaprika' ? defiLlamaPromise : coinPaprikaPromise;
+
+  let other;
+  if (first.status === 'rejected') {
+    other = await otherPromise;
+  } else {
+    other = await Promise.race([
+      otherPromise,
+      new Promise((resolve) => setTimeout(() => resolve(null), SOURCE_CROSS_CHECK_MS)),
+    ]);
+  }
+
+  const bySource = new Map([first, other].filter(Boolean).map((result) => [result.source, result]));
+  const coinPaprika = bySource.get('coinpaprika') ?? { status: 'rejected', reason: new Error('CoinPaprika did not answer within the cross-check window') };
+  const defiLlama = bySource.get('defillama') ?? { status: 'rejected', reason: new Error('DefiLlama did not answer within the cross-check window') };
   if (coinPaprika.status === 'rejected' && defiLlama.status === 'rejected') {
-    throw defiLlama.reason;
+    // DefiLlama's not-found error is the route's established signal for a
+    // valid lookup with no matching coin. Preserve it when both sources
+    // reject so an unknown coin remains a 200 not_found answer.
+    throw defiLlama.reason ?? coinPaprika.reason;
   }
 
   const primary = coinPaprika.status === 'fulfilled'

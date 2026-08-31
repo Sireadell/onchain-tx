@@ -20,6 +20,22 @@ test('storm-alert: missing location answered with guidance', async (t) => {
   assert.equal((await res.json()).status, 'invalid_input');
 });
 
+test('storm-alert: unrelated free-text question is refused before any call', async (t) => {
+  let called = false;
+  const original = globalThis.fetch;
+  globalThis.fetch = (url, ...rest) => {
+    if (String(url).startsWith('http://127.0.0.1:')) return original(url, ...rest);
+    called = true;
+    throw new Error('should not be called');
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/storm-alert?location=${encodeURIComponent('What time is it in Miami?')}`);
+  assert.equal((await res.json()).status, 'invalid_input');
+  assert.equal(called, false);
+});
+
 test('storm-alert: place name returns a risk grade with supporting figures', async (t) => {
   const base = startServer(t);
   const res = await fetch(`${base}/storm-alert?location=Miami`);

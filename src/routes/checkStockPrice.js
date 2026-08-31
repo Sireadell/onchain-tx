@@ -8,6 +8,7 @@ import { getStockQuote, TickerNotFoundError } from '../lib/stockPriceApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { respondUnusableInput } from '../lib/unusableInput.js';
 import { extractTicker, freeTextParam } from '../lib/entityExtract.js';
+import { questionMatchesIntent } from '../lib/intentGuard.js';
 
 const router = Router();
 
@@ -18,6 +19,12 @@ async function handleStockPrice(req, res) {
   // of it. extractTicker prefers an explicit symbol in the text and falls
   // back to the prose name, which the price API resolves by symbol search.
   const question = freeTextParam(params);
+  if (question && params?.ticker == null && !questionMatchesIntent(question, /\b(?:stock|stocks|share|shares|share\s+price|stock\s+price|ticker|equity|equities|trading|company)\b/i)) {
+    return respondUnusableInput(
+      res,
+      'This request does not appear to ask for a company share price. Ask for a stock or share price and include the company name or ticker symbol.',
+    );
+  }
   const ticker = params?.ticker ?? (question ? extractTicker(question) : null);
 
   if (!ticker) {
@@ -51,25 +58,38 @@ async function handleStockPrice(req, res) {
   // from what the caller sent (e.g. ticker=Apple resolved to AAPL via
   // symbol search — see stockPriceApi.js). Display that, not the input.
   const resolvedTicker = (quote.resolvedTicker ?? ticker).toUpperCase();
-  const as_of = quote.asOfUnix != null ? new Date(quote.asOfUnix * 1000).toISOString() : new Date().toISOString();
+  const observedAt = quote.asOfUnix != null && Number.isFinite(Number(quote.asOfUnix))
+    ? new Date(Number(quote.asOfUnix) * 1000)
+    : null;
+  const as_of = observedAt && !Number.isNaN(observedAt.getTime()) ? observedAt.toISOString() : null;
+  const retrieved_at = new Date().toISOString();
   // Fixed 2 decimal places (standard USD cent precision), not the source's
   // full float precision, and not a bare maximumFractionDigits that drops
   // a trailing zero. Verified against the live champion STOCK_PRICE scorer
   // (registration #48): our old "$319.7" scored 0.0056, "$319.70" alone
   // scored 0.7804, full raw precision "$319.70001" scored 0.0057 — same
   // exact-match-at-2dp behavior already confirmed on CRYPTO_PRICE.
-  const priceUsdFixed = quote.priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const priceFixed = quote.priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const currency = typeof quote.currency === 'string' && quote.currency.trim()
+    ? quote.currency.trim()
+    : null;
+  const isUsd = currency?.toUpperCase() === 'USD';
+  const quotedPrice = isUsd ? `$${priceFixed} ${currency}` : `${priceFixed}${currency ? ` ${currency}` : ''}`;
+  const stockLabel = quote.companyName ? `${quote.companyName} (${resolvedTicker})` : resolvedTicker;
   res.json({
     query: ticker,
     status: 'ok',
-    summary: `${resolvedTicker} is $${priceUsdFixed}${quote.currency && quote.currency !== 'USD' ? ` ${quote.currency}` : ''}`,
+    summary: `${stockLabel} is ${quotedPrice}${as_of ? ` as of ${as_of}` : ''}.`,
     confidence: 1.0,
     canonical: ['ticker', resolvedTicker, quote.priceUsd].join(':'),
-    price_usd: quote.priceUsd,
-    currency: quote.currency,
+    price: quote.priceUsd,
+    price_usd: isUsd ? quote.priceUsd : null,
+    company_name: quote.companyName ?? null,
+    currency,
     exchange: quote.exchangeName,
     price_source: quote.source,
     as_of,
+    retrieved_at,
   });
 }
 

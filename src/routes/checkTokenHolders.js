@@ -85,7 +85,7 @@ async function handleTokenHolders(req, res) {
     status: 'ok',
     summary:
       holders_count != null
-        ? `${info.symbol ?? token} has ${holders_count.toLocaleString('en-US')} holders on ${chain.label}`
+        ? `${info.symbol ?? token} has ${holders_count} holders on ${chain.label}`
         : `${token} found on ${chain.label} but no holder count is available`,
     confidence: 1.0,
     canonical,

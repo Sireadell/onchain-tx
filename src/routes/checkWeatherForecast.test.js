@@ -25,6 +25,22 @@ test('weather-forecast: missing location answered with guidance', async (t) => {
   assert.equal((await res.json()).status, 'invalid_input');
 });
 
+test('weather-forecast: unrelated free-text question is refused before any call', async (t) => {
+  let called = false;
+  const original = globalThis.fetch;
+  globalThis.fetch = (url, ...rest) => {
+    if (String(url).startsWith('http://127.0.0.1:')) return original(url, ...rest);
+    called = true;
+    throw new Error('should not be called');
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/weather-forecast?location=${encodeURIComponent('What is the population of Tokyo?')}`);
+  assert.equal((await res.json()).status, 'invalid_input');
+  assert.equal(called, false);
+});
+
 test('weather-forecast: place name returns condition, temps, precipitation, wind', async (t) => {
   const base = startServer(t);
   const res = await fetch(`${base}/weather-forecast?location=Tokyo`);

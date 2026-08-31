@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CHAINS, resolveChain, resolveChainLoose } from './chains.js';
+import { CHAINS, resolveChain, resolveChainLoose, resolveRpcChainLoose, rpcChainNames } from './chains.js';
 
 test('resolveChain is unchanged: exact canonical keys only', () => {
   assert.equal(resolveChain('eth'), CHAINS.eth);
@@ -42,4 +42,21 @@ test('resolveChainLoose returns null for an unrecognized chain', () => {
   assert.equal(resolveChainLoose('solana'), null);
   assert.equal(resolveChainLoose(''), null);
   assert.equal(resolveChainLoose(undefined), null);
+});
+
+test('RPC chain resolution excludes Optimism until its Ankr access is enabled', () => {
+  const original = process.env.ANKR_ENABLE_OPTIMISM;
+  delete process.env.ANKR_ENABLE_OPTIMISM;
+  try {
+    assert.equal(resolveRpcChainLoose('optimism'), null);
+    assert.ok(!rpcChainNames().includes('optimism'));
+    assert.equal(resolveRpcChainLoose('base'), CHAINS.base);
+
+    process.env.ANKR_ENABLE_OPTIMISM = 'true';
+    assert.equal(resolveRpcChainLoose('optimism'), CHAINS.optimism);
+    assert.ok(rpcChainNames().includes('optimism'));
+  } finally {
+    if (original === undefined) delete process.env.ANKR_ENABLE_OPTIMISM;
+    else process.env.ANKR_ENABLE_OPTIMISM = original;
+  }
 });

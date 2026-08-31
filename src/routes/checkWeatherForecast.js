@@ -12,6 +12,7 @@ import { Router } from 'express';
 import { fetchForecast, WeatherLookupError, WeatherUpstreamError } from '../lib/weatherForecast.js';
 import { parseWhen, parseFocus } from '../lib/questionParse.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
+import { questionMatchesIntent, WEATHER_CUES } from '../lib/intentGuard.js';
 
 const router = Router();
 
@@ -144,6 +145,12 @@ async function handleWeatherForecast(req, res) {
   }
 
   const text = String(rawLocation);
+  if (!questionMatchesIntent(text, WEATHER_CUES)) {
+    return respondUnusableInput(
+      res,
+      'This request does not appear to ask about weather. Ask for a forecast or a weather condition and name the location.',
+    );
+  }
   // An explicit when/focus param wins over one parsed from the question,
   // so a caller that knows what it wants is never second-guessed.
   const when = params?.when ? parseWhen(String(params.when)) : parseWhen(text);

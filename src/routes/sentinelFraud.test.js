@@ -67,3 +67,25 @@ test('assess-wallet answers Sentinel validation errors instead of failing', asyn
     global.fetch = originalFetch;
   }
 });
+
+test('Sentinel outage returns an honest inconclusive answer instead of a failed request', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response(
+    JSON.stringify({ error: 'service unavailable' }),
+    { status: 503, headers: { 'content-type': 'application/json' } },
+  );
+
+  try {
+    await withServer(async (base) => {
+      const response = await originalFetch(`${base}/assess-wallet?wallet=0x${'a'.repeat(40)}`);
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.status, 'inconclusive');
+      assert.equal(body.assessment_status, 'INCONCLUSIVE');
+      assert.equal(body.confidence, 0);
+      assert.match(body.summary, /temporarily unavailable/);
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});

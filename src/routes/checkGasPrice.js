@@ -16,8 +16,9 @@
 import { Router } from 'express';
 import { getGasPrice, getBlockNumber, withRpcBudget, RpcBudgetExceededError, ApiKeyMissingError } from '../lib/ankrRpc.js';
 import { getCoinPrice } from '../lib/defiLlamaApi.js';
-import { CHAINS, DEFAULT_CHAIN, resolveChainLoose } from '../lib/chains.js';
+import { DEFAULT_CHAIN, resolveChainLoose, resolveRpcChainLoose, rpcChainNames } from '../lib/chains.js';
 import { freeTextParam } from '../lib/entityExtract.js';
+import { questionMatchesIntent } from '../lib/intentGuard.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 
 const STANDARD_TRANSFER_GAS_UNITS = 21_000;
@@ -31,13 +32,23 @@ async function handleGasPrice(req, res) {
   // a chain name, so hand the question to it before defaulting to eth —
   // otherwise every free-text gas question silently answered for Ethereum.
   const question = freeTextParam(params);
-  const chainParam = params?.chain ?? resolveChainLoose(question ?? '')?.segment ?? DEFAULT_CHAIN;
-
-  const chain = resolveChainLoose(chainParam);
-  if (!chain) {
+  if (question && params?.chain == null && !questionMatchesIntent(question, /\b(?:gas|fees?|transaction\s+(?:fee|cost)|transfer\s+cost|cost\s+(?:to|of)\s+(?:send|transfer|transact)|transact(?:ion|ing)\s+cost)\b/i)) {
     return respondUnusableInput(
       res,
-      `I cannot report gas for ${quoteParam(chainParam)} because it is not a chain I cover. I track current transaction fees on ${Object.keys(CHAINS).join(', ')}. Ask again naming one of those and I will give the current gas price in gwei and the USD cost of a standard transfer.`,
+      'This request does not appear to ask about blockchain gas or transaction fees. Name a supported chain and ask for its gas price or standard transfer cost.',
+    );
+  }
+  const chainParam = params?.chain ?? resolveChainLoose(question ?? '')?.segment ?? DEFAULT_CHAIN;
+
+  const knownChain = resolveChainLoose(chainParam);
+  const chain = resolveRpcChainLoose(chainParam);
+  if (!chain) {
+    const problem = knownChain
+      ? `${quoteParam(chainParam)} is not available through the current RPC provider`
+      : `${quoteParam(chainParam)} is not a chain I cover`;
+    return respondUnusableInput(
+      res,
+      `I cannot report gas because ${problem}. I track current transaction fees on ${rpcChainNames().join(', ')}. Ask again naming one of those and I will give the current gas price in gwei and the USD cost of a standard transfer.`,
     );
   }
 
@@ -75,7 +86,7 @@ async function handleGasPrice(req, res) {
 
   const canonical = [chainParam, 'gas_price', gas_price_wei, block_number ?? '-'].join(':');
   const summary = fee_usd != null
-    ? `current gas price on ${chain.label} is ${gas_price_gwei.toFixed(4)} gwei, about $${fee_usd.toFixed(4)} for a standard transfer`
+    ? `a standard transfer on ${chain.label} costs about $${fee_usd.toFixed(4)} USD at the current gas price of ${gas_price_gwei.toFixed(4)} gwei`
     : `current gas price on ${chain.label} is ${gas_price_gwei.toFixed(4)} gwei`;
 
   res.json({

@@ -92,3 +92,17 @@ export function resolveChainLoose(input) {
   }
   return null;
 }
+
+// The current Ankr key does not include Optimism RPC access. Keep Optimism
+// available to Blockscout-backed routes, but do not advertise or attempt an
+// RPC call there until the key is upgraded and the flag is enabled.
+export function resolveRpcChainLoose(input) {
+  const chain = resolveChainLoose(input);
+  if (!chain) return null;
+  if (chain.segment === 'optimism' && process.env.ANKR_ENABLE_OPTIMISM !== 'true') return null;
+  return chain;
+}
+
+export function rpcChainNames() {
+  return Object.keys(CHAINS).filter((name) => resolveRpcChainLoose(name));
+}

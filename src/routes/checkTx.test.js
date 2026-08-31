@@ -105,6 +105,63 @@ test('same tx_hash on two different chains does not cross-contaminate responses'
   assert.equal(baseRes.chain, 'base');
 });
 
+test('a successful Base transaction is described as Base, not Ethereum', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  resetRpcCache();
+  mockFetch(t, async (_url, options) => {
+    const { method } = JSON.parse(options.body);
+    const result = method === 'eth_getTransactionByHash'
+      ? {
+          hash: `0x${'6'.repeat(64)}`,
+          from: `0x${'a'.repeat(40)}`,
+          to: `0x${'b'.repeat(40)}`,
+          value: '0xde0b6b3a7640000',
+          input: '0x',
+          blockNumber: '0x10',
+        }
+      : method === 'eth_getTransactionReceipt'
+        ? { blockHash: `0x${'c'.repeat(64)}`, status: '0x1' }
+        : '0x20';
+    return { ok: true, status: 200, json: async () => ({ jsonrpc: '2.0', id: 1, result }) };
+  });
+  const base = startServer(t);
+  const hash = `0x${'6'.repeat(64)}`;
+
+  const body = await (await fetch(`${base}/check-tx?chain=base&tx_hash=${hash}`)).json();
+  assert.equal(body.status, 'confirmed');
+  assert.match(body.summary, /^Base transaction/);
+  assert.match(body.summary, /sent 1 ETH/);
+  assert.doesNotMatch(body.summary, /^Ethereum transaction/);
+});
+
+test('ERC-20 transfer selector is reported as canonical transfer', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  resetRpcCache();
+  mockFetch(t, async (_url, options) => {
+    const { method } = JSON.parse(options.body);
+    const result = method === 'eth_getTransactionByHash'
+      ? {
+          hash: `0x${'7'.repeat(64)}`,
+          from: `0x${'a'.repeat(40)}`,
+          to: `0x${'b'.repeat(40)}`,
+          value: '0x0',
+          input: `0xa9059cbb${'0'.repeat(128)}`,
+          blockNumber: '0x10',
+        }
+      : method === 'eth_getTransactionReceipt'
+        ? { blockHash: `0x${'c'.repeat(64)}`, status: '0x1' }
+        : '0x20';
+    return { ok: true, status: 200, json: async () => ({ jsonrpc: '2.0', id: 1, result }) };
+  });
+  const base = startServer(t);
+  const hash = `0x${'7'.repeat(64)}`;
+
+  const body = await (await fetch(`${base}/check-tx?chain=eth&tx_hash=${hash}`)).json();
+  assert.equal(body.method_signature, 'transfer(address,uint256)');
+  assert.match(body.summary, /called transfer/);
+  assert.doesNotMatch(body.summary, /workMyDirefulOwner/);
+});
+
 // Added 2026-08-30 after the live miner was found answering "no transaction
 // hash was supplied" to a question that plainly contained one. The engine
 // hands the caller's question through; the route only read tx_hash, so
@@ -156,5 +213,26 @@ test('a question with no hash in it is still refused', async (t) => {
 
   const body = await (await fetch(`${base}/check-tx?question=is+my+transaction+ok`)).json();
   assert.equal(body.status, 'invalid_input');
+  assert.equal(called, false);
+});
+
+test('Optimism is refused before RPC until the current Ankr key supports it', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  const originalFlag = process.env.ANKR_ENABLE_OPTIMISM;
+  delete process.env.ANKR_ENABLE_OPTIMISM;
+  t.after(() => {
+    if (originalFlag === undefined) delete process.env.ANKR_ENABLE_OPTIMISM;
+    else process.env.ANKR_ENABLE_OPTIMISM = originalFlag;
+  });
+  let called = false;
+  mockFetch(t, async () => {
+    called = true;
+    throw new Error('should not be called');
+  });
+  const base = startServer(t);
+
+  const body = await (await fetch(`${base}/check-tx?chain=optimism&tx_hash=0x${'1'.repeat(64)}`)).json();
+  assert.equal(body.status, 'invalid_input');
+  assert.match(body.summary, /current RPC provider/);
   assert.equal(called, false);
 });

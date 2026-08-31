@@ -64,6 +64,7 @@ export async function getStockQuote(ticker) {
       }
       return {
         priceUsd: meta.regularMarketPrice,
+        companyName: meta.longName ?? meta.shortName ?? null,
         currency: meta.currency ?? null,
         exchangeName: meta.fullExchangeName ?? meta.exchangeName ?? null,
         asOfUnix: meta.regularMarketTime ?? null,

@@ -22,7 +22,7 @@ import {
   ApiKeyMissingError,
 } from '../lib/ankrRpc.js';
 import { getTokenInfo, TokenNotFoundError } from '../lib/blockscoutApi.js';
-import { CHAINS, DEFAULT_CHAIN, resolveChainLoose } from '../lib/chains.js';
+import { DEFAULT_CHAIN, resolveChainLoose, resolveRpcChainLoose, rpcChainNames } from '../lib/chains.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 import { extractAddress, freeTextParam } from '../lib/entityExtract.js';
 import { amountToDecimalString, amountToRoundedString } from '../lib/formatAmount.js';
@@ -180,11 +180,15 @@ async function handleWalletBalance(req, res) {
     );
   }
 
-  const chain = resolveChainLoose(chainParam);
+  const knownChain = resolveChainLoose(chainParam);
+  const chain = resolveRpcChainLoose(chainParam);
   if (!chain) {
+    const problem = knownChain
+      ? `${quoteParam(chainParam)} is not available through the current RPC provider`
+      : `${quoteParam(chainParam)} is not a chain I index`;
     return respondUnusableInput(
       res,
-      `I cannot check a balance on ${quoteParam(chainParam)} because it is not a chain I index. I can read balances on ${Object.keys(CHAINS).join(', ')}. Ask again naming one of those and I will return the wallet's balance there.`,
+      `I cannot check this balance because ${problem}. I can read balances on ${rpcChainNames().join(', ')}. Ask again naming one of those and I will return the wallet's balance there.`,
     );
   }
 

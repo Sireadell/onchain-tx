@@ -226,6 +226,29 @@ test('crypto-price: CoinPaprika failure falls back to DefiLlama', async (t) => {
   assert.equal(body.price_source, 'defillama');
 });
 
+test('crypto-price: a slow secondary source does not delay a good answer', async (t) => {
+  resetDefiLlamaCache();
+  mockFetchWithCoinGecko(t, {
+    coinpaprika: async () => new Promise((resolve) => setTimeout(() => resolve({
+      status: 200,
+      json: async () => ({ currencies: [] }),
+    }), 1_000)),
+    defillama: async () => ({
+      status: 200,
+      json: async () => ({
+        coins: { 'coingecko:bitcoin': { price: 64100, symbol: 'BTC', timestamp: 1787090000 } },
+      }),
+    }),
+  });
+  const base = startServer(t);
+  const startedAt = Date.now();
+
+  const body = await (await fetch(`${base}/crypto-price?coin_id=bitcoin`)).json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.price_source, 'defillama');
+  assert.ok(Date.now() - startedAt < 750, 'a good price should not wait for the slow source');
+});
+
 test('crypto-price: successful chain_token lookup', async (t) => {
   resetDefiLlamaCache();
   mockFetch(t, async () => ({

@@ -12,7 +12,7 @@ import {
   ApiKeyMissingError,
 } from '../lib/ankrRpc.js';
 import { evaluateTransaction } from '../lib/txStatus.js';
-import { CHAINS, DEFAULT_CHAIN, resolveChainLoose } from '../lib/chains.js';
+import { DEFAULT_CHAIN, resolveChainLoose, resolveRpcChainLoose, rpcChainNames } from '../lib/chains.js';
 import { lookupMethodSignature } from '../lib/fourByte.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 import { extractTxHash, freeTextParam } from '../lib/entityExtract.js';
@@ -46,11 +46,15 @@ async function handleCheckTx(req, res) {
     );
   }
 
-  const chain = resolveChainLoose(chainParam);
+  const knownChain = resolveChainLoose(chainParam);
+  const chain = resolveRpcChainLoose(chainParam);
   if (!chain) {
+    const problem = knownChain
+      ? `${quoteParam(chainParam)} is not available through the current RPC provider`
+      : `${quoteParam(chainParam)} is not a chain I index`;
     return respondUnusableInput(
       res,
-      `I cannot look up this transaction because ${quoteParam(chainParam)} is not a chain I index. I can read transactions on ${Object.keys(CHAINS).join(', ')}. Ask again naming one of those and I will report the transaction's confirmation status, block, sender, recipient, and value.`,
+      `I cannot look up this transaction because ${problem}. I can read transactions on ${rpcChainNames().join(', ')}. Ask again naming one of those and I will report the transaction's confirmation status, block, sender, recipient, and value.`,
     );
   }
 
@@ -113,7 +117,7 @@ async function handleCheckTx(req, res) {
     // "0.000000000000031337" and the whole answer scores as if the value
     // were wrong. See formatAmount.js.
     const value_eth_str = result.value_wei === null ? String(value_eth) : amountToDecimalString(result.value_wei, 18);
-    summary = `Ethereum transaction ${txHash} sent ${value_eth_str} ETH from ${result.from} to ${result.to}${methodText} in block ${result.block_number}; status ${result.receipt_status ?? result.status}.`;
+    summary = `${chain.label} transaction ${txHash} sent ${value_eth_str} ${chain.nativeSymbol} from ${result.from} to ${result.to}${methodText} in block ${result.block_number}; status ${result.receipt_status ?? result.status}.`;
   }
 
   // Compact, deterministic one-line summary of the verdict — chain:tx_hash:

@@ -12,6 +12,7 @@ import { Router } from 'express';
 import { fetchStormRisk, WeatherLookupError, WeatherUpstreamError } from '../lib/weatherForecast.js';
 import { parseWhen } from '../lib/questionParse.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
+import { questionMatchesIntent, STORM_CUES } from '../lib/intentGuard.js';
 
 const router = Router();
 
@@ -53,6 +54,12 @@ async function handleStormAlert(req, res) {
   }
 
   const text = String(rawLocation);
+  if (!questionMatchesIntent(text, STORM_CUES)) {
+    return respondUnusableInput(
+      res,
+      'This request does not appear to ask about storm or wind disruption risk. Ask for a storm alert or disruption assessment and name the location.',
+    );
+  }
   const explicitHours = Number(params?.hours);
   const parsed = parseWhen(params?.when ? String(params.when) : text);
   const hours = Number.isFinite(explicitHours) && explicitHours > 0 ? explicitHours : (parsed?.hours ?? 48);

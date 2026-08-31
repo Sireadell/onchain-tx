@@ -11,7 +11,7 @@ import {
 
 const GEOCODE_URL = 'https://geocoding-api.open-meteo.com/v1/search';
 const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
-const CALL_TIMEOUT_MS = Number(process.env.WEATHER_TIMEOUT_MS) || 8_000;
+const CALL_TIMEOUT_MS = Number(process.env.WEATHER_TIMEOUT_MS) || 4_000;
 
 // The caller's input could not be resolved to an answer: no place found in
 // the text, or no place by that name exists. This is the caller's problem,
@@ -159,7 +159,7 @@ export function isTruncatedFirstDay(hoursCounted) {
 // (4xx/5xx, timeout, network error) is TxLens's or Open-Meteo's fault
 // either way, so it fails immediately as a WeatherUpstreamError rather
 // than delaying an answer the retry can't fix.
-const RATE_LIMIT_RETRY_DELAY_MS = Number(process.env.WEATHER_RETRY_DELAY_MS) || 1_500;
+const RATE_LIMIT_RETRY_DELAY_MS = Number(process.env.WEATHER_RETRY_DELAY_MS) || 500;
 
 async function fetchJson(url, label, attempt = 1, headers = undefined) {
   const controller = new AbortController();

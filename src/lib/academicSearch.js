@@ -20,7 +20,7 @@
 
 const WORKS_URL = 'https://api.openalex.org/works';
 const CROSSREF_WORKS_URL = 'https://api.crossref.org/works';
-const CALL_TIMEOUT_MS = Number(process.env.ACADEMIC_SEARCH_TIMEOUT_MS) || 8_000;
+const CALL_TIMEOUT_MS = Number(process.env.ACADEMIC_SEARCH_TIMEOUT_MS) || 4_000;
 const SELECT_FIELDS = 'id,doi,title,publication_year,cited_by_count,authorships,primary_location,abstract_inverted_index';
 
 export class AcademicSearchError extends Error {

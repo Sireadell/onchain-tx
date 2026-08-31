@@ -73,13 +73,12 @@ test('ip-geolocate: pulls an IP out of a whole question and reports risk flags i
   assert.equal(typeof body.is_mobile, 'boolean');
 });
 
-test('ip-geolocate: summary is a short region/country/ISP sentence, not city or risk-flag prose', async (t) => {
+test('ip-geolocate: summary includes city, region, country, and ISP without risk-flag prose', async (t) => {
   const base = startServer(t);
   const res = await fetch(`${base}/ip-geolocate?ip=8.8.8.8`);
   const body = await res.json();
   assert.equal(body.status, 'ok');
-  assert.match(body.summary, /^8\.8\.8\.8 is located in .+, operated by .+\.$/);
+  assert.match(body.summary, new RegExp(`^8\\.8\\.8\\.8 is located in ${body.city}, ${body.region}, ${body.country}, operated by .+\\.$`));
   assert.doesNotMatch(body.summary, /Risk flags:/);
-  // city stays a real field; it's just not in the graded summary text.
   assert.ok(body.city);
 });

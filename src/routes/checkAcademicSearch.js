@@ -5,6 +5,7 @@
 import { Router } from 'express';
 import { searchPapers, AcademicSearchError } from '../lib/academicSearch.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
+import { questionMatchesIntent } from '../lib/intentGuard.js';
 
 const router = Router();
 
@@ -32,6 +33,8 @@ function parseYearRange(text) {
 function extractSearchTopic(rawTopic) {
   const stripped = String(rawTopic)
     .replace(/\?+\s*$/, '')
+    // Imperative requests with a count: "Find 5 peer-reviewed papers on X".
+    .replace(/^\s*(?:please\s+)?(?:find|search for|look up|get|show me|list|give me)\s+(?:\d{1,2}\s+)?(?:some\s+)?(?:recent\s+|peer[- ]reviewed\s+|academic\s+|research\s+)*(?:papers?|articles?|studies|publications?|research)\s+(?:on|about|regarding|concerning|for|into)\s+/i, '')
     // Leading question framing: "what papers exist on X", "which studies
     // cover X", "are there any papers about X", "can you find X".
     .replace(/^\s*(?:what|which|who|whose|are\s+there|is\s+there|do\s+(?:you\s+)?(?:have|know)|can\s+you\s+(?:find|show|list|get))\b[^]*?\b(?:on|about|regarding|concerning|for|into)\s+/i, '')
@@ -44,10 +47,18 @@ function extractSearchTopic(rawTopic) {
   return stripped || String(rawTopic).trim();
 }
 
+function requestedResultCount(text) {
+  const match = String(text).match(/^\s*(?:please\s+)?(?:find|show(?: me)?|list|get|give me)\s+(\d{1,2})\s+(?:(?:recent|peer[- ]reviewed|academic|research)\s+)*(?:papers?|articles?|studies|publications?)\b/i);
+  return match ? Math.min(Math.max(Number(match[1]), 1), 25) : null;
+}
+
 async function handleAcademicSearch(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
   const rawTopic = params?.topic ?? params?.query ?? params?.q ?? params?.question ?? params?.search;
-  const limit = Number(params?.limit) || 5;
+  const explicitLimit = params?.limit != null ? Number(params.limit) : null;
+  const limit = Number.isFinite(explicitLimit) && explicitLimit > 0
+    ? Math.min(explicitLimit, 25)
+    : requestedResultCount(rawTopic) ?? 5;
   const parsedYears = parseYearRange(String(rawTopic ?? ''));
   const fromYear = params?.from_year ? Number(params.from_year) : parsedYears.fromYear;
   const toYear = params?.to_year ? Number(params.to_year) : parsedYears.toYear;
@@ -59,6 +70,13 @@ async function handleAcademicSearch(req, res) {
     );
   }
 
+  if (params?.topic == null && !questionMatchesIntent(String(rawTopic), /\b(?:academic|article|articles|journal|literature|paper|papers|publication|publications|peer[- ]reviewed|research|study|studies)\b/i)) {
+    return respondUnusableInput(
+      res,
+      'This request does not appear to ask for academic research. Ask for papers, studies, articles, or research on a topic.',
+    );
+  }
+
   const searchTopic = extractSearchTopic(rawTopic);
 
   let result;
@@ -66,9 +84,14 @@ async function handleAcademicSearch(req, res) {
     result = await searchPapers(searchTopic, { limit, fromYear, toYear });
   } catch (err) {
     if (err instanceof AcademicSearchError) {
-      return respondUnusableInput(res, `I cannot search for papers on ${quoteParam(rawTopic)}: ${err.message}`);
+      return res.status(502).json({
+        status: 'error',
+        summary: `Academic sources are temporarily unavailable for ${quoteParam(rawTopic)}. Retry shortly.`,
+        confidence: 0,
+        error: err.message,
+      });
     }
-    return res.status(502).json({ status: 'error', summary: 'academic search failed', confidence: 1.0, error: err.message });
+    return res.status(502).json({ status: 'error', summary: 'academic search failed', confidence: 0, error: err.message });
   }
 
   if (result.results.length === 0) {

@@ -68,6 +68,24 @@ test('gas-price: unsupported chain rejected before any RPC call', async (t) => {
   assert.equal(called, false);
 });
 
+test('gas-price: unrelated free-text question is refused before any upstream call', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  let called = false;
+  const original = globalThis.fetch;
+  globalThis.fetch = (url, ...rest) => {
+    if (String(url).startsWith('http://127.0.0.1:')) return original(url, ...rest);
+    called = true;
+    throw new Error('should not be called');
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/gas-price?question=${encodeURIComponent('What is Ethereum worth?')}`);
+  const body = await res.json();
+  assert.equal(body.status, 'invalid_input');
+  assert.equal(called, false);
+});
+
 test('gas-price: successful read returns wei/gwei/fee_usd and canonical', async (t) => {
   process.env.ANKR_API_KEY = 'test-key';
   resetRpcCache();
@@ -89,7 +107,7 @@ test('gas-price: successful read returns wei/gwei/fee_usd and canonical', async 
   assert.equal(body.canonical, 'eth:gas_price:1000000000:256');
   assert.equal(body.native_price_usd, 2000);
   assert.equal(body.fee_usd, 1 * 1e-9 * 21_000 * 2000);
-  assert.match(body.summary, /\$/);
+  assert.match(body.summary, /^a standard transfer on Ethereum costs about \$0\.0420 USD/);
   assert.ok(body.as_of);
 });
 
