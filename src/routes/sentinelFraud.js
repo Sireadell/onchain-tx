@@ -3,7 +3,13 @@ import { respondUnusableInput } from '../lib/unusableInput.js';
 
 const router = express.Router();
 const DEFAULT_SENTINEL_BASE_URL = 'https://telegraph-sentinel-40vp.onrender.com';
-const DEFAULT_TIMEOUT_MS = 12_000;
+// Telegraph's confirmed synchronous Miner timeout is 30s (docs/PROTOCOL_NOTES.md
+// in telegraph-sentinel). Sentinel's own internal hard cutoff is 20-25s
+// (docs/LOCKED_SPEC.md there), with p90 latency at 15s. 12s was cutting off
+// genuine slower-but-valid Sentinel answers before Sentinel itself gave up,
+// turning them into empty "inconclusive" responses. 27s gives Sentinel its
+// full internal budget while still returning before Telegraph's 30s cutoff.
+const DEFAULT_TIMEOUT_MS = 27_000;
 
 function sentinelBaseUrl() {
   return (process.env.SENTINEL_BASE_URL || DEFAULT_SENTINEL_BASE_URL).replace(/\/$/, '');
