@@ -3,34 +3,41 @@ import { ethers } from 'ethers';
 
 const DIAMOND = '0x5a2324aA18613FAD4e44bDF0d6c73Ec1f6D87ff8';
 const RPC = 'https://sepolia.base.org';
-// 341 was superseded on-chain by 378 (confirmed 2026-08-31 via
-// explorer.telegraphprotocol.com/api/miners/378: active, owned by this
-// wallet, yaml_hash 03d0c41d...). 378 is the current live slot to carry
-// forward. Every id this script has carried before (246, 261, 267, 313,
-// 341) is now dead, so this constant is stale by definition after every
-// run and MUST be re-verified before the next one: confirm with a
-// staticCall, not just the explorer's status field.
-const OLD_REGISTRATION_ID = 378;
-// !! STALE AS OF 2026-08-31 23:20. DO NOT RUN THIS SCRIPT AS IT STANDS. !!
-// WEB_SEARCH was added to miner.yaml and shipped in 0d70bba, after the
-// values below were worked out. Running this now would re-register the
-// pre-WEB_SEARCH config and the new intent would silently not exist
-// on-chain. Two things must be redone first, in this order:
-//   1. Repoint YAML_URL at a commit that actually contains the WEB_SEARCH
-//      miner.yaml, then recompute YAML_HASH from the raw file that URL
-//      serves (not from the local working copy, which has CRLF endings).
-//   2. Add 'WEB_SEARCH' to SUPPORTED_INTENTS below. It is missing.
-// Then re-verify OLD_REGISTRATION_ID with a staticCall as the note above
-// says, because that is stale by definition too.
+// VERIFIED 2026-08-31 23:00 against the live explorer and the chain itself.
+// 395 is the current live slot: active, owned by this wallet, 13 intents,
+// yaml_hash b712cf45..., confirmed via
+// explorer.telegraphprotocol.com/api/miners/395. Every id this script has
+// carried before (246, 261, 267, 313, 341, 378) is dead. This constant is
+// stale by definition after every run and MUST be re-verified before the
+// next one: confirm with a staticCall, not just the explorer status field.
+const OLD_REGISTRATION_ID = 395;
+
+// This update adds WEB_SEARCH, the fourteenth intent. What was checked
+// before touching the chain, because updateMiner mints a NEW registration
+// and retires the old one, so a YAML the off-chain validator rejects leaves
+// the miner with nothing active. That is not theoretical: 341 was rejected
+// on a duplicate `answer` key and TxLens had no active registration until
+// 378 was created.
 //
-// Points at the current HEAD of main (6359d3a) at the time of this update.
-// miner.yaml itself last changed in 8c8e22d; later commits (6359d3a) don't
-// touch it, so this commit serves the identical current file — verified by
-// diffing the raw fetch against the local working copy byte-for-byte
-// (only difference was Windows CRLF, confirmed with the CRs stripped).
-const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/6359d3acf4d08f3dffcd774af32ed3151eafa8bb/miner.yaml';
-const YAML_HASH = '0xb712cf458e36ade59e07464831cfc03e96a1d7b1bad823d2c689590fdb671721';
-const PREVIOUS_YAML_HASH = '03d0c41d1ca910cfba256f50713adcbc17fc2a155a12c129123b934413734e3e';
+//   - Every schema failure seen in other miners' real rejections was checked
+//     against this YAML: `limitations` is an array, not a string (what
+//     rejected arcadian-defi-risk #401); no endpoint carries a `params` key
+//     at all, so the accepted_fields object/array mismatch that rejected
+//     legwork #391 and qarinah #397 cannot apply; there is no `on_chain`
+//     block, so the missing-description failure that rejected
+//     onchain-intel #393 cannot apply.
+//   - Parsed with a strict loader that raises on duplicate keys. Clean.
+//     341 was rejected with an EMPTY error list, which is what a duplicate
+//     key produces, so a clean parse is the specific check that case needs.
+//   - Top-level key set is identical to the currently-accepted YAML, and
+//     /web-search carries exactly the same five keys as every other
+//     endpoint entry.
+//   - WEB_SEARCH is canonical on-chain (getCanonicalIntents, 45 intents),
+//     as are the other thirteen.
+//   - /web-search answers in production, checked live.
+const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/e4a7b74abb988754d9b99323b3ce19e24094b967/miner.yaml';
+const YAML_HASH = '0x20b0711eaa720e3f21602a5ab8686bda5c1d97c2e9019af65c776f89f073b56e';
+const PREVIOUS_YAML_HASH = 'b712cf458e36ade59e07464831cfc03e96a1d7b1bad823d2c689590fdb671721';
 const FEE_ADDRESS = '0x6f477610A93C5B255C29c489760045272BCeDa99';
 const MIN_PRICE_USDC = 10000;
 const CONFIRMATION_PHRASE = `update-txlens-${OLD_REGISTRATION_ID}-${YAML_HASH.slice(2, 10)}`;
@@ -48,6 +55,7 @@ const SUPPORTED_INTENTS = [
   'IP_GEOLOCATION',
   'ACADEMIC_SEARCH',
   'FRAUD_DETECTION',
+  'WEB_SEARCH',
 ];
 
 const abi = [
@@ -189,6 +197,21 @@ if (geo.status !== 'ok' || !geo.country) fail('ip-geolocate route is not working
 console.log('8/9 exercising the new ACADEMIC_SEARCH route');
 const papers = await requireJson(`${BASE}/academic-search?topic=federated%20learning`);
 if (papers.status !== 'ok' || !Array.isArray(papers.papers) || papers.papers.length === 0) fail('academic-search route is not working');
+
+// The intent this update exists to add. Same rule as every other endpoint
+// here: it must actually answer before the chain is told we support it, or
+// every WEB_SEARCH question routed to us scores zero. Checked with retry
+// because it calls an external search provider and a cold Render dyno can
+// be slow on the first hit.
+console.log('8b/9 exercising the new WEB_SEARCH route');
+const webSearchOk = await checkWithRetry(
+  'web-search',
+  `${BASE}/web-search?query=${encodeURIComponent('What is the capital of France?')}`,
+  (b) => b.status === 'ok' && typeof b.answer === 'string' && b.answer.trim().length > 0,
+);
+if (!webSearchOk) {
+  fail('web-search did not answer, and this update exists to claim WEB_SEARCH on-chain. Refusing to register an intent that cannot respond.');
+}
 
 if (!process.env.MINER_PRIVATE_KEY) fail('MINER_PRIVATE_KEY is missing');
 const provider = new ethers.JsonRpcProvider(RPC);
