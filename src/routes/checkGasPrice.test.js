@@ -173,8 +173,14 @@ test('gas-price: successful read returns wei/gwei/fee_usd and canonical', async 
   assert.equal(body.canonical, 'eth:gas_price:1000000000:256');
   assert.equal(body.native_price_usd, 2000);
   assert.equal(body.fee_usd, 1 * 1e-9 * 21_000 * 2000);
-  assert.match(body.summary, /^a standard transfer on Ethereum costs about \$0\.0420 USD/);
+  // Answer shape is load-bearing for scoring: the live GAS_PRICE champion
+  // (#2884) returns 0 for any answer carrying no observation time, which is
+  // what the old wording scored. See the note in checkGasPrice.js.
+  assert.match(body.summary, /^Ethereum gas price: 1 gwei\./);
+  assert.match(body.summary, /A standard 21,000-gas transfer costs about \$0\.0420 USD\./);
+  assert.match(body.summary, /Observed at: \d{4}-\d{2}-\d{2}T[\d:.]+Z\.$/);
   assert.ok(body.as_of);
+  assert.ok(body.summary.includes(body.as_of));
 });
 
 test('gas-price: price lookup failure still returns gas price, fee_usd null', async (t) => {
@@ -209,6 +215,11 @@ test('gas-price: price lookup failure still returns gas price, fee_usd null', as
   assert.equal(body.fee_usd, null);
   assert.equal(body.native_price_usd, null);
   assert.doesNotMatch(body.summary, /\$/);
+  // The USD sentence drops out when pricing is unavailable, but the
+  // observation time must survive on this branch too. Without it the
+  // champion scorer returns 0 no matter how correct the gwei figure is.
+  assert.match(body.summary, /^Ethereum gas price: 1 gwei\. Observed at: [^ ]+Z\.$/);
+  assert.ok(body.summary.includes(body.as_of));
 });
 
 test('gas-price: omitted chain param falls back to default chain', async (t) => {

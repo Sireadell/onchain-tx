@@ -1,0 +1,32 @@
+{
+  "cases": [
+    {
+      "id": "NEW_format_vs_champion_gt",
+      "question": "What is the current gas price on Ethereum?",
+      "ground_truth": "Ethereum gas price: 0.071955762 gwei. Observed at: 2026-08-31T21:19:48.909Z.",
+      "good_answer": "Ethereum gas price: 0.071955762 gwei. A standard 21,000-gas transfer costs about $0.0037 USD. Observed at: 2026-08-31T21:19:48.909Z.",
+      "bad_answer": "gas is cheap"
+    },
+    {
+      "id": "NEW_format_vs_reworded_gt",
+      "question": "What is the current gas price on Ethereum?",
+      "ground_truth": "The average transaction fee on Ethereum is about $0.0037 USD, gas at 0.071955762 gwei, as of 2026-08-31T21:19:48Z.",
+      "good_answer": "Ethereum gas price: 0.071955762 gwei. A standard 21,000-gas transfer costs about $0.0037 USD. Observed at: 2026-08-31T21:19:48.909Z.",
+      "bad_answer": "gas is cheap"
+    },
+    {
+      "id": "NEW_format_no_usd_branch",
+      "question": "What is the current gas price on Base?",
+      "ground_truth": "Base gas price: 0.004521 gwei. Observed at: 2026-08-31T21:19:48.909Z.",
+      "good_answer": "Base gas price: 0.004521 gwei. Observed at: 2026-08-31T21:19:48.909Z.",
+      "bad_answer": "gas is cheap"
+    },
+    {
+      "id": "OLD_format_control",
+      "question": "What is the current gas price on Ethereum?",
+      "ground_truth": "Ethereum gas price: 0.071955762 gwei. Observed at: 2026-08-31T21:19:48.909Z.",
+      "good_answer": "a standard transfer on Ethereum costs about $0.0037 USD at the current gas price of 0.0720 gwei",
+      "bad_answer": "gas is cheap"
+    }
+  ]
+}
