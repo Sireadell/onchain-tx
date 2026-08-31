@@ -5,11 +5,11 @@
 // with an empty body), so "not found" is a real, cheap-to-detect case
 // rather than something inferred from an empty response.
 //
-// This is the only source used for STOCK_PRICE — unlike the other
-// endpoints, there's no equivalent second free/no-key source to fall back
-// to (Alpha Vantage needs a key and has a tight daily free-tier cap), so a
-// Yahoo outage means this endpoint is down. Accepted trade-off given the
-// alternative is not shipping the intent at all.
+// This is the primary source for STOCK_PRICE, because its price is the one
+// that matches how the intent is actually graded (see stockPriceApi.js for
+// the measurement). Twelve Data backs it up when Yahoo is down or throttled,
+// so a Yahoo outage no longer takes the endpoint offline the way it did when
+// this was the only source.
 
 import { checkBudget } from './ankrRpc.js';
 

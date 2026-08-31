@@ -247,32 +247,113 @@ test('stock-price: unknown ticker returns not_found, not an error', async (t) =>
   assert.equal(body.price_usd, null);
 });
 
-test('stock-price: Twelve Data is preferred when configured', async (t) => {
+// Mocks both providers at once, so a test that asserts which one won cannot
+// silently pass by letting the other reach the real network. The previous
+// version of the priority test mocked Twelve Data only, and once Yahoo took
+// the lead it started quoting the real live AAPL price instead of failing
+// loudly.
+function mockBothProviders(t, { yahoo, twelveData }) {
+  const original = globalThis.fetch;
+  globalThis.fetch = (url, ...rest) => {
+    const href = String(url);
+    if (href.startsWith('https://query1.finance.yahoo.com/')) return yahoo(href, ...rest);
+    if (href.startsWith('https://api.twelvedata.com/')) return twelveData(href, ...rest);
+    return original(url, ...rest);
+  };
+  t.after(() => {
+    globalThis.fetch = original;
+  });
+}
+
+function yahooOk(price) {
+  return async () => ({
+    status: 200,
+    ok: true,
+    json: async () => ({
+      chart: {
+        result: [{
+          meta: {
+            regularMarketPrice: price,
+            longName: 'Apple Inc.',
+            currency: 'USD',
+            fullExchangeName: 'NasdaqGS',
+            regularMarketTime: 1787680000,
+          },
+        }],
+      },
+    }),
+  });
+}
+
+function twelveDataOk(price) {
+  return async () => ({
+    status: 200,
+    ok: true,
+    json: async () => ({
+      symbol: 'AAPL', name: 'Apple Inc.', close: String(price), currency: 'USD', exchange: 'NASDAQ', timestamp: 1787680000,
+    }),
+  });
+}
+
+function withTwelveDataKey(t) {
   const oldKey = process.env.TWELVE_DATA_API_KEY;
   process.env.TWELVE_DATA_API_KEY = 'test-key';
   t.after(() => {
     if (oldKey === undefined) delete process.env.TWELVE_DATA_API_KEY;
     else process.env.TWELVE_DATA_API_KEY = oldKey;
   });
+}
 
-  mockTwelveDataFetch(t, async (url) => {
-    assert.equal(new URL(url).searchParams.get('apikey'), 'test-key');
-    return {
-      status: 200,
-      ok: true,
-      json: async () => ({
-        symbol: 'AAPL', name: 'Apple Inc.', close: '311.42', currency: 'USD', exchange: 'NASDAQ', timestamp: 1787680000,
-      }),
-    };
+// Yahoo leads because its price is the one STOCK_PRICE is graded against;
+// Twelve Data was answering with the market-open figure. See the note in
+// ../lib/stockPriceApi.js.
+test('stock-price: Yahoo is preferred over Twelve Data when both answer', async (t) => {
+  withTwelveDataKey(t);
+  let twelveDataCalled = false;
+  mockBothProviders(t, {
+    yahoo: yahooOk(316.85),
+    twelveData: async (...args) => {
+      twelveDataCalled = true;
+      return twelveDataOk(311.42)(...args);
+    },
   });
   const base = startServer(t);
 
-  const res = await fetch(`${base}/stock-price?ticker=AAPL`);
+  const body = await (await fetch(`${base}/stock-price?ticker=AAPL`)).json();
+  assert.equal(body.price_usd, 316.85);
+  assert.equal(body.price_source, 'yahoo_finance');
+  assert.equal(body.company_name, 'Apple Inc.');
+  assert.equal(twelveDataCalled, false, 'Twelve Data must not be called when Yahoo answers');
+});
+
+test('stock-price: Twelve Data still answers when Yahoo is throttled', async (t) => {
+  withTwelveDataKey(t);
+  mockBothProviders(t, {
+    yahoo: async () => ({ status: 429, ok: false, statusText: 'Too Many Requests', json: async () => ({}) }),
+    twelveData: twelveDataOk(311.42),
+  });
+  const base = startServer(t);
+
+  const body = await (await fetch(`${base}/stock-price?ticker=AAPL`)).json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.price_usd, 311.42);
+  assert.equal(body.price_source, 'twelve_data');
+});
+
+// A clean 404 from Yahoo is a real verdict on the ticker. Twelve Data being
+// rate-limited at the same moment is not evidence the ticker exists, so it
+// must not turn a graceful answer into a 502.
+test('stock-price: Yahoo not-found stands even while Twelve Data is throttled', async (t) => {
+  withTwelveDataKey(t);
+  mockBothProviders(t, {
+    yahoo: async () => ({ status: 404, ok: false, statusText: 'Not Found', json: async () => ({}) }),
+    twelveData: async () => ({ status: 429, ok: false, statusText: 'Too Many Requests', json: async () => ({}) }),
+  });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/stock-price?ticker=ZZZZQQ`);
   assert.equal(res.status, 200);
   const body = await res.json();
-  assert.equal(body.price_usd, 311.42);
-  assert.equal(body.exchange, 'NASDAQ');
-  assert.equal(body.company_name, 'Apple Inc.');
-  assert.equal(body.price_source, 'twelve_data');
-  assert.equal(body.summary, `Apple Inc. (AAPL) is $311.42 USD as of ${body.as_of}.`);
+  assert.equal(body.status, 'not_found');
+  assert.match(body.summary, /no stock quote found for 'ZZZZQQ'/);
 });

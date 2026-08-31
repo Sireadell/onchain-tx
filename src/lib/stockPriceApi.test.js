@@ -62,9 +62,12 @@ test('getStockQuote falls back to symbol search when the ticker as typed is not 
   const quote = await getStockQuote('Apple');
   assert.equal(quote.priceUsd, 319.7);
   assert.equal(quote.resolvedTicker, 'AAPL');
-  // proves the direct attempt happened before the search fallback, not
-  // that search was skipped
-  assert.ok(calls[0].includes('symbol=Apple') && !calls[0].includes('symbol_search'));
+  // Proves the direct attempt happened before the search fallback, not that
+  // search was skipped. Asserted on the ticker rather than on which provider
+  // went first, so it keeps testing the ordering it cares about even when the
+  // provider priority changes (Yahoo leads as of 2026-08-31).
+  assert.ok(!calls[0].includes('symbol_search'), 'first call must be a direct quote, not a search');
+  assert.match(calls[0], /Apple/);
 });
 
 test('getStockQuote still resolves via search when the direct attempt fails with a transient error, not just not-found', async (t) => {
