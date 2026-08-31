@@ -7,6 +7,13 @@ import {
 } from './metnoFallback.js';
 import { fetchForecast, fetchStormRisk, __clearWeatherCachesForTesting } from './weatherForecast.js';
 
+// This file exercises the MET Norway tier, which now sits behind the
+// OpenWeatherMap one. Switching that tier off here keeps these tests reading
+// the same whether or not the developer running them has a key in their own
+// environment. node --test gives each file its own process, so this cannot
+// leak into owmFallback.test.js.
+delete process.env.OPENWEATHERMAP_API_KEY;
+
 // A trimmed copy of a real api.met.no/locationforecast/2.0/compact response,
 // captured live 2026-08-30. Kept in the shape MET actually returns, including
 // the switch from hourly to 6-hourly entries partway through, because that

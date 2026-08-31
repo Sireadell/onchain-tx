@@ -8,6 +8,10 @@ import {
   METNO_URL, METNO_USER_AGENT, METNO_SOURCE, METNO_NAME,
   offsetSecondsForTimezone, toOpenMeteoDaily, toOpenMeteoHourly,
 } from './metnoFallback.js';
+import { fetchOwmDaily, fetchOwmHourly, isOwmConfigured } from './owmFallback.js';
+
+const OWM_NAME = 'OpenWeatherMap';
+const OWM_SOURCE = 'https://openweathermap.org';
 
 const GEOCODE_URL = 'https://geocoding-api.open-meteo.com/v1/search';
 const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
@@ -215,6 +219,19 @@ async function fetchWithFallback(url, label, location, shape) {
     return { body: await fetchJson(url, label), source: 'Open-Meteo' };
   } catch (err) {
     if (!(err instanceof WeatherUpstreamError)) throw err;
+    // OpenWeatherMap whenever a key is configured, in either shape. Tried
+    // before MET Norway because it publishes two figures MET does not have
+    // outside the Nordics: a real precipitation probability for the daily
+    // forecast, and a measured wind gust for the storm window, where MET
+    // leaves the grade resting on a 1.5x estimate.
+    if (isOwmConfigured()) {
+      try {
+        const body = shape === 'daily' ? await fetchOwmDaily(location) : await fetchOwmHourly(location);
+        return { body, source: OWM_NAME, attribution: OWM_SOURCE, degraded: true };
+      } catch {
+        // Falls through to MET Norway below.
+      }
+    }
     try {
       return { body: await fetchMetno(location, shape), source: METNO_NAME, attribution: METNO_SOURCE, degraded: true };
     } catch (fallbackErr) {
@@ -491,11 +508,13 @@ export async function fetchStormRisk(input, hours = 48) {
     thunderstorm_hours: thunderstormHours,
     severe_hail_hours: severeHailHours,
     source,
-    // MET Norway publishes no gust figure outside its own region, so on the
+    // MET Norway publishes no gust figure outside its own region, so on that
     // fallback path peak_gust_kmh and the LOW/MODERATE/HIGH/SEVERE grade
     // rest on an estimate. risk_score does not: it is computed from
-    // sustained wind, which MET reports directly.
-    ...(degraded ? { degraded: true, gusts_estimated: true, attribution } : {}),
+    // sustained wind, which MET reports directly. OpenWeatherMap is also a
+    // fallback but does report a measured gust, so the flag is set for the
+    // provider that estimates rather than for degraded paths in general.
+    ...(degraded ? { degraded: true, ...(source === METNO_NAME ? { gusts_estimated: true } : {}), attribution } : {}),
     fetchedAt: new Date().toISOString(),
   };
   // Cached briefly rather than hitting Open-Meteo on every question — see
