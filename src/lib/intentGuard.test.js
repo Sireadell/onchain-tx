@@ -152,6 +152,10 @@ const REAL_STYLE_ACADEMIC_QUESTIONS = [
   'Find scientific articles on CRISPR',
   'Find articles on AI safety',
   'Research federated learning',
+  'Find systematic reviews about long COVID',
+  'Find 10 studies on malaria vaccines since 2020',
+  'Recent studies on AI safety',
+  'Literature review on conflict resolution',
 ];
 for (const question of REAL_STYLE_ACADEMIC_QUESTIONS) {
   test(`academic guard admits a realistic academic question: ${question}`, () => {
@@ -170,7 +174,7 @@ test('widened guards still reject obvious cross-intent and unrelated wording', (
   }
   assert.equal(questionMatchesIntent('Research the cheapest flight to Miami', ACADEMIC_CUES), false);
   assert.equal(questionMatchesIntent('What does market research cost?', ACADEMIC_CUES), false);
-  for (const text of ['Find a news article', 'Show shopping articles', 'Police published their findings', 'Read my personal journal', 'research']) {
+  for (const text of ['Find a news article', 'Show shopping articles', 'Police published their findings', 'Read my personal journal', 'research', 'Research the best laptops for college', 'Research is hard']) {
     assert.equal(freeTextMatchesIntent(text, ACADEMIC_CUES), false, text);
   }
   for (const text of ['airline fees', 'university fees', 'lawyer fees', 'bank transfer cost', 'gas stove prices']) {

@@ -79,11 +79,11 @@ test('academic-search: literature, publication, article and imperative research 
   };
   t.after(() => { globalThis.fetch = originalFetch; });
   const base = startServer(t);
-  for (const q of ['Find literature on federated learning', 'What does the literature say about mRNA vaccines?', 'Show me publications about CRISPR', 'Find scientific articles on CRISPR', 'Find articles on AI safety', 'Research federated learning']) {
+  for (const q of ['Find literature on federated learning', 'What does the literature say about mRNA vaccines?', 'Show me publications about CRISPR', 'Find scientific articles on CRISPR', 'Find articles on AI safety', 'Research federated learning', 'Find systematic reviews about long COVID', 'Find 10 studies on malaria vaccines since 2020', 'Recent studies on AI safety', 'Literature review on conflict resolution']) {
     const res = await fetch(`${base}/academic-search?q=${encodeURIComponent(q)}`);
     assert.notEqual((await res.json()).summary, 'This request does not appear to ask for academic research. Ask for papers, studies, articles, or research on a topic.', q);
   }
-  assert.equal(calls, 6);
+  assert.equal(calls, 10);
 });
 
 // Guards the defect an adversarial review found on 2026-08-29: results were
