@@ -19,6 +19,7 @@ import checkWeatherForecastRouter from './routes/checkWeatherForecast.js';
 import checkStormAlertRouter from './routes/checkStormAlert.js';
 import checkIpGeolocationRouter from './routes/checkIpGeolocation.js';
 import checkAcademicSearchRouter from './routes/checkAcademicSearch.js';
+import checkWebSearchRouter from './routes/checkWebSearch.js';
 import sentinelFraudRouter from './routes/sentinelFraud.js';
 import { misrouteWatchMiddleware } from './lib/misrouteWatch.js';
 import { createMisrouteHandoffMiddleware } from './lib/misrouteHandoff.js';
@@ -47,6 +48,7 @@ const checkWeatherForecastRateLimit = signalRateLimit();
 const checkStormAlertRateLimit = signalRateLimit();
 const checkIpGeolocationRateLimit = signalRateLimit();
 const checkAcademicSearchRateLimit = signalRateLimit();
+const checkWebSearchRateLimit = signalRateLimit();
 const sentinelFraudRateLimit = signalRateLimit();
 const misrouteHandoffMiddleware = createMisrouteHandoffMiddleware({
   transaction: checkTxRateLimit,
@@ -141,6 +143,7 @@ export function buildApp() {
   app.use('/storm-alert', checkStormAlertRateLimit, checkStormAlertRouter);
   app.use('/ip-geolocate', checkIpGeolocationRateLimit, checkIpGeolocationRouter);
   app.use('/academic-search', checkAcademicSearchRateLimit, checkAcademicSearchRouter);
+  app.use('/web-search', checkWebSearchRateLimit, checkWebSearchRouter);
   app.use('/fraud-query', sentinelFraudRateLimit, misrouteHandoffMiddleware);
   app.use('/assess-wallet', sentinelFraudRateLimit, misrouteHandoffMiddleware);
   app.use('/', sentinelFraudRouter);

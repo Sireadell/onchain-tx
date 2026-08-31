@@ -37,7 +37,7 @@ description: >
   repeated provider calls, and freshness timestamps identify when the data
   was fetched.
 
-  It covers thirteen canonical intents. WEATHER_FORECAST: what will the
+  It covers fourteen canonical intents. WEATHER_FORECAST: what will the
   weather do at a named place on the day or over the window asked about,
   answering the aspect emphasised (rain, wind, snow, freeze, temperature)
   rather than reciting a range. STORM_ALERT: how disruptive will the
@@ -54,8 +54,10 @@ description: >
   handshake. IP_GEOLOCATION: where is an IPv4 or IPv6 address, on whose
   network, and is it a proxy, VPN or datacenter address. ACADEMIC_SEARCH:
   which peer-reviewed papers exist on a topic, with journal, authors,
-  citation counts and DOIs. FRAUD_DETECTION: how likely is a given address
-  or scheme to be fraudulent.
+  citation counts and DOIs. WEB_SEARCH: an open question of any kind,
+  answered from a live web search with the sources named, for the questions
+  that have no single authoritative feed behind them. FRAUD_DETECTION: how
+  likely is a given address or scheme to be fraudulent.
 
   Blockscout-backed reads cover five EVM chains (Ethereum, Base, Arbitrum,
   Optimism, Polygon). RPC-backed reads currently cover Ethereum, Base,
@@ -270,6 +272,30 @@ endpoints:
       Read live from OpenAlex, with Crossref as a fallback, at request time. Params: topic (required),
       limit (optional, 1-25, default 5), from_year (optional), to_year
       (optional).
+  - path: /web-search
+    external_path: /web-search
+    method: GET
+    intents: [WEB_SEARCH]
+    description: >
+      WEB_SEARCH. Answers an open question of any kind from a live web
+      search performed at request time, for questions that have no single
+      authoritative feed behind them: "what happened at the summit this
+      week", "how does a heat pump work", "will El Nino disrupt shipping
+      this season", "what did the company announce". Takes the whole
+      question as the caller wrote it and returns a direct written answer
+      followed by the sources it drew on, naming the most relevant three
+      with their URLs. Questions about current events are searched against
+      a news index and questions about markets and company results against
+      a finance index, chosen from the wording of the question itself.
+      Confidence is reported as 0.9 rather than 1.0 because a synthesized
+      web answer is only as reliable as the pages behind it, unlike a chain
+      read or a live TLS handshake. For a peer-reviewed literature search
+      use ACADEMIC_SEARCH instead, and for a live number such as a price,
+      gas fee, balance or forecast use the specific intent for it, which
+      reads the value from its own provider rather than from the open web.
+      Params: query (required, the whole question), max_results (optional,
+      1-20, default 5), topic_mode (optional, one of general, news,
+      finance, overriding what the question implies).
   - path: /fraud-query
     external_path: /fraud-query
     method: POST
@@ -427,11 +453,25 @@ input_schema:
     query:
       type: string
       description: >
-        General factual fraud question for /fraud-query. Also accepted as a
-        fallback alias for the main parameter on /ssl-check,
-        /weather-forecast, /storm-alert, /ip-geolocate and
-        /academic-search, so a caller that forwards the raw question under
-        a generic name is still answered rather than refused.
+        The whole question to answer on /web-search, where it is the primary
+        parameter rather than an alias. Also the general factual fraud
+        question for /fraud-query, and a fallback alias for the main
+        parameter on /ssl-check, /weather-forecast, /storm-alert,
+        /ip-geolocate and /academic-search, so a caller that forwards the
+        raw question under a generic name is still answered rather than
+        refused.
+    max_results:
+      type: integer
+      minimum: 1
+      maximum: 20
+      description: How many web sources to draw on for /web-search. Defaults to 5.
+    topic_mode:
+      type: string
+      enum: [general, news, finance]
+      description: >
+        Which search index /web-search should use. Read from the wording of
+        the question when omitted: current-events phrasing selects news and
+        markets phrasing selects finance.
     wallet:
       type: string
       pattern: "^0x[0-9a-fA-F]{40}$"
@@ -605,6 +645,10 @@ output_schema:
       type: array
       items:
         type: object
+      description: >
+        On /crypto-price, the independent price feeds that answered. On
+        /web-search, the pages the answer drew on, each carrying title, url,
+        snippet and the provider's relevance score, in relevance order.
     price_source:
       type: string
       enum: [coinpaprika, defillama, twelve_data, yahoo_finance]
@@ -825,6 +869,22 @@ output_schema:
     to_year:
       type: [integer, "null"]
       description: /academic-search only. Latest publication year applied, whether passed or read from the question.
+    search_query:
+      type: string
+      description: >
+        /web-search only. The text actually sent to the search index, after
+        an instruction aimed at the miner ("search the web for ...") has
+        been removed from the front of the question.
+    topic:
+      type: string
+      enum: [general, news, finance]
+      description: /web-search only. Which search index answered, whether passed as topic_mode or read from the question.
+    result_count:
+      type: integer
+      description: /web-search only. How many web sources the answer drew on.
+    provider:
+      type: string
+      description: /web-search only. Which search service supplied the answer.
     mode:
       type: string
       enum: [fraud_knowledge, wallet_risk]
@@ -900,6 +960,7 @@ semantics:
     - STORM_ALERT
     - IP_GEOLOCATION
     - ACADEMIC_SEARCH
+    - WEB_SEARCH
     - FRAUD_DETECTION
 
 docs:

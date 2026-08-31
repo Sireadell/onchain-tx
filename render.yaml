@@ -19,3 +19,7 @@ services:
         sync: false
       - key: OPENWEATHERMAP_API_KEY
         sync: false
+      - key: PERPLEXITY_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
