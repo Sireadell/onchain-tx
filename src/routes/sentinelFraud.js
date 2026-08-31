@@ -47,10 +47,28 @@ async function proxySentinel(req, res, path) {
     });
 
     const raw = await upstream.text();
+    if (!raw) {
+      if (upstream.status === 400 || upstream.status === 422) {
+        return respondUnusableInput(
+          res,
+          'I cannot assess this wallet for fraud risk because Sentinel rejected the input. Pass a wallet address, 42 characters long and starting with "0x", as the wallet parameter, and I will return a risk verdict with the reasons behind it.',
+        );
+      }
+      return respondSentinelUnavailable(res, `Sentinel returned an empty response (status ${upstream.status})`);
+    }
     let body;
     try {
       body = raw ? JSON.parse(raw) : {};
     } catch {
+      if (upstream.status === 400 || upstream.status === 422) {
+        return respondUnusableInput(
+          res,
+          'I cannot assess this wallet for fraud risk because Sentinel rejected the input. Pass a wallet address, 42 characters long and starting with "0x", as the wallet parameter, and I will return a risk verdict with the reasons behind it.',
+        );
+      }
+      if (upstream.status === 429 || upstream.status >= 500) {
+        return respondSentinelUnavailable(res, `Sentinel returned a non-JSON response (status ${upstream.status})`);
+      }
       return res.status(502).json({ error: 'Sentinel returned an invalid response' });
     }
 

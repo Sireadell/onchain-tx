@@ -153,7 +153,7 @@ async function handleWalletBalance(req, res) {
   // address. Fall back to it so the extractor below has something to read.
   const question = freeTextParam(params);
   const rawAddress = params?.address ?? question;
-  const chainParam = params?.chain ?? resolveChainLoose(question ?? '')?.segment ?? DEFAULT_CHAIN;
+  const chainParam = params?.chain ?? resolveChainLoose(question ?? '')?.key ?? DEFAULT_CHAIN;
   const rawToken = params?.token;
 
   // Exact match first; if that fails, pull an address out of whatever was

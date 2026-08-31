@@ -35,6 +35,57 @@ test('academic-search: unrelated free-text question is refused before any call',
   assert.equal(called, false);
 });
 
+test('academic-search: ordinary research wording is refused before any upstream call', async (t) => {
+  let called = false;
+  const original = globalThis.fetch;
+  globalThis.fetch = (url, ...rest) => {
+    if (String(url).startsWith('http://127.0.0.1:')) return original(url, ...rest);
+    called = true;
+    throw new Error('should not be called');
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+  const res = await fetch(`${base}/academic-search?query=${encodeURIComponent('Research the cheapest flight to Miami')}`);
+  assert.equal((await res.json()).status, 'invalid_input');
+  assert.equal(called, false);
+});
+
+test('academic-search: weak scholarly-looking and terse q wording is refused', async (t) => {
+  let called = false;
+  const original = globalThis.fetch;
+  globalThis.fetch = (url, ...rest) => {
+    if (String(url).startsWith('http://127.0.0.1:')) return original(url, ...rest);
+    called = true;
+    throw new Error('should not be called');
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+  for (const q of ['news article', 'shopping articles', 'police findings', 'personal journal', 'published']) {
+    const res = await fetch(`${base}/academic-search?q=${encodeURIComponent(q)}`);
+    assert.equal((await res.json()).status, 'invalid_input', q);
+  }
+  assert.equal(called, false);
+});
+
+test('academic-search: literature, publication, article and imperative research framing is accepted', async (t) => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (url) => {
+    if (String(url).startsWith('https://api.openalex.org/')) {
+      calls += 1;
+      return new Response(JSON.stringify({ meta: { count: 0 }, results: [] }), { status: 200 });
+    }
+    return originalFetch(url);
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const base = startServer(t);
+  for (const q of ['Find literature on federated learning', 'What does the literature say about mRNA vaccines?', 'Show me publications about CRISPR', 'Find scientific articles on CRISPR', 'Find articles on AI safety', 'Research federated learning']) {
+    const res = await fetch(`${base}/academic-search?q=${encodeURIComponent(q)}`);
+    assert.notEqual((await res.json()).summary, 'This request does not appear to ask for academic research. Ask for papers, studies, articles, or research on a topic.', q);
+  }
+  assert.equal(calls, 6);
+});
+
 // Guards the defect an adversarial review found on 2026-08-29: results were
 // sorted by citation count across the whole match set, which surfaced
 // enormously-cited papers that had nothing to do with the topic ("federated

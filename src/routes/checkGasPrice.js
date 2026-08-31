@@ -18,7 +18,7 @@ import { getGasPrice, getBlockNumber, withRpcBudget, RpcBudgetExceededError, Api
 import { getCoinPrice } from '../lib/defiLlamaApi.js';
 import { DEFAULT_CHAIN, resolveChainLoose, resolveRpcChainLoose, rpcChainNames } from '../lib/chains.js';
 import { freeTextParam } from '../lib/entityExtract.js';
-import { questionMatchesIntent } from '../lib/intentGuard.js';
+import { freeTextMatchesIntent, GAS_CUES } from '../lib/intentGuard.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 
 const STANDARD_TRANSFER_GAS_UNITS = 21_000;
@@ -32,13 +32,13 @@ async function handleGasPrice(req, res) {
   // a chain name, so hand the question to it before defaulting to eth —
   // otherwise every free-text gas question silently answered for Ethereum.
   const question = freeTextParam(params);
-  if (question && params?.chain == null && !questionMatchesIntent(question, /\b(?:gas|fees?|transaction\s+(?:fee|cost)|transfer\s+cost|cost\s+(?:to|of)\s+(?:send|transfer|transact)|transact(?:ion|ing)\s+cost)\b/i)) {
+  if (question && !freeTextMatchesIntent(question, GAS_CUES)) {
     return respondUnusableInput(
       res,
       'This request does not appear to ask about blockchain gas or transaction fees. Name a supported chain and ask for its gas price or standard transfer cost.',
     );
   }
-  const chainParam = params?.chain ?? resolveChainLoose(question ?? '')?.segment ?? DEFAULT_CHAIN;
+  const chainParam = params?.chain ?? resolveChainLoose(question ?? '')?.key ?? DEFAULT_CHAIN;
 
   const knownChain = resolveChainLoose(chainParam);
   const chain = resolveRpcChainLoose(chainParam);
@@ -61,12 +61,12 @@ async function handleGasPrice(req, res) {
     ]);
   } catch (err) {
     if (err instanceof ApiKeyMissingError) {
-      return res.status(503).json({ status: 'error', summary: 'gas price signal unavailable', confidence: 1.0, error: err.message });
+      return res.status(503).json({ status: 'error', summary: 'gas price signal unavailable', confidence: 0, error: err.message });
     }
     if (err instanceof RpcBudgetExceededError) {
-      return res.status(503).json({ status: 'error', summary: 'gas price lookup could not complete within budget', confidence: 1.0, error: err.message });
+      return res.status(503).json({ status: 'error', summary: 'gas price lookup could not complete within budget', confidence: 0, error: err.message });
     }
-    return res.status(502).json({ status: 'error', summary: 'upstream RPC call failed', confidence: 1.0, error: err.message });
+    return res.status(502).json({ status: 'error', summary: 'upstream RPC call failed', confidence: 0, error: err.message });
   }
 
   const gas_price_wei = BigInt(gasPriceHex).toString();

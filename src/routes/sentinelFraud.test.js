@@ -89,3 +89,70 @@ test('Sentinel outage returns an honest inconclusive answer instead of a failed 
     global.fetch = originalFetch;
   }
 });
+
+test('Sentinel non-JSON outage page returns an honest inconclusive answer', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response('<html>rate limited</html>', {
+    status: 429,
+    headers: { 'content-type': 'text/html' },
+  });
+
+  try {
+    await withServer(async (base) => {
+      const response = await originalFetch(`${base}/assess-wallet?wallet=0x${'a'.repeat(40)}`);
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.status, 'inconclusive');
+      assert.equal(body.assessment_status, 'INCONCLUSIVE');
+      assert.equal(body.confidence, 0);
+      assert.match(body.summary, /temporarily unavailable/);
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('Sentinel successful non-JSON response remains an invalid upstream error', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response('<html>not JSON</html>', {
+    status: 200,
+    headers: { 'content-type': 'text/html' },
+  });
+
+  try {
+    await withServer(async (base) => {
+      const response = await originalFetch(`${base}/assess-wallet?wallet=0x${'a'.repeat(40)}`);
+      assert.equal(response.status, 502);
+      const body = await response.json();
+      assert.equal(body.error, 'Sentinel returned an invalid response');
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('Sentinel non-JSON validation response becomes invalid_input', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response('bad wallet', { status: 422 });
+  try {
+    await withServer(async (base) => {
+      const response = await originalFetch(`${base}/assess-wallet`);
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).status, 'invalid_input');
+    });
+  } finally { global.fetch = originalFetch; }
+});
+
+test('Sentinel empty 204 becomes inconclusive with zero confidence', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response(null, { status: 204 });
+  try {
+    await withServer(async (base) => {
+      const response = await originalFetch(`${base}/assess-wallet?wallet=0x${'a'.repeat(40)}`);
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.status, 'inconclusive');
+      assert.equal(body.confidence, 0);
+    });
+  } finally { global.fetch = originalFetch; }
+});

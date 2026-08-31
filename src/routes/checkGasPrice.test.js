@@ -86,6 +86,72 @@ test('gas-price: unrelated free-text question is refused before any upstream cal
   assert.equal(called, false);
 });
 
+test('gas-price: ordinary shipping cost wording is not mistaken for blockchain gas', async (t) => {
+  let called = false;
+  const original = globalThis.fetch;
+  globalThis.fetch = (url, ...rest) => {
+    if (String(url).startsWith('http://127.0.0.1:')) return original(url, ...rest);
+    called = true;
+    throw new Error('should not be called');
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+  const res = await fetch(`${base}/gas-price?question=${encodeURIComponent('How much does it cost to send a parcel?')}`);
+  assert.equal((await res.json()).status, 'invalid_input');
+  assert.equal(called, false);
+});
+
+test('gas-price: terse unrelated q values are refused before any upstream call', async (t) => {
+  let called = false;
+  const original = globalThis.fetch;
+  globalThis.fetch = (url, ...rest) => {
+    if (String(url).startsWith('http://127.0.0.1:')) return original(url, ...rest);
+    called = true;
+    throw new Error('should not be called');
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+  for (const q of ['airline fees', 'university fees', 'lawyer fees', 'bank transfer cost', 'gas stove prices', 'Shell gas station prices']) {
+    const res = await fetch(`${base}/gas-price?q=${encodeURIComponent(q)}`);
+    assert.equal((await res.json()).status, 'invalid_input', q);
+  }
+  assert.equal(called, false);
+});
+
+test('gas-price: real unsupported chain wording reaches supported-chain guidance', async (t) => {
+  const base = startServer(t);
+  const res = await fetch(`${base}/gas-price?q=${encodeURIComponent('What does a transaction cost on Avalanche?')}`);
+  const body = await res.json();
+  assert.equal(body.status, 'invalid_input');
+  assert.match(body.summary, /current RPC provider|not available/i);
+  assert.doesNotMatch(body.summary, /does not appear to ask/i);
+});
+
+test('gas-price: unrelated free text cannot bypass guard beside chain=base', async (t) => {
+  let called = false;
+  const original = globalThis.fetch;
+  globalThis.fetch = (url, ...rest) => {
+    if (String(url).startsWith('http://127.0.0.1:')) return original(url, ...rest);
+    called = true;
+    throw new Error('should not be called');
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+  const res = await fetch(`${base}/gas-price?chain=base&q=${encodeURIComponent('bitcoin price')}`);
+  assert.equal((await res.json()).status, 'invalid_input');
+  assert.equal(called, false);
+});
+
+test('gas-price: infrastructure failures report zero confidence', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  resetRpcCache();
+  mockFetch(t, async () => { throw new Error('RPC unavailable'); });
+  const base = startServer(t);
+  const res = await fetch(`${base}/gas-price?chain=eth`);
+  assert.equal(res.status, 502);
+  assert.equal((await res.json()).confidence, 0);
+});
+
 test('gas-price: successful read returns wei/gwei/fee_usd and canonical', async (t) => {
   process.env.ANKR_API_KEY = 'test-key';
   resetRpcCache();

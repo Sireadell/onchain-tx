@@ -31,12 +31,23 @@
 // live-checked 2026-08-25 against coins.llama.fi — `matic-network` returns
 // an empty `coins` object there, `polygon-ecosystem-token` is the id that
 // actually resolves.
+// `key` mirrors the object's own key. Routes that pull a chain name out of
+// free text (e.g. "What does a transaction cost on Avalanche?") need a
+// caller-safe identifier to carry forward even for chains below with no
+// `segment` — using `segment` there would come back null and silently fall
+// through to the eth default instead of naming the unsupported chain.
 export const CHAINS = {
-  eth: { segment: 'eth', label: 'Ethereum', nativeSymbol: 'ETH', blockscoutHost: 'eth.blockscout.com', nativeCoingeckoId: 'ethereum' },
-  base: { segment: 'base', label: 'Base', nativeSymbol: 'ETH', blockscoutHost: 'base.blockscout.com', nativeCoingeckoId: 'ethereum' },
-  arbitrum: { segment: 'arbitrum', label: 'Arbitrum', nativeSymbol: 'ETH', blockscoutHost: 'arbitrum.blockscout.com', nativeCoingeckoId: 'ethereum' },
-  optimism: { segment: 'optimism', label: 'Optimism', nativeSymbol: 'ETH', blockscoutHost: 'explorer.optimism.io', nativeCoingeckoId: 'ethereum' },
-  polygon: { segment: 'polygon', label: 'Polygon', nativeSymbol: 'POL', blockscoutHost: 'polygon.blockscout.com', nativeCoingeckoId: 'polygon-ecosystem-token' },
+  eth: { key: 'eth', segment: 'eth', label: 'Ethereum', nativeSymbol: 'ETH', blockscoutHost: 'eth.blockscout.com', nativeCoingeckoId: 'ethereum' },
+  base: { key: 'base', segment: 'base', label: 'Base', nativeSymbol: 'ETH', blockscoutHost: 'base.blockscout.com', nativeCoingeckoId: 'ethereum' },
+  arbitrum: { key: 'arbitrum', segment: 'arbitrum', label: 'Arbitrum', nativeSymbol: 'ETH', blockscoutHost: 'arbitrum.blockscout.com', nativeCoingeckoId: 'ethereum' },
+  optimism: { key: 'optimism', segment: 'optimism', label: 'Optimism', nativeSymbol: 'ETH', blockscoutHost: 'explorer.optimism.io', nativeCoingeckoId: 'ethereum' },
+  polygon: { key: 'polygon', segment: 'polygon', label: 'Polygon', nativeSymbol: 'POL', blockscoutHost: 'polygon.blockscout.com', nativeCoingeckoId: 'polygon-ecosystem-token' },
+  // Real chain, no Ankr RPC access — `segment: null` keeps it out of
+  // resolveRpcChainLoose (same gating resolveRpcChainLoose already does for
+  // optimism without a key) while resolveChainLoose still recognizes the
+  // name, so a caller asking about it gets "not available through the
+  // current RPC provider" instead of a silent, wrong answer for Ethereum.
+  avalanche: { key: 'avalanche', segment: null, label: 'Avalanche', nativeSymbol: 'AVAX', blockscoutHost: null, nativeCoingeckoId: 'avalanche-2' },
 };
 
 export const DEFAULT_CHAIN = process.env.CHAIN || 'eth';
@@ -63,6 +74,9 @@ const CHAIN_ALIASES = {
   matic: 'polygon',
   'polygon pos': 'polygon',
   'polygon mainnet': 'polygon',
+  avax: 'avalanche',
+  'avalanche mainnet': 'avalanche',
+  'avalanche c-chain': 'avalanche',
 };
 
 const CHAIN_VOCABULARY = [...Object.keys(CHAINS), ...Object.keys(CHAIN_ALIASES)].sort(
@@ -98,7 +112,7 @@ export function resolveChainLoose(input) {
 // RPC call there until the key is upgraded and the flag is enabled.
 export function resolveRpcChainLoose(input) {
   const chain = resolveChainLoose(input);
-  if (!chain) return null;
+  if (!chain || !chain.segment) return null;
   if (chain.segment === 'optimism' && process.env.ANKR_ENABLE_OPTIMISM !== 'true') return null;
   return chain;
 }

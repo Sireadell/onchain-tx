@@ -5,7 +5,7 @@
 import { Router } from 'express';
 import { searchPapers, AcademicSearchError } from '../lib/academicSearch.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
-import { questionMatchesIntent } from '../lib/intentGuard.js';
+import { freeTextMatchesIntent, ACADEMIC_CUES } from '../lib/intentGuard.js';
 
 const router = Router();
 
@@ -70,7 +70,7 @@ async function handleAcademicSearch(req, res) {
     );
   }
 
-  if (params?.topic == null && !questionMatchesIntent(String(rawTopic), /\b(?:academic|article|articles|journal|literature|paper|papers|publication|publications|peer[- ]reviewed|research|study|studies)\b/i)) {
+  if (params?.topic == null && !freeTextMatchesIntent(String(rawTopic), ACADEMIC_CUES)) {
     return respondUnusableInput(
       res,
       'This request does not appear to ask for academic research. Ask for papers, studies, articles, or research on a topic.',

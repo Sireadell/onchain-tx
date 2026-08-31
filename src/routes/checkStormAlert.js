@@ -12,7 +12,7 @@ import { Router } from 'express';
 import { fetchStormRisk, WeatherLookupError, WeatherUpstreamError } from '../lib/weatherForecast.js';
 import { parseWhen } from '../lib/questionParse.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
-import { questionMatchesIntent, STORM_CUES } from '../lib/intentGuard.js';
+import { freeTextMatchesIntent, questionMatchesIntent, STORM_CUES } from '../lib/intentGuard.js';
 
 const router = Router();
 
@@ -54,7 +54,8 @@ async function handleStormAlert(req, res) {
   }
 
   const text = String(rawLocation);
-  if (!questionMatchesIntent(text, STORM_CUES)) {
+  const explicitFreeText = params?.location == null;
+  if (!(explicitFreeText ? freeTextMatchesIntent(text, STORM_CUES) : questionMatchesIntent(text, STORM_CUES))) {
     return respondUnusableInput(
       res,
       'This request does not appear to ask about storm or wind disruption risk. Ask for a storm alert or disruption assessment and name the location.',
@@ -83,7 +84,7 @@ async function handleStormAlert(req, res) {
       summary: upstream
         ? `The storm forecast service is temporarily unavailable: ${err.message}. This is not a problem with the request; retry shortly.`
         : 'storm risk assessment failed',
-      confidence: 1.0,
+      confidence: 0,
       error: err.message,
     });
   }

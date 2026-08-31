@@ -68,6 +68,62 @@ test('stock-price: unrelated free-text question is refused before any call', asy
   assert.equal(called, false);
 });
 
+test('stock-price: crypto price wording is refused before any upstream call', async (t) => {
+  let called = false;
+  const original = globalThis.fetch;
+  globalThis.fetch = (url, ...rest) => {
+    if (String(url).startsWith('http://127.0.0.1:')) return original(url, ...rest);
+    called = true;
+    throw new Error('should not be called');
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+  const res = await fetch(`${base}/stock-price?question=${encodeURIComponent('What is the Bitcoin price today?')}`);
+  assert.equal((await res.json()).status, 'invalid_input');
+  assert.equal(called, false);
+});
+
+test('stock-price: uppercase ticker works but generic value questions and terse q are refused', async (t) => {
+  let calls = 0;
+  mockFetch(t, async () => {
+    calls += 1;
+    return { status: 404, json: async () => ({ chart: { result: null, error: { code: 'Not Found' } } }) };
+  });
+  const base = startServer(t);
+  const ticker = await fetch(`${base}/stock-price?q=${encodeURIComponent('What is NVDA at?')}`);
+  assert.equal((await ticker.json()).status, 'not_found');
+  assert.ok(calls > 0);
+  const before = calls;
+  for (const q of ['house worth', 'painting worth', 'gold trading', 'milk price', 'Eiffel Tower worth', 'TON worth', 'XMR trading', 'PEPE worth']) {
+    const res = await fetch(`${base}/stock-price?q=${encodeURIComponent(q)}`);
+    assert.equal((await res.json()).status, 'invalid_input', q);
+  }
+  assert.equal(calls, before);
+});
+
+test('stock-price: common ticker and company-name price framing reaches lookup', async (t) => {
+  let calls = 0;
+  mockFetch(t, async () => {
+    calls += 1;
+    return { status: 404, json: async () => ({ chart: { result: null, error: { code: 'Not Found' } } }) };
+  });
+  const base = startServer(t);
+  for (const q of ['What is AAPL trading at?', 'What is NVDA price?', 'What is the price of AAPL?', 'How much is NVDA?', 'AAPL today?', 'Apple price today', 'How is Apple trading?']) {
+    const res = await fetch(`${base}/stock-price?q=${encodeURIComponent(q)}`);
+    assert.equal((await res.json()).status, 'not_found', q);
+  }
+  assert.ok(calls >= 7);
+});
+
+test('stock-price: unrelated free text cannot bypass guard beside ticker=AAPL', async (t) => {
+  let called = false;
+  mockFetch(t, async () => { called = true; throw new Error('should not be called'); });
+  const base = startServer(t);
+  const res = await fetch(`${base}/stock-price?ticker=AAPL&question=${encodeURIComponent('weather tomorrow')}`);
+  assert.equal((await res.json()).status, 'invalid_input');
+  assert.equal(called, false);
+});
+
 test('stock-price: successful lookup returns price_usd and canonical', async (t) => {
   mockFetch(t, async () => ({
     status: 200,

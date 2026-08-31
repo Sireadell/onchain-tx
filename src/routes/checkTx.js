@@ -34,7 +34,7 @@ async function handleCheckTx(req, res) {
   // else DEFAULT_CHAIN, preserving pre-multi-chain behavior for existing
   // callers. An explicit but unrecognized chain is a validation error, not
   // a silent fallback.
-  const chainParam = params?.chain ?? resolveChainLoose(question ?? '')?.segment ?? DEFAULT_CHAIN;
+  const chainParam = params?.chain ?? resolveChainLoose(question ?? '')?.key ?? DEFAULT_CHAIN;
 
   if (!txHash) {
     const problem = rawTxHash

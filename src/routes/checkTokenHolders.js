@@ -29,7 +29,7 @@ async function handleTokenHolders(req, res) {
   // address already present but wrapped in other text. See
   // entityExtract.js.
   const token = rawToken && ADDRESS_RE.test(rawToken) ? rawToken : extractAddress(rawToken);
-  const chainParam = params?.chain ?? resolveChainLoose(question ?? '')?.segment ?? DEFAULT_CHAIN;
+  const chainParam = params?.chain ?? resolveChainLoose(question ?? '')?.key ?? DEFAULT_CHAIN;
 
   if (!token) {
     const problem = rawToken

@@ -36,6 +36,65 @@ test('storm-alert: unrelated free-text question is refused before any call', asy
   assert.equal(called, false);
 });
 
+test('storm-alert: refuses non-weather warning domains before any upstream call', async (t) => {
+  let called = false;
+  const original = globalThis.fetch;
+  globalThis.fetch = (url, ...rest) => {
+    if (String(url).startsWith('http://127.0.0.1:')) return original(url, ...rest);
+    called = true;
+    throw new Error('should not be called');
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+  for (const question of [
+    'Does this product have a warning?',
+    'Is CAMZYOS under a medical warning?',
+    'Did the government issue a travel advisory?',
+    'Is Apple under an earnings warning?',
+  ]) {
+    const res = await fetch(`${base}/storm-alert?location=${encodeURIComponent(question)}`);
+    assert.equal((await res.json()).status, 'invalid_input', question);
+  }
+  assert.equal(called, false);
+});
+
+test('storm-alert: accepts weather alert and under-warning questions', async (t) => {
+  const base = startServer(t);
+  for (const question of ['Are there weather alerts for Miami?', 'Is Miami under a warning?']) {
+    const res = await fetch(`${base}/storm-alert?location=${encodeURIComponent(question)}`);
+    assert.equal(res.status, 200, question);
+    const body = await res.json();
+    assert.equal(body.status, 'ok', `${question}: ${body.summary}`);
+    assert.match(body.location, /Miami/i);
+  }
+});
+
+test('storm-alert: explicit weather warnings override government and safety wording', async (t) => {
+  const base = startServer(t);
+  for (const question of ['Did the government issue a storm warning for Miami?', 'Is there a public safety flood warning for Miami?']) {
+    const res = await fetch(`${base}/storm-alert?q=${encodeURIComponent(question)}`);
+    assert.equal(res.status, 200, question);
+    assert.equal((await res.json()).status, 'ok', question);
+  }
+});
+
+test('storm-alert: terse account and Bitcoin warnings are refused before upstream calls', async (t) => {
+  let called = false;
+  const original = globalThis.fetch;
+  globalThis.fetch = (url, ...rest) => {
+    if (String(url).startsWith('http://127.0.0.1:')) return original(url, ...rest);
+    called = true;
+    throw new Error('should not be called');
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+  for (const q of ['Bitcoin under a warning', 'account under a warning']) {
+    const res = await fetch(`${base}/storm-alert?q=${encodeURIComponent(q)}`);
+    assert.equal((await res.json()).status, 'invalid_input', q);
+  }
+  assert.equal(called, false);
+});
+
 test('storm-alert: place name returns a risk grade with supporting figures', async (t) => {
   const base = startServer(t);
   const res = await fetch(`${base}/storm-alert?location=Miami`);
@@ -107,6 +166,7 @@ test('storm-alert: an upstream failure is reported as a real error, not invalid_
   assert.equal(body.status, 'error');
   assert.doesNotMatch(body.summary, /invalid_input/);
   assert.match(body.summary, /temporarily unavailable/);
+  assert.equal(body.confidence, 0);
 });
 
 // Same fix as weather-forecast: a repeated question for the same place

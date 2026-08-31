@@ -8,7 +8,7 @@ import { getStockQuote, TickerNotFoundError } from '../lib/stockPriceApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { respondUnusableInput } from '../lib/unusableInput.js';
 import { extractTicker, freeTextParam } from '../lib/entityExtract.js';
-import { questionMatchesIntent } from '../lib/intentGuard.js';
+import { stockTextMatchesIntent } from '../lib/intentGuard.js';
 
 const router = Router();
 
@@ -19,7 +19,7 @@ async function handleStockPrice(req, res) {
   // of it. extractTicker prefers an explicit symbol in the text and falls
   // back to the prose name, which the price API resolves by symbol search.
   const question = freeTextParam(params);
-  if (question && params?.ticker == null && !questionMatchesIntent(question, /\b(?:stock|stocks|share|shares|share\s+price|stock\s+price|ticker|equity|equities|trading|company)\b/i)) {
+  if (question && !stockTextMatchesIntent(question)) {
     return respondUnusableInput(
       res,
       'This request does not appear to ask for a company share price. Ask for a stock or share price and include the company name or ticker symbol.',
@@ -49,9 +49,9 @@ async function handleStockPrice(req, res) {
       });
     }
     if (err instanceof RpcBudgetExceededError) {
-      return res.status(503).json({ status: 'error', summary: 'stock price lookup could not complete within budget', confidence: 1.0, error: err.message });
+      return res.status(503).json({ status: 'error', summary: 'stock price lookup could not complete within budget', confidence: 0, error: err.message });
     }
-    return res.status(502).json({ status: 'error', summary: 'upstream stock price call failed', confidence: 1.0, error: err.message });
+    return res.status(502).json({ status: 'error', summary: 'upstream stock price call failed', confidence: 0, error: err.message });
   }
 
   // resolvedTicker is the real symbol used for the quote, which may differ
