@@ -3,19 +3,34 @@ import { ethers } from 'ethers';
 
 const DIAMOND = '0x5a2324aA18613FAD4e44bDF0d6c73Ec1f6D87ff8';
 const RPC = 'https://sepolia.base.org';
-// 313 was retired on-chain by the run that minted 341 (confirmed 2026-08-30:
-// updateMiner.staticCall(313, ...) reverts "already deregistered"). 341 is
-// what that run actually produced — it's live on-chain and owned by this
-// wallet, just marked "rejected" by the explorer's off-chain YAML validator
-// because that YAML had a duplicate `answer` key. Updating 341 (not
-// registering fresh) is what carries the slot forward. Every id this script
-// has carried before (246, 261, 267, 313) is now dead, so this constant is
-// stale by definition after every run and MUST be re-verified before the
-// next one: confirm with a staticCall, not just the explorer's status field.
-const OLD_REGISTRATION_ID = 341;
-const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/d41b197c20e79c072d724f9524b32b1cacfd83e4/miner.yaml';
-const YAML_HASH = '0x03d0c41d1ca910cfba256f50713adcbc17fc2a155a12c129123b934413734e3e';
-const PREVIOUS_YAML_HASH = 'eea39162c91b399da440c461fe46cc5b5feaedce6fd1d21be6a450404e8cf1aa';
+// 341 was superseded on-chain by 378 (confirmed 2026-08-31 via
+// explorer.telegraphprotocol.com/api/miners/378: active, owned by this
+// wallet, yaml_hash 03d0c41d...). 378 is the current live slot to carry
+// forward. Every id this script has carried before (246, 261, 267, 313,
+// 341) is now dead, so this constant is stale by definition after every
+// run and MUST be re-verified before the next one: confirm with a
+// staticCall, not just the explorer's status field.
+const OLD_REGISTRATION_ID = 378;
+// !! STALE AS OF 2026-08-31 23:20. DO NOT RUN THIS SCRIPT AS IT STANDS. !!
+// WEB_SEARCH was added to miner.yaml and shipped in 0d70bba, after the
+// values below were worked out. Running this now would re-register the
+// pre-WEB_SEARCH config and the new intent would silently not exist
+// on-chain. Two things must be redone first, in this order:
+//   1. Repoint YAML_URL at a commit that actually contains the WEB_SEARCH
+//      miner.yaml, then recompute YAML_HASH from the raw file that URL
+//      serves (not from the local working copy, which has CRLF endings).
+//   2. Add 'WEB_SEARCH' to SUPPORTED_INTENTS below. It is missing.
+// Then re-verify OLD_REGISTRATION_ID with a staticCall as the note above
+// says, because that is stale by definition too.
+//
+// Points at the current HEAD of main (6359d3a) at the time of this update.
+// miner.yaml itself last changed in 8c8e22d; later commits (6359d3a) don't
+// touch it, so this commit serves the identical current file — verified by
+// diffing the raw fetch against the local working copy byte-for-byte
+// (only difference was Windows CRLF, confirmed with the CRs stripped).
+const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/6359d3acf4d08f3dffcd774af32ed3151eafa8bb/miner.yaml';
+const YAML_HASH = '0xb712cf458e36ade59e07464831cfc03e96a1d7b1bad823d2c689590fdb671721';
+const PREVIOUS_YAML_HASH = '03d0c41d1ca910cfba256f50713adcbc17fc2a155a12c129123b934413734e3e';
 const FEE_ADDRESS = '0x6f477610A93C5B255C29c489760045272BCeDa99';
 const MIN_PRICE_USDC = 10000;
 const CONFIRMATION_PHRASE = `update-txlens-${OLD_REGISTRATION_ID}-${YAML_HASH.slice(2, 10)}`;
