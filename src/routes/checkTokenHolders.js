@@ -16,7 +16,7 @@ const router = Router();
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
-async function handleTokenHolders(req, res) {
+export async function handleTokenHolders(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
   // Same free-text fallback as the other on-chain routes: the engine
   // sends "how many holders does 0xabc... have on Base" as a question, not

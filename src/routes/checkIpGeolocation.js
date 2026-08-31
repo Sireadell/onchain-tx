@@ -9,7 +9,7 @@ import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 
 const router = Router();
 
-async function handleIpGeolocation(req, res) {
+export async function handleIpGeolocation(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
   const rawIp = params?.ip ?? params?.query ?? params?.q ?? params?.question ?? params?.address;
   const ip = extractIp(rawIp);

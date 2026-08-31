@@ -147,7 +147,7 @@ async function handleTokenBalance(req, res, address, chainParam, chain, token) {
   });
 }
 
-async function handleWalletBalance(req, res) {
+export async function handleWalletBalance(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
   // The engine often sends the caller's question rather than a bare
   // address. Fall back to it so the extractor below has something to read.

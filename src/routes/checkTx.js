@@ -22,7 +22,7 @@ const router = Router();
 
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 
-async function handleCheckTx(req, res) {
+export async function handleCheckTx(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
   const question = freeTextParam(params);
   const rawTxHash = params?.tx_hash ?? question;

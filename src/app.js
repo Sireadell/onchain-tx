@@ -21,6 +21,7 @@ import checkIpGeolocationRouter from './routes/checkIpGeolocation.js';
 import checkAcademicSearchRouter from './routes/checkAcademicSearch.js';
 import sentinelFraudRouter from './routes/sentinelFraud.js';
 import { misrouteWatchMiddleware } from './lib/misrouteWatch.js';
+import { createMisrouteHandoffMiddleware } from './lib/misrouteHandoff.js';
 
 // Each route has its own bucket. The default allows dispatcher bursts while
 // the provider-specific clients still enforce their own tighter quotas.
@@ -47,6 +48,12 @@ const checkStormAlertRateLimit = signalRateLimit();
 const checkIpGeolocationRateLimit = signalRateLimit();
 const checkAcademicSearchRateLimit = signalRateLimit();
 const sentinelFraudRateLimit = signalRateLimit();
+const misrouteHandoffMiddleware = createMisrouteHandoffMiddleware({
+  transaction: checkTxRateLimit,
+  walletBalance: checkWalletBalanceRateLimit,
+  tokenHolders: checkTokenHoldersRateLimit,
+  ipGeolocation: checkIpGeolocationRateLimit,
+});
 
 // Logs every request as it arrives and again when it finishes, to stdout
 // (Render captures this in its dashboard logs, no extra infra needed). Added
@@ -122,19 +129,21 @@ export function buildApp() {
   app.use(misrouteWatchMiddleware);
 
   app.use('/health', healthRouter);
-  app.use('/check-tx', checkTxRateLimit, checkTxRouter);
+  app.use('/check-tx', checkTxRateLimit, misrouteHandoffMiddleware, checkTxRouter);
   app.use('/gas-price', checkGasPriceRateLimit, checkGasPriceRouter);
   app.use('/wallet-balance', checkWalletBalanceRateLimit, checkWalletBalanceRouter);
   app.use('/token-holders', checkTokenHoldersRateLimit, checkTokenHoldersRouter);
   app.use('/tvl', checkTvlRateLimit, checkTvlRouter);
   app.use('/crypto-price', checkCryptoPriceRateLimit, checkCryptoPriceRouter);
   app.use('/stock-price', checkStockPriceRateLimit, checkStockPriceRouter);
-  app.use('/ssl-check', checkSslVerificationRateLimit, checkSslVerificationRouter);
+  app.use('/ssl-check', checkSslVerificationRateLimit, misrouteHandoffMiddleware, checkSslVerificationRouter);
   app.use('/weather-forecast', checkWeatherForecastRateLimit, checkWeatherForecastRouter);
   app.use('/storm-alert', checkStormAlertRateLimit, checkStormAlertRouter);
   app.use('/ip-geolocate', checkIpGeolocationRateLimit, checkIpGeolocationRouter);
   app.use('/academic-search', checkAcademicSearchRateLimit, checkAcademicSearchRouter);
-  app.use('/', sentinelFraudRateLimit, sentinelFraudRouter);
+  app.use('/fraud-query', sentinelFraudRateLimit, misrouteHandoffMiddleware);
+  app.use('/assess-wallet', sentinelFraudRateLimit, misrouteHandoffMiddleware);
+  app.use('/', sentinelFraudRouter);
 
   return app;
 }

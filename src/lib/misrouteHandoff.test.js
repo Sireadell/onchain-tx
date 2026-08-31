@@ -1,0 +1,218 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { buildApp } from '../app.js';
+import { resetRpcCache } from './ankrRpc.js';
+import { resetBlockscoutCache } from './blockscoutApi.js';
+import { detectHandoff } from './misrouteHandoff.js';
+
+const ADDRESS = `0x${'a'.repeat(40)}`;
+const TX_HASH = `0x${'b'.repeat(64)}`;
+
+function startServer(t) {
+  const server = buildApp().listen(0);
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  return `http://127.0.0.1:${server.address().port}`;
+}
+
+function mockFetch(t, handler) {
+  const original = globalThis.fetch;
+  globalThis.fetch = (url, ...rest) => handler(original, url, ...rest);
+  t.after(() => { globalThis.fetch = original; });
+}
+
+test('handoff: an ETH-held question sent to transaction lookup returns the wallet balance response', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  resetRpcCache();
+  mockFetch(t, async (original, url, options) => {
+    if (typeof url === 'string' && url.startsWith('https://rpc.ankr.com/')) {
+      const { method } = JSON.parse(options.body);
+      return { ok: true, status: 200, json: async () => ({ jsonrpc: '2.0', id: 1, result: method === 'eth_getBalance' ? '0xde0b6b3a7640000' : '0x1' }) };
+    }
+    return original(url, options);
+  });
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/check-tx?question=${encodeURIComponent(`How much ETH is held by ${ADDRESS}?`)}`)).json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.address, ADDRESS);
+  assert.equal(body.balance_wei, '1000000000000000000');
+  assert.equal(body.tx_hash, undefined);
+  assert.equal(body.answer, body.summary);
+});
+
+test('handoff: POST transaction lookup preserves the ETH-held wallet handoff', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  resetRpcCache();
+  mockFetch(t, async (original, url, options) => {
+    if (typeof url === 'string' && url.startsWith('https://rpc.ankr.com/')) {
+      const { method } = JSON.parse(options.body);
+      return { ok: true, status: 200, json: async () => ({ jsonrpc: '2.0', id: 1, result: method === 'eth_getBalance' ? '0xde0b6b3a7640000' : '0x1' }) };
+    }
+    return original(url, options);
+  });
+  const base = startServer(t);
+  const response = await fetch(`${base}/check-tx`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ question: `How much ETH is held by ${ADDRESS}?` }),
+  });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.status, 'ok');
+  assert.equal(body.address, ADDRESS);
+  assert.equal(body.balance_wei, '1000000000000000000');
+});
+
+test('handoff: an explicit wallets-hold-contract question sent to transaction lookup returns the holder count response', async (t) => {
+  resetBlockscoutCache();
+  mockFetch(t, async (original, url, options) => {
+    if (typeof url === 'string' && url.includes('.blockscout.com')) {
+      return { status: 200, json: async () => ({ holders_count: '1234', symbol: 'TST', name: 'Test Token' }) };
+    }
+    return original(url, options);
+  });
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/check-tx?question=${encodeURIComponent(`How many wallets hold contract ${ADDRESS}?`)}`)).json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.token, ADDRESS);
+  assert.equal(body.holders_count, 1234);
+  assert.equal(body.tx_hash, undefined);
+  assert.equal(body.answer, body.summary);
+});
+
+test('handoff: a transaction confirmation sent to fraud returns the transaction response', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  resetRpcCache();
+  mockFetch(t, async (original, url, options) => {
+    if (typeof url === 'string' && url.startsWith('https://rpc.ankr.com/')) {
+      const { method } = JSON.parse(options.body);
+      return { ok: true, status: 200, json: async () => ({ jsonrpc: '2.0', id: 1, result: method === 'eth_blockNumber' ? '0x1' : null }) };
+    }
+    return original(url, options);
+  });
+  const base = startServer(t);
+  const response = await fetch(`${base}/fraud-query`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ question: `Is transaction ${TX_HASH} confirmed?` }),
+  });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.status, 'not_found');
+  assert.equal(body.tx_hash, TX_HASH);
+  assert.equal(body.assessment_status, undefined);
+  assert.equal(body.answer, body.summary);
+});
+
+test('handoff: an IP location question sent to SSL returns the geolocation response', async (t) => {
+  mockFetch(t, async (original, url, options) => {
+    if (typeof url === 'string' && url.startsWith('https://ipinfo.io/')) {
+      return { ok: true, json: async () => ({ ip: '8.8.8.8', country: 'US', region: 'California', city: 'Mountain View', loc: '37.4056,-122.0775', timezone: 'America/Los_Angeles', org: 'AS15169 Google LLC' }) };
+    }
+    if (typeof url === 'string' && url.startsWith('http://ip-api.com/')) {
+      return { ok: true, json: async () => ({ status: 'success', query: '8.8.8.8', country: 'United States', countryCode: 'US', regionName: 'California', city: 'Mountain View', isp: 'Google LLC', mobile: false, proxy: false, hosting: true }) };
+    }
+    return original(url, options);
+  });
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/ssl-check?domain=${encodeURIComponent('Where is 8.8.8.8 located?')}`)).json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.ip, '8.8.8.8');
+  assert.match(body.summary, /located in Mountain View/);
+  assert.equal(body.valid, undefined);
+  assert.equal(body.answer, body.summary);
+});
+
+test('handoff: POST SSL lookup and a trailing slash both preserve the IP handoff', async (t) => {
+  mockFetch(t, async (original, url, options) => {
+    if (typeof url === 'string' && url.startsWith('https://ipinfo.io/')) {
+      return { ok: true, json: async () => ({ ip: '8.8.8.8', country: 'US', region: 'California', city: 'Mountain View', loc: '37.4056,-122.0775', timezone: 'America/Los_Angeles', org: 'AS15169 Google LLC' }) };
+    }
+    if (typeof url === 'string' && url.startsWith('http://ip-api.com/')) {
+      return { ok: true, json: async () => ({ status: 'success', query: '8.8.8.8', country: 'United States', countryCode: 'US', regionName: 'California', city: 'Mountain View', isp: 'Google LLC', mobile: false, proxy: false, hosting: true }) };
+    }
+    return original(url, options);
+  });
+  const base = startServer(t);
+  const response = await fetch(`${base}/ssl-check/`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ domain: 'Where is 8.8.8.8?' }),
+  });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.status, 'ok');
+  assert.equal(body.ip, '8.8.8.8');
+  assert.equal(body.valid, undefined);
+});
+
+test('handoff: GET assess-wallet preserves the transaction-confirmation handoff', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  resetRpcCache();
+  mockFetch(t, async (original, url, options) => {
+    if (typeof url === 'string' && url.startsWith('https://rpc.ankr.com/')) {
+      const { method } = JSON.parse(options.body);
+      return { ok: true, status: 200, json: async () => ({ jsonrpc: '2.0', id: 1, result: method === 'eth_blockNumber' ? '0x1' : null }) };
+    }
+    return original(url, options);
+  });
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/assess-wallet?question=${encodeURIComponent(`Is transaction ${TX_HASH} confirmed?`)}`)).json();
+  assert.equal(body.status, 'not_found');
+  assert.equal(body.tx_hash, TX_HASH);
+  assert.equal(body.assessment_status, undefined);
+});
+
+test('handoff: an address without balance or holder wording stays on transaction lookup', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  let rpcCalled = false;
+  mockFetch(t, async (original, url, options) => {
+    if (typeof url === 'string' && url.startsWith('https://rpc.ankr.com/')) {
+      rpcCalled = true;
+      throw new Error('should not call RPC');
+    }
+    return original(url, options);
+  });
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/check-tx?question=${encodeURIComponent(`Tell me about ${ADDRESS}`)}`)).json();
+  assert.equal(body.status, 'invalid_input');
+  assert.equal(rpcCalled, false);
+});
+
+test('handoff: an explicit chain stays with the rerouted wallet balance lookup', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  resetRpcCache();
+  mockFetch(t, async (original, url, options) => {
+    if (typeof url === 'string' && url.startsWith('https://rpc.ankr.com/')) {
+      assert.match(url, /\/base\//);
+      const { method } = JSON.parse(options.body);
+      return { ok: true, status: 200, json: async () => ({ jsonrpc: '2.0', id: 1, result: method === 'eth_getBalance' ? '0x0' : '0x1' }) };
+    }
+    return original(url, options);
+  });
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/check-tx?chain=base&question=${encodeURIComponent(`What balance does ${ADDRESS} hold?`)}`)).json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.chain, 'base');
+  assert.equal(body.answer, body.summary);
+});
+
+test('handoff: strict guards reject ambiguous or independently structured requests', () => {
+  const addressQuestion = `What balance and holder count does ${ADDRESS} have?`;
+  assert.equal(detectHandoff('/check-tx', addressQuestion, { question: addressQuestion }), null);
+  assert.equal(detectHandoff('/check-tx', `How many wallets use ${ADDRESS}?`, {}), null);
+  assert.equal(detectHandoff('/check-tx', `How many wallets use token ${ADDRESS}?`, {}), null);
+  assert.equal(detectHandoff('/check-tx', `How many addresses interacted with contract ${ADDRESS}?`, {}), null);
+  assert.equal(detectHandoff('/check-tx', `How many wallets hold ${ADDRESS}?`, {}), null);
+  assert.equal(detectHandoff('/check-tx', `How many wallets hold contract ${ADDRESS}?`, {}), 'holders');
+  assert.equal(detectHandoff('/check-tx', `How much ETH is held by ${ADDRESS}?`, {}), 'wallet');
+  assert.equal(detectHandoff('/check-tx', `Is ${ADDRESS} held by a multisig?`, {}), null);
+  assert.equal(detectHandoff('/check-tx', `Was ${ADDRESS} held as collateral?`, {}), null);
+  assert.equal(detectHandoff('/check-tx', `Who held ${ADDRESS} before the transfer?`, {}), null);
+  assert.equal(detectHandoff('/check-tx', `Is transaction ${TX_HASH} confirmed for ${ADDRESS} balance?`, {}), null);
+  assert.equal(detectHandoff('/ssl-check', 'Where should I look up 8.8.8.8?', {}), null);
+  assert.equal(detectHandoff('/ssl-check', 'Where is 8.8.8.8?', {}), 'ip');
+  assert.equal(detectHandoff('/ssl-check', 'What country is 8.8.8.8 in?', {}), 'ip');
+  assert.equal(detectHandoff('/check-tx', `What balance does ${ADDRESS} hold?`, { tx_hash: TX_HASH }), null);
+  assert.equal(detectHandoff('/ssl-check', 'Where is 8.8.8.8?', { domain: 'example.com' }), null);
+  assert.equal(detectHandoff('/assess-wallet', `Is transaction ${TX_HASH} confirmed?`, { wallet: ADDRESS }), null);
+});
