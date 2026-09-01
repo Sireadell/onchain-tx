@@ -23,6 +23,7 @@ import checkWebSearchRouter from './routes/checkWebSearch.js';
 import sentinelFraudRouter from './routes/sentinelFraud.js';
 import { misrouteWatchMiddleware } from './lib/misrouteWatch.js';
 import { createMisrouteHandoffMiddleware } from './lib/misrouteHandoff.js';
+import { createRefusalFallbackMiddleware } from './lib/refusalFallback.js';
 
 // Each route has its own bucket. The default allows dispatcher bursts while
 // the provider-specific clients still enforce their own tighter quotas.
@@ -56,6 +57,7 @@ const misrouteHandoffMiddleware = createMisrouteHandoffMiddleware({
   tokenHolders: checkTokenHoldersRateLimit,
   ipGeolocation: checkIpGeolocationRateLimit,
 });
+const refusalFallbackMiddleware = createRefusalFallbackMiddleware();
 
 // Logs every request as it arrives and again when it finishes, to stdout
 // (Render captures this in its dashboard logs, no extra infra needed). Added
@@ -129,6 +131,10 @@ export function buildApp() {
   app.use(express.json());
   app.use(answerFieldMiddleware);
   app.use(misrouteWatchMiddleware);
+  // Mounted after the watcher so the watcher records what the caller was
+  // actually sent, and after answerFieldMiddleware so a rescued answer
+  // passes back out through the same chain a route's own answer does.
+  app.use(refusalFallbackMiddleware);
 
   app.use('/health', healthRouter);
   app.use('/check-tx', checkTxRateLimit, misrouteHandoffMiddleware, checkTxRouter);

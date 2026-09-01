@@ -4,6 +4,14 @@ import { CHAINS } from './lib/chains.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 
+// One process serves all 14 intents, so an unhandled rejection anywhere
+// takes every intent down until Render cold-starts a replacement. Node 22
+// exits on one by default. Log it and keep serving instead: a single broken
+// request is not a reason to drop the other thirteen intents.
+process.on('unhandledRejection', (reason) => {
+  console.error('unhandled rejection (kept serving):', reason);
+});
+
 // Probe every allowlisted chain at startup with a live eth_blockNumber call
 // instead of deploying "successfully" and only discovering a bad chain or
 // API key per-request as an opaque 502 on the first real caller. Only exit

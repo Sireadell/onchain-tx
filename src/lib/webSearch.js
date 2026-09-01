@@ -219,7 +219,23 @@ export async function searchWeb(query, options = {}) {
   const topic = options.topic === 'news' || options.topic === 'finance' ? options.topic : 'general';
   const maxResults = Math.min(Math.max(Number(options.maxResults) || 5, 1), 20);
 
-  const total = Number(process.env.WEB_SEARCH_BUDGET_MS) || options.budgetMs || TOTAL_BUDGET_MS;
+  // The caller's budget wins over the env override. This is the real change
+  // here, and it exists for the refusal fallback: /web-search sets its own
+  // generous deadline, while the fallback derives a much tighter one from
+  // whatever is left of Telegraph's 30s cut after the route already ran.
+  // The previous order read the env var first, so WEB_SEARCH_BUDGET_MS tuned
+  // for /web-search would silently override the fallback's remaining time and
+  // push a response past that cut. Precedence, not NaN, was the risk: the old
+  // expression chained with ||, which coerces NaN away on its own.
+  //
+  // The env read is still validated rather than chained, because ?? does NOT
+  // fall through on NaN. Written as `options.budgetMs ?? Number(env) ?? …` an
+  // unset var yields NaN, every provider aborts on the first tick, and the
+  // whole WEB_SEARCH intent answers 502. Number.isFinite is what rules that
+  // out, and a non-positive value is rejected for the same reason.
+  const envBudget = Number(process.env.WEB_SEARCH_BUDGET_MS);
+  const total = options.budgetMs
+    ?? (Number.isFinite(envBudget) && envBudget > 0 ? envBudget : TOTAL_BUDGET_MS);
   const deadline = Date.now() + total;
 
   // Perplexity leads because it writes the answer sentence the engine
