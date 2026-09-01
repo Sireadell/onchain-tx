@@ -133,8 +133,8 @@ export function buildApp() {
   app.use('/health', healthRouter);
   app.use('/check-tx', checkTxRateLimit, misrouteHandoffMiddleware, checkTxRouter);
   app.use('/gas-price', checkGasPriceRateLimit, checkGasPriceRouter);
-  app.use('/wallet-balance', checkWalletBalanceRateLimit, checkWalletBalanceRouter);
-  app.use('/token-holders', checkTokenHoldersRateLimit, checkTokenHoldersRouter);
+  app.use('/wallet-balance', checkWalletBalanceRateLimit, misrouteHandoffMiddleware, checkWalletBalanceRouter);
+  app.use('/token-holders', checkTokenHoldersRateLimit, misrouteHandoffMiddleware, checkTokenHoldersRouter);
   app.use('/tvl', checkTvlRateLimit, checkTvlRouter);
   app.use('/crypto-price', checkCryptoPriceRateLimit, checkCryptoPriceRouter);
   app.use('/stock-price', checkStockPriceRateLimit, checkStockPriceRouter);

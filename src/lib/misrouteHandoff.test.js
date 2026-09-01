@@ -216,3 +216,34 @@ test('handoff: strict guards reject ambiguous or independently structured reques
   assert.equal(detectHandoff('/ssl-check', 'Where is 8.8.8.8?', { domain: 'example.com' }), null);
   assert.equal(detectHandoff('/assess-wallet', `Is transaction ${TX_HASH} confirmed?`, { wallet: ADDRESS }), null);
 });
+
+// The four cases below are the real routed questions the misroute watcher
+// recorded in production on 2026-08-31, not invented examples. USDC is the
+// address the dispatcher used in every one of them.
+const USDC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
+
+test('handoff: a balance question routed to the holder count moves to wallet', () => {
+  const text = `What is the wallet balance of ${USDC} on Ethereum?`;
+  assert.equal(detectHandoff('/token-holders', text, { q: text }), 'wallet');
+});
+
+test('handoff: a holder question routed to the balance moves to holders', () => {
+  const text = `How many holders does ${USDC} have?`;
+  assert.equal(detectHandoff('/wallet-balance', text, { q: text }), 'holders');
+});
+
+test('handoff: "how many wallets hold X" stays on the holder count', () => {
+  // Reads like a balance question because of "hold", but it is asking how
+  // many addresses hold the token, which is where it already is.
+  const text = `How many wallets hold ${USDC} on Ethereum?`;
+  assert.equal(detectHandoff('/token-holders', text, { q: text }), null);
+});
+
+test('handoff: a confidently routed call with its own structured field is left alone', () => {
+  // The dispatcher sends token or address when it knows the intent. Only the
+  // free-text calls are ambiguous enough to be worth moving.
+  const text = `What is the wallet balance of ${USDC} on Ethereum?`;
+  assert.equal(detectHandoff('/token-holders', text, { token: USDC, q: text }), null);
+  const holders = `How many holders does ${USDC} have?`;
+  assert.equal(detectHandoff('/wallet-balance', holders, { address: USDC, q: holders }), null);
+});

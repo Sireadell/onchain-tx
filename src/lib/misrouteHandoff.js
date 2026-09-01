@@ -49,9 +49,44 @@ function hasIndependentStructuredInput(path, params, text) {
       ? 'domain'
       : path === '/assess-wallet'
         ? 'wallet'
-        : null;
+        : path === '/token-holders'
+          ? 'token'
+          : path === '/wallet-balance'
+            ? 'address'
+            : null;
   const value = key ? params?.[key] : null;
   return typeof value === 'string' && value.trim() && value.trim() !== text.trim();
+}
+
+// Decides whether a question carrying a bare address is asking for a native
+// balance or a holder count. Returns null when the evidence points both ways
+// or when the phrasing only looks like a balance question, so the caller can
+// leave the request on the endpoint the dispatcher chose.
+function walletOrHolderCue(text) {
+  // "How many wallets hold contract 0x..." is a holder-count question,
+  // not a request for the contract's native wallet balance. Keep this
+  // narrow so general questions about wallets using or interacting with a
+  // token remain on the endpoint the dispatcher chose.
+  const countsWalletsOrAddresses = /\bhow many (?:wallets|addresses)\b/i.test(text);
+  const hasTokenOrContract = /\b(?:token|contract)\b/i.test(text);
+  const hasHoldVerb = /\b(?:hold|holds|holding|holders?)\b/i.test(text);
+  const explicitWalletHolderQuestion = countsWalletsOrAddresses
+    && hasTokenOrContract
+    && hasHoldVerb;
+  const unqualifiedWalletCountQuestion = countsWalletsOrAddresses
+    && hasHoldVerb
+    && !hasTokenOrContract;
+  if (unqualifiedWalletCountQuestion) return null;
+  const asksNativeAmountHeld = /\bhow much\s+(?:eth|matic|pol|bnb|avax|arb|op|ftm|celo|xdai)\s+is held by\b/i.test(text);
+  const walletCue = hasAnyWord(text, ['balance'])
+    || (!explicitWalletHolderQuestion && hasAnyWord(text, ['hold', 'holds', 'holding']))
+    || asksNativeAmountHeld;
+  const holderCue = hasAnyWord(text, ['holder', 'holders'])
+    || explicitWalletHolderQuestion;
+  if (walletCue && holderCue) return null;
+  if (walletCue) return 'wallet';
+  if (holderCue) return 'holders';
+  return null;
 }
 
 function detectHandoff(path, text, params) {
@@ -62,29 +97,23 @@ function detectHandoff(path, text, params) {
   // mentioned in the same sentence. It is never safe to turn that into an
   // address lookup.
   if (path === '/check-tx' && !extractTxHash(text) && extractAddress(text)) {
-    // "How many wallets hold contract 0x..." is a holder-count question,
-    // not a request for the contract's native wallet balance. Keep this
-    // narrow so general questions about wallets using or interacting with a
-    // token remain on the endpoint the dispatcher chose.
-    const countsWalletsOrAddresses = /\bhow many (?:wallets|addresses)\b/i.test(text);
-    const hasTokenOrContract = /\b(?:token|contract)\b/i.test(text);
-    const hasHoldVerb = /\b(?:hold|holds|holding|holders?)\b/i.test(text);
-    const explicitWalletHolderQuestion = countsWalletsOrAddresses
-      && hasTokenOrContract
-      && hasHoldVerb;
-    const unqualifiedWalletCountQuestion = countsWalletsOrAddresses
-      && hasHoldVerb
-      && !hasTokenOrContract;
-    if (unqualifiedWalletCountQuestion) return null;
-    const asksNativeAmountHeld = /\bhow much\s+(?:eth|matic|pol|bnb|avax|arb|op|ftm|celo|xdai)\s+is held by\b/i.test(text);
-    const walletCue = hasAnyWord(text, ['balance'])
-      || (!explicitWalletHolderQuestion && hasAnyWord(text, ['hold', 'holds', 'holding']))
-      || asksNativeAmountHeld;
-    const holderCue = hasAnyWord(text, ['holder', 'holders'])
-      || explicitWalletHolderQuestion;
-    if (walletCue && holderCue) return null;
-    if (walletCue) return 'wallet';
-    if (holderCue) return 'holders';
+    const cue = walletOrHolderCue(text);
+    if (cue) return cue;
+  }
+
+  // These two intents get swapped for each other directly, in both
+  // directions: a balance question routed to the holder count, or a holder
+  // question routed to the balance. The dispatcher supplies token or address
+  // when it is confident, so the misrouted calls arrive carrying only the
+  // question, and hasIndependentStructuredInput above already left the
+  // confident ones alone. Only move a call when the cue names the other
+  // endpoint, never when it merely agrees with the one already handling it.
+  if (path === '/token-holders' && !extractTxHash(text) && extractAddress(text)) {
+    if (walletOrHolderCue(text) === 'wallet') return 'wallet';
+  }
+
+  if (path === '/wallet-balance' && !extractTxHash(text) && extractAddress(text)) {
+    if (walletOrHolderCue(text) === 'holders') return 'holders';
   }
 
   if ((path === '/fraud-query' || path === '/assess-wallet') && extractTxHash(text)) {

@@ -90,9 +90,11 @@ const misrouteCounts = Object.create(null);
 let totalCalls = 0;
 
 // Kept low on purpose. The counters live in process memory, and the free
-// Render plan spins the service down when it goes idle, so anything not yet
-// printed is lost on the next restart. At 20 the summary had never once
-// printed against real traffic volumes.
+// Render plan spins the service down when it goes idle, so a cycle that has
+// not printed yet is lost on the next restart. At 20 it did print, 22 times
+// in the 34 hours to 2026-09-01, but real intent traffic runs at roughly 20
+// calls an hour against a service that idles out well inside that, so the
+// last partial cycle was routinely thrown away.
 const SUMMARY_EVERY = 5;
 
 function logSummary() {
