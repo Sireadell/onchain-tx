@@ -2,7 +2,7 @@
 // planning session). Logs two things, changes nothing about what a caller
 // gets back:
 //
-//   1. How many calls land on each of the 13 intents, and what status each
+//   1. How many calls land on each of the 14 intents, and what status each
 //      one answered with (ok / invalid_input / not_found / error).
 //   2. Whenever a call lands on one intent but its question also carries the
 //      dual-gate evidence (a strict structural signal AND a matching
@@ -27,6 +27,7 @@ const INTENT_BY_PATH = {
   '/storm-alert': 'STORM_ALERT',
   '/ip-geolocate': 'IP_GEOLOCATION',
   '/academic-search': 'ACADEMIC_SEARCH',
+  '/web-search': 'WEB_SEARCH',
   '/fraud-query': 'FRAUD_DETECTION',
   '/assess-wallet': 'FRAUD_DETECTION',
 };
@@ -88,7 +89,11 @@ const statusCounts = Object.create(null);
 const misrouteCounts = Object.create(null);
 let totalCalls = 0;
 
-const SUMMARY_EVERY = 20;
+// Kept low on purpose. The counters live in process memory, and the free
+// Render plan spins the service down when it goes idle, so anything not yet
+// printed is lost on the next restart. At 20 the summary had never once
+// printed against real traffic volumes.
+const SUMMARY_EVERY = 5;
 
 function logSummary() {
   console.log(`[misroute-watch] summary after ${totalCalls} calls`);
