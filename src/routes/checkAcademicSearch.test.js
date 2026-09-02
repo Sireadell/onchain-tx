@@ -86,6 +86,36 @@ test('academic-search: literature, publication, article and imperative research 
   assert.equal(calls, 10);
 });
 
+test('academic-search: a terse CRISPR topic is accepted', async (t) => {
+  const originalFetch = globalThis.fetch;
+  let requestedSearch = null;
+  globalThis.fetch = async (url) => {
+    if (String(url).startsWith('https://api.openalex.org/')) {
+      requestedSearch = new URL(url).searchParams.get('search');
+      return new Response(JSON.stringify({
+        meta: { count: 1 },
+        results: [{
+          title: 'CRISPR gene editing in human cells',
+          publication_year: 2025,
+          cited_by_count: 12,
+          authorships: [],
+          primary_location: null,
+          abstract_inverted_index: null,
+        }],
+      }), { status: 200 });
+    }
+    return originalFetch(url);
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/academic-search?query=${encodeURIComponent('CRISPR gene editing')}`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(requestedSearch, 'CRISPR gene editing');
+  assert.equal(body.papers.length, 1);
+});
+
 // Guards the defect an adversarial review found on 2026-08-29: results were
 // sorted by citation count across the whole match set, which surfaced
 // enormously-cited papers that had nothing to do with the topic ("federated

@@ -101,7 +101,12 @@ async function handleCryptoPrice(req, res) {
   const question = freeTextParam(params);
   const priceChain = params?.price_chain;
   const token = params?.token;
-  const coinId = params?.coin_id ?? (!priceChain && !token && question ? extractSubject(question) : undefined);
+  let coinId = params?.coin_id ?? (!priceChain && !token && question ? extractSubject(question) : undefined);
+  // "one ether" means one unit of Ethereum, not Harmony's ONE token.
+  // CoinPaprika's search otherwise sees the leading word "one" and returns
+  // ONE, producing a plausible-looking but completely wrong price.
+  const coinText = question ?? params?.coin_id;
+  if (coinText && /\b(?:one\s+)?(?:ether|eth)\b/i.test(coinText)) coinId = 'ethereum';
 
   const chainTokenMode = Boolean(priceChain || token);
   if (!coinId && !chainTokenMode) {

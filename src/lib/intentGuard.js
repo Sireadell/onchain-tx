@@ -137,7 +137,7 @@ export function stockTextMatchesIntent(input) {
 // names it mid-sentence ("What do scholars say about federated learning?").
 const ACADEMIC_EXCLUDE = String.raw`(?:news|newspaper|shopping|product\s+review|police|personal\s+journal|cheapest\s+flights?|flight\s+prices?|best\s+(?:laptops?|phones?|headphones?|shoes?|deals?))`;
 const ACADEMIC_EXCLUDE_RE = new RegExp(String.raw`\b${ACADEMIC_EXCLUDE}\b`, 'i');
-const ACADEMIC_WORD_CUES = /\b(?:academic|papers?|peer[- ]reviewed|scholars?|scholarly|cit(?:e|ed|ation|ations)|dissertation|meta[- ]analysis|systematic\s+reviews?|literature\s+reviews?|research\s+stud(?:y|ies)|recent\s+studies|stud(?:y|ies)\s+(?:paper|papers|research)|journal\s+(?:paper|papers|article|articles)|scientific\s+(?:articles?|papers?))\b/i;
+const ACADEMIC_WORD_CUES = /\b(?:academic|papers?|peer[- ]reviewed|scholars?|scholarly|cit(?:e|ed|ation|ations)|dissertation|meta[- ]analysis|systematic\s+reviews?|literature\s+reviews?|research\s+stud(?:y|ies)|recent\s+studies|stud(?:y|ies)\s+(?:paper|papers|research)|journal\s+(?:paper|papers|article|articles)|scientific\s+(?:articles?|papers?)|CRISPR)\b/i;
 const ACADEMIC_IMPERATIVE = /^(?:find|show(?:\s+me)?|get|search\s+for)\b.*\b(?:literature|publications?|articles?|stud(?:y|ies))\b/i;
 const ACADEMIC_LITERATURE_SAYS = /\bliterature\s+(?:say|says)\b/i;
 const ACADEMIC_RESEARCH_IMPERATIVE = /^(?:please\s+)?research\s+(?!(?:is|are|was|were|the\s+best)\b)\S.+/i;

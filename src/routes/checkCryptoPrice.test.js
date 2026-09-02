@@ -226,6 +226,36 @@ test('crypto-price: CoinPaprika failure falls back to DefiLlama', async (t) => {
   assert.equal(body.price_source, 'defillama');
 });
 
+test('crypto-price: one ether is Ethereum, not the ONE token', async (t) => {
+  resetDefiLlamaCache();
+  let searchedFor = null;
+  mockFetchWithCoinGecko(t, {
+    coinpaprika: async (url) => {
+      searchedFor = new URL(url).searchParams.get('q');
+      return {
+        status: 200,
+        json: async () => ({ currencies: [{ id: 'eth-ethereum', symbol: 'ETH', is_active: true, rank: 2 }] }),
+      };
+    },
+    coinpaprikaTicker: async () => ({
+      status: 200,
+      json: async () => ({
+        symbol: 'ETH',
+        last_updated: '2026-09-02T16:00:00Z',
+        quotes: { USD: { price: 2398.18, market_cap: 1, percent_change_24h: 0 } },
+      }),
+    }),
+  });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/crypto-price?coin_id=${encodeURIComponent('How much is one ether worth in dollars?')}`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(searchedFor, 'ethereum');
+  assert.equal(body.symbol, 'ETH');
+  assert.equal(body.price_usd, 2398.18);
+});
+
 test('crypto-price: a slow secondary source does not delay a good answer', async (t) => {
   resetDefiLlamaCache();
   mockFetchWithCoinGecko(t, {
