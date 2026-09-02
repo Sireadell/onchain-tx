@@ -21,7 +21,7 @@ import checkIpGeolocationRouter from './routes/checkIpGeolocation.js';
 import checkAcademicSearchRouter from './routes/checkAcademicSearch.js';
 import checkWebSearchRouter from './routes/checkWebSearch.js';
 import sentinelFraudRouter from './routes/sentinelFraud.js';
-import { misrouteWatchMiddleware } from './lib/misrouteWatch.js';
+import { misrouteWatchMiddleware, extractRequestText } from './lib/misrouteWatch.js';
 import { createMisrouteHandoffMiddleware } from './lib/misrouteHandoff.js';
 import { createRefusalFallbackMiddleware } from './lib/refusalFallback.js';
 
@@ -66,11 +66,34 @@ const refusalFallbackMiddleware = createRefusalFallbackMiddleware();
 // caused by the server never receiving the request, timing out mid-call, or
 // something else — the explorer's scoring history doesn't record that.
 // Placed before rate limiting so a rejected request still gets logged.
+//
+// Extended 2026-09-02 to also log the question text and the final response
+// body, so a specific question ("did we get asked X") and its answer can be
+// confirmed after the fact instead of just the path and status code. Mounted
+// after express.json() so req.body is parsed, and wraps res.json first (so
+// it unwraps last) so it captures the body after answerFieldMiddleware,
+// misrouteWatchMiddleware, and refusalFallbackMiddleware have all had their
+// say — the same JSON the caller actually receives.
+const MAX_LOGGED_BODY_CHARS = 500;
 const requestLogMiddleware = (req, res, next) => {
   const start = Date.now();
-  console.log(`[req] ${new Date().toISOString()} ${req.method} ${req.originalUrl}`);
+  const question = extractRequestText(req);
+  console.log(`[req] ${new Date().toISOString()} ${req.method} ${req.originalUrl}${question ? ` question=${JSON.stringify(question)}` : ''}`);
+
+  const sendJson = res.json.bind(res);
+  let responseBody;
+  res.json = (body) => {
+    responseBody = body;
+    return sendJson(body);
+  };
+
   res.on('finish', () => {
-    console.log(`[res] ${new Date().toISOString()} ${req.method} ${req.originalUrl} -> ${res.statusCode} (${Date.now() - start}ms)`);
+    let answer = '';
+    if (responseBody !== undefined) {
+      const serialized = JSON.stringify(responseBody);
+      answer = ` answer=${serialized.length > MAX_LOGGED_BODY_CHARS ? `${serialized.slice(0, MAX_LOGGED_BODY_CHARS)}...` : serialized}`;
+    }
+    console.log(`[res] ${new Date().toISOString()} ${req.method} ${req.originalUrl} -> ${res.statusCode} (${Date.now() - start}ms)${answer}`);
   });
   next();
 };
@@ -126,9 +149,9 @@ export function buildApp() {
   // `true` so a caller can't spoof X-Forwarded-For to collapse the rate
   // limiter into one shared bucket.
   app.set('trust proxy', 1);
-  app.use(requestLogMiddleware);
   app.use(corsMiddleware);
   app.use(express.json());
+  app.use(requestLogMiddleware);
   app.use(answerFieldMiddleware);
   app.use(misrouteWatchMiddleware);
   // Mounted after the watcher so the watcher records what the caller was
