@@ -165,8 +165,8 @@ export function buildApp() {
   app.use('/wallet-balance', checkWalletBalanceRateLimit, misrouteHandoffMiddleware, checkWalletBalanceRouter);
   app.use('/token-holders', checkTokenHoldersRateLimit, misrouteHandoffMiddleware, checkTokenHoldersRouter);
   app.use('/tvl', checkTvlRateLimit, checkTvlRouter);
-  app.use('/crypto-price', checkCryptoPriceRateLimit, checkCryptoPriceRouter);
-  app.use('/stock-price', checkStockPriceRateLimit, checkStockPriceRouter);
+  app.use('/crypto-price', checkCryptoPriceRateLimit, misrouteHandoffMiddleware, checkCryptoPriceRouter);
+  app.use('/stock-price', checkStockPriceRateLimit, misrouteHandoffMiddleware, checkStockPriceRouter);
   app.use('/ssl-check', checkSslVerificationRateLimit, misrouteHandoffMiddleware, checkSslVerificationRouter);
   app.use('/weather-forecast', checkWeatherForecastRateLimit, checkWeatherForecastRouter);
   app.use('/storm-alert', checkStormAlertRateLimit, checkStormAlertRouter);

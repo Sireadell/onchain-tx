@@ -269,3 +269,32 @@ test('handoff: a confidently routed call with its own structured field is left a
   const holders = `How many holders does ${USDC} have?`;
   assert.equal(detectHandoff('/wallet-balance', holders, { address: USDC, q: holders }), null);
 });
+
+test('handoff: an adverb between "is" and "held by" still reads as a balance question', () => {
+  // The live router run on 2026-09-02 sent this exact wording to the holder
+  // count. "is currently held by" missed the cue that "is held by" matched,
+  // so the question stayed on the wrong endpoint.
+  for (const phrasing of ['is currently held by', 'is presently held by', 'is right now held by']) {
+    const text = `Without estimating from past transfers, how much ETH ${phrasing} ${ADDRESS}?`;
+    assert.equal(detectHandoff('/token-holders', text, { token: text }), 'wallet', phrasing);
+  }
+});
+
+test('handoff: an adverb does not turn an ambiguous "held" question into a balance lookup', () => {
+  assert.equal(detectHandoff('/check-tx', `Is ${ADDRESS} currently held by a multisig?`, {}), null);
+  assert.equal(detectHandoff('/check-tx', `Who previously held ${ADDRESS} before the transfer?`, {}), null);
+});
+
+test('handoff: a wallet question misrouted to a price intent moves to the balance', () => {
+  const text = `Return both human-readable ETH and exact wei for ${ADDRESS} on Ethereum. What is its balance?`;
+  assert.equal(detectHandoff('/crypto-price', text, { symbol: text }), 'wallet');
+  assert.equal(detectHandoff('/stock-price', text, { symbol: text }), 'wallet');
+});
+
+test('handoff: a genuine price question stays on the price intent', () => {
+  for (const path of ['/crypto-price', '/stock-price']) {
+    for (const text of ['Quote one whole bitcoin in US dollars now.', 'How much does one AAPL share cost now?']) {
+      assert.equal(detectHandoff(path, text, { symbol: text }), null, `${path} ${text}`);
+    }
+  }
+});

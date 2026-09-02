@@ -85,7 +85,12 @@ function walletOrHolderCue(text) {
     && !hasTokenOrContract
     && !explicitWalletHolderQuestion;
   if (unqualifiedWalletCountQuestion) return null;
-  const asksNativeAmountHeld = /\bhow much\s+(?:eth|matic|pol|bnb|avax|arb|op|ftm|celo|xdai)\s+is held by\b/i.test(text);
+  // "is held by" routinely arrives with an adverb in the middle ("is
+  // currently held by", "is presently being held by"). Allow up to two
+  // filler words so one adverb does not lose the whole cue, while keeping
+  // the phrase anchored to "how much <native asset> ... held by" so the
+  // ambiguous bare "held" cases below stay unmatched.
+  const asksNativeAmountHeld = /\bhow much\s+(?:eth|matic|pol|bnb|avax|arb|op|ftm|celo|xdai)\s+is\s+(?:\w+\s+){0,2}held by\b/i.test(text);
   const walletCue = hasAnyWord(text, ['balance'])
     || (!explicitWalletHolderQuestion && hasAnyWord(text, ['hold', 'holds', 'holding']))
     || asksNativeAmountHeld;
@@ -122,6 +127,16 @@ function detectHandoff(path, text, params) {
 
   if (path === '/wallet-balance' && !extractTxHash(text) && extractAddress(text)) {
     if (walletOrHolderCue(text) === 'holders') return 'holders';
+  }
+
+  // Wallet questions land on the price intents in live traffic: two of the
+  // 42 questions in the 2026-09-02 router run went that way, both asking
+  // for a holding and both answered as a price. The gate is the same one
+  // used above, an address plus an unambiguous balance or holder cue, which
+  // a genuine price question never carries.
+  if ((path === '/crypto-price' || path === '/stock-price') && !extractTxHash(text) && extractAddress(text)) {
+    const cue = walletOrHolderCue(text);
+    if (cue) return cue;
   }
 
   if ((path === '/fraud-query' || path === '/assess-wallet') && extractTxHash(text)) {
