@@ -2,6 +2,31 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildApp } from '../app.js';
 import { resetDefiLlamaCache } from '../lib/defiLlamaApi.js';
+import { extractTvlProtocol } from './checkTvl.js';
+
+test('tvl: extracts protocols from the three hard questions', () => {
+  assert.equal(extractTvlProtocol("What is Uniswap's aggregate live TVL across every chain, in USD?"), 'Uniswap');
+  assert.equal(extractTvlProtocol("Report Aave's present total value locked, not market capitalization or borrowed value."), 'Aave');
+  assert.equal(extractTvlProtocol('How much capital is currently locked in Curve DEX across its deployments?'), 'Curve');
+});
+
+test('tvl: possessive and locked-in extraction handles contractions, versions, articles, and multiword names', () => {
+  assert.equal(extractTvlProtocol("What's Uniswap's current TVL?"), 'Uniswap');
+  assert.equal(extractTvlProtocol("What is Aave V3's current TVL?"), 'Aave V3');
+  assert.equal(extractTvlProtocol('How much capital is locked in the Rocket Pool protocol?'), 'Rocket Pool');
+  assert.equal(extractTvlProtocol('How much is locked in the Aave protocol?'), 'Aave');
+});
+
+test('tvl: possessive extraction refuses ambiguous or non-governing names', () => {
+  assert.equal(extractTvlProtocol("What is Ethereum's share of Aave's TVL?"), null);
+  assert.equal(extractTvlProtocol("Compare Uniswap's TVL with Aave's TVL"), null);
+  assert.equal(extractTvlProtocol("What is Aave's market capitalization compared with TVL?"), null);
+});
+
+test('tvl: non-possessive multi-protocol questions are refused without malformed extraction', () => {
+  assert.equal(extractTvlProtocol('Compare the TVL of Uniswap and Aave'), null);
+  assert.equal(extractTvlProtocol('How much is locked in Uniswap and Aave?'), null);
+});
 
 function startServer(t) {
   const server = buildApp().listen(0);

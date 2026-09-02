@@ -239,6 +239,28 @@ test('handoff: "how many wallets hold X" stays on the holder count', () => {
   assert.equal(detectHandoff('/token-holders', text, { q: text }), null);
 });
 
+test('handoff: a unique-address holder question misrouted to balance moves to holders', () => {
+  const text = `How many unique addresses currently hold any USDC at ${USDC}?`;
+  assert.equal(detectHandoff('/wallet-balance', text, { q: text }), 'holders');
+});
+
+test('handoff: unique-address wording without a token cue does not force a holder lookup', () => {
+  const text = `How many unique addresses currently hold funds at ${USDC}?`;
+  assert.equal(detectHandoff('/wallet-balance', text, { q: text }), null);
+});
+
+test('handoff: generic uppercase finance and web3 terms are not treated as token tickers', () => {
+  for (const term of ['USD', 'NFT', 'NFTs', 'DEX']) {
+    const text = `How many unique addresses currently hold ${term} at ${USDC}?`;
+    assert.equal(detectHandoff('/wallet-balance', text, { q: text }), null, term);
+  }
+});
+
+test('handoff: an ordinary capitalized prose word elsewhere is not a token cue', () => {
+  const text = `How many unique addresses hold funds at ${USDC}? Link the evidence.`;
+  assert.equal(detectHandoff('/wallet-balance', text, { q: text }), null);
+});
+
 test('handoff: a confidently routed call with its own structured field is left alone', () => {
   // The dispatcher sends token or address when it knows the intent. Only the
   // free-text calls are ambiguous enough to be worth moving.

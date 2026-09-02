@@ -67,15 +67,23 @@ function walletOrHolderCue(text) {
   // not a request for the contract's native wallet balance. Keep this
   // narrow so general questions about wallets using or interacting with a
   // token remain on the endpoint the dispatcher chose.
-  const countsWalletsOrAddresses = /\bhow many (?:wallets|addresses)\b/i.test(text);
+  const countsWalletsOrAddresses = /\bhow many (?:unique\s+|distinct\s+)?(?:wallets|addresses)\b/i.test(text);
   const hasTokenOrContract = /\b(?:token|contract)\b/i.test(text);
+  const knownAssetTickers = new Set([
+    'BTC', 'ETH', 'SOL', 'XRP', 'BNB', 'ADA', 'DOGE', 'MATIC', 'POL',
+    'AVAX', 'DOT', 'LINK', 'LTC', 'TRX', 'SHIB', 'UNI', 'ATOM', 'USDT',
+    'USDC', 'XMR', 'TON', 'PEPE', 'ARB', 'OP', 'DAI', 'WETH', 'WBTC',
+  ]);
+  const heldTicker = text.match(/\b(?:hold|holds|holding)\s+(?:any\s+)?([A-Z][A-Z0-9]{1,9})\b/);
+  const hasAssetTicker = heldTicker ? knownAssetTickers.has(heldTicker[1]) : false;
   const hasHoldVerb = /\b(?:hold|holds|holding|holders?)\b/i.test(text);
   const explicitWalletHolderQuestion = countsWalletsOrAddresses
-    && hasTokenOrContract
+    && (hasTokenOrContract || hasAssetTicker)
     && hasHoldVerb;
   const unqualifiedWalletCountQuestion = countsWalletsOrAddresses
     && hasHoldVerb
-    && !hasTokenOrContract;
+    && !hasTokenOrContract
+    && !explicitWalletHolderQuestion;
   if (unqualifiedWalletCountQuestion) return null;
   const asksNativeAmountHeld = /\bhow much\s+(?:eth|matic|pol|bnb|avax|arb|op|ftm|celo|xdai)\s+is held by\b/i.test(text);
   const walletCue = hasAnyWord(text, ['balance'])

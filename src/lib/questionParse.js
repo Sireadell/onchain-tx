@@ -29,7 +29,7 @@ const TIME_WORDS = [
 const LEADING_NOISE = /^(?:\s*(?:hi|hey|please|can you|could you|tell me|i want to know|what(?:'s| is| are)?|whats|how(?:'s| is)?|hows|will|is|are|do|does|show me|give me|find|search for|look up|check)\b[\s,]*)+/i;
 
 // "in the next 48 hours", "over the next two days", "for the next 3 days"
-const RELATIVE_WINDOW_RE = /\b(?:in|over|for|within|during)?\s*the\s+next\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s*(hour|hours|day|days)\b/i;
+const RELATIVE_WINDOW_RE = /\b(?:in|over|for|within|during)?\s*(?:the\s+)?next\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s*(?:calendar\s+)?(hour|hours|day|days)\b/i;
 
 // The same window without "the next", e.g. "storm risk ... in 44 hours".
 // Measured on the live question feed 2026-08-30: 50 of 90 weather/storm
@@ -126,6 +126,18 @@ export function locationCandidates(text) {
 
   // "weather in Tokyo", "storm risk near Miami this weekend"
   const prepositional = raw.match(/\b(?:in|at|near|around|for|over)\s+([^?.,;]+)/i);
+  // Read the full proper-name run before the possessive. This preserves
+  // multiword and punctuated places such as "New York's" and "St. John's".
+  // Question contractions such as "What's" are ignored.
+  const placeWord = String.raw`[A-Z][\w.-]*(?:[\u2019'][A-Za-z]+)?`;
+  const placeConnector = String.raw`(?:of|de|del|la|las|le|les|el|van|von|der|den|da|do|dos)`;
+  const possessivePlaceRe = new RegExp(`\\b((${placeWord})(?:\\s+(?:(?:${placeConnector})\\s+)?${placeWord})*)[\\u2019']s\\b`, 'g');
+  const possessivePlaces = [...raw.matchAll(possessivePlaceRe)]
+    .map((match) => {
+      const name = match[1].replace(/^(?:What[\u2019']s|Give|Assess|Will|Can|Could|Please)\s+/i, '');
+      return /^St\.\s/i.test(name) ? `${name}${match[0].slice(-2)}` : name;
+    })
+    .filter((name) => !/^(?:What|Who|Where|When|Why|How|It)$/i.test(name));
   // Place names are usually the capitalised run in an otherwise lowercase
   // question. Skips the first word, which may just be sentence case.
   const withoutLead = raw.replace(/^\W*\w+\s*/, '');
@@ -137,6 +149,7 @@ export function locationCandidates(text) {
   const looksLikeQuestion = /[?]/.test(raw) || raw.split(/\s+/).length > 3 || LEADING_NOISE.test(raw);
   if (!looksLikeQuestion) push(raw);
 
+  for (const place of possessivePlaces) push(place);
   if (prepositional) push(prepositional[1]);
   if (capitalised) push(capitalised[1]);
   push(raw.replace(LEADING_NOISE, ''));

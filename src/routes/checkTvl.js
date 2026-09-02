@@ -32,6 +32,31 @@ import { describeAddressMiss, ADDRESS_RE } from '../lib/addressContext.js';
 
 const router = Router();
 
+export function extractTvlProtocol(question) {
+  if (typeof question !== 'string') return null;
+  // A one-protocol endpoint must not silently turn comparisons or joined
+  // protocol lists into a lookup for whichever name happens to come first.
+  if (/\bcompare\b/i.test(question) && /\b(?:TVL|value locked)\b/i.test(question)) return null;
+  if (/\b(?:TVL\s+of|locked\s+in)\s+(?:the\s+)?[A-Z][\w-]*(?:\s+[A-Z][\w-]*)*\s+and\s+[A-Z][\w-]*\b/.test(question)) return null;
+  const possessives = [...question.matchAll(/\b((?:[A-Z][\w-]*)(?:\s+[A-Z][\w-]*)*)[\u2019']s\b/g)]
+    .map((match) => ({
+      name: match[1].replace(/^(?:Report|Give|Show|Tell|Please)\s+/i, ''),
+      end: match.index + match[0].length,
+    }))
+    .filter(({ name }) => !/^(?:What|Who|Where|When|Why|How|It)$/i.test(name));
+  // More than one possessive name is an inherently comparative or nested
+  // question. A single protocol TVL lookup cannot answer it honestly.
+  if (possessives.length > 1) return null;
+  if (possessives.length === 1) {
+    const candidate = possessives[0];
+    const governedText = question.slice(candidate.end);
+    const directlyOwnsTvl = /^\s+(?:(?:current|present|live|aggregate|total)\s+)*(?:TVL|total value locked|value locked)\b/i.test(governedText);
+    return directlyOwnsTvl ? candidate.name : null;
+  }
+  const lockedIn = question.match(/\blocked\s+in\s+(?:the\s+)?([A-Z][\w-]*(?:\s+(?!(?:DEX|protocol|across|over|on|for|with)\b)[A-Z][\w-]*)*)(?:\s+(?:DEX|protocol))?\b/);
+  return lockedIn ? lockedIn[1] : extractSubject(question);
+}
+
 async function handleTvl(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
   // Trimmed here, not just in the transport: an untrimmed value still
@@ -58,7 +83,7 @@ async function handleTvl(req, res) {
   const question = !usableProtocol && !rawTvlChain
     ? (protocolIsProse ? rawProtocol : freeTextParam(params))
     : null;
-  const subject = question ? extractSubject(question) : null;
+  const subject = question ? extractTvlProtocol(question) : null;
   const split = subject ? subject.match(/^(.*?)\s+\bon\s+(.+)$/i) : null;
   const protocol = usableProtocol ?? (split ? split[1].trim() : subject ?? undefined);
   const tvlChain = rawTvlChain ?? (split ? split[2].trim() : undefined);
