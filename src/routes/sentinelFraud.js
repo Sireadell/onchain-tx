@@ -1,5 +1,6 @@
 import express from 'express';
 import { respondUnusableInput } from '../lib/unusableInput.js';
+import { freeTextParam } from '../lib/entityExtract.js';
 
 const router = express.Router();
 const DEFAULT_SENTINEL_BASE_URL = 'https://telegraph-sentinel-40vp.onrender.com';
@@ -39,10 +40,22 @@ async function proxySentinel(req, res, path) {
       if (typeof value === 'string') target.searchParams.set(key, value);
     }
 
+    // Sentinel only accepts its free-text field under the literal key
+    // `query`. Callers routinely send the same text under `question`, `q`,
+    // `text`, `input`, or `prompt` instead — every one of those already
+    // counts for our own free-text extraction (see entityExtract.js) — but
+    // forwarding req.body unchanged threw that text away, so Sentinel saw
+    // no `query` and rejected a perfectly good question as unusable input.
+    const outgoingBody = { ...(req.body ?? {}) };
+    if (req.method === 'POST' && typeof outgoingBody.query !== 'string') {
+      const text = freeTextParam(outgoingBody);
+      if (text) outgoingBody.query = text;
+    }
+
     const upstream = await fetch(target, {
       method: req.method,
       headers: req.method === 'POST' ? { 'content-type': 'application/json' } : undefined,
-      body: req.method === 'POST' ? JSON.stringify(req.body ?? {}) : undefined,
+      body: req.method === 'POST' ? JSON.stringify(outgoingBody) : undefined,
       signal: controller.signal,
     });
 
