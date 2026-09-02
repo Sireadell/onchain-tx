@@ -7,7 +7,7 @@ import { Router } from 'express';
 import { getStockQuote, TickerNotFoundError } from '../lib/stockPriceApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { respondUnusableInput } from '../lib/unusableInput.js';
-import { extractTicker, freeTextParam } from '../lib/entityExtract.js';
+import { extractTicker, freeTextParam, looksLikeSentence } from '../lib/entityExtract.js';
 import { stockTextMatchesIntent } from '../lib/intentGuard.js';
 
 const router = Router();
@@ -25,7 +25,13 @@ async function handleStockPrice(req, res) {
       'This request does not appear to ask for a company share price. Ask for a stock or share price and include the company name or ticker symbol.',
     );
   }
-  const ticker = params?.ticker ?? (question ? extractTicker(question) : null);
+  // The engine also puts the question into the ticker parameter itself
+  // (ticker="What is Tesla stock trading at?"), which was then looked up
+  // as a symbol and never found. Prose here is reduced to a symbol the
+  // same way a free-text question is.
+  const suppliedTicker = looksLikeSentence(params?.ticker) ? null : params?.ticker;
+  const tickerText = suppliedTicker ? null : (params?.ticker ?? question);
+  const ticker = suppliedTicker ?? (tickerText ? extractTicker(tickerText) : null);
 
   if (!ticker) {
     return respondUnusableInput(

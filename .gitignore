@@ -1,5 +1,6 @@
 node_modules/
 .env
+.env.*
 *.log
 scripts/.pinata-jwt-tmp
 scoring-module/comparator/

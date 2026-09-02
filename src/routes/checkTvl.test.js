@@ -129,3 +129,58 @@ test('tvl: unknown protocol returns not_found, not an error', async (t) => {
   assert.equal(body.status, 'not_found');
   assert.equal(body.tvl_usd, null);
 });
+
+// Regression: measured against the live network on 2026-09-02, every
+// natural-language TVL question failed because the engine passes the whole
+// question as `protocol` and this route looked up a protocol by that entire
+// sentence. Prose in the parameter must be reduced to the protocol it names.
+test('tvl: a whole question sent as the protocol parameter resolves to the protocol', async (t) => {
+  resetDefiLlamaCache();
+  const requested = [];
+  mockFetch(t, async (url) => {
+    requested.push(url);
+    return { status: 200, text: async () => '3467427625.51' };
+  });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/tvl?protocol=${encodeURIComponent('How much value is locked in Uniswap?')}`);
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.status, 'ok');
+  assert.ok(
+    requested.some((u) => u.toLowerCase().includes('uniswap')),
+    `expected a lookup for uniswap, got ${requested.join(', ')}`,
+  );
+  assert.ok(!requested.some((u) => u.includes('How%20much')), 'the raw sentence must not be sent as a protocol name');
+});
+
+test('tvl: "locked in" phrasing does not leak into the protocol name', async (t) => {
+  resetDefiLlamaCache();
+  const requested = [];
+  mockFetch(t, async (url) => {
+    requested.push(url);
+    return { status: 200, text: async () => '1000' };
+  });
+  const base = startServer(t);
+
+  await fetch(`${base}/tvl?protocol=${encodeURIComponent('How much money is locked in Curve right now?')}`);
+  assert.ok(
+    requested.some((u) => u.toLowerCase().includes('curve')),
+    `expected a lookup for curve, got ${requested.join(', ')}`,
+  );
+  assert.ok(!requested.some((u) => u.toLowerCase().includes('locked')), '"locked" must be stripped from the name');
+});
+
+test('tvl: a bare protocol slug is still passed through untouched', async (t) => {
+  resetDefiLlamaCache();
+  const requested = [];
+  mockFetch(t, async (url) => {
+    requested.push(url);
+    return { status: 200, text: async () => '5000' };
+  });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/tvl?protocol=aave-v3`);
+  assert.equal((await res.json()).status, 'ok');
+  assert.ok(requested.some((u) => u.includes('aave-v3')), 'the slug must be used as given');
+});

@@ -357,3 +357,58 @@ test('stock-price: Yahoo not-found stands even while Twelve Data is throttled', 
   assert.equal(body.status, 'not_found');
   assert.match(body.summary, /no stock quote found for 'ZZZZQQ'/);
 });
+
+// Regression: measured against the live network on 2026-09-02, every
+// natural-language share-price question failed, because the engine passes the
+// whole question as `ticker` and this route sent that entire sentence to the
+// quote API as if it were a symbol.
+test('stock-price: a whole question sent as the ticker parameter resolves to the symbol', async (t) => {
+  const requested = [];
+  mockFetch(t, async (url) => {
+    requested.push(url);
+    return {
+      status: 200,
+      json: async () => ({
+        chart: {
+          result: [{
+            meta: { regularMarketPrice: 412.5, currency: 'USD', fullExchangeName: 'NasdaqGS', regularMarketTime: 1787676478, longName: 'NVIDIA Corporation' },
+          }],
+        },
+      }),
+    };
+  });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/stock-price?ticker=${encodeURIComponent('What is the current share price of NVDA?')}`);
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.status, 'ok');
+  assert.equal(body.price_usd, 412.5);
+  assert.ok(
+    requested.some((u) => u.includes('NVDA')),
+    `expected NVDA to be looked up, got ${requested.join(', ')}`,
+  );
+  assert.ok(!requested.some((u) => u.includes('What%20is')), 'the raw sentence must not be sent as a symbol');
+});
+
+test('stock-price: a bare ticker is still used exactly as supplied', async (t) => {
+  const requested = [];
+  mockFetch(t, async (url) => {
+    requested.push(url);
+    return {
+      status: 200,
+      json: async () => ({
+        chart: {
+          result: [{
+            meta: { regularMarketPrice: 309.69, currency: 'USD', fullExchangeName: 'NasdaqGS', regularMarketTime: 1787676478, longName: 'Apple Inc.' },
+          }],
+        },
+      }),
+    };
+  });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/stock-price?ticker=AAPL`);
+  assert.equal((await res.json()).canonical, 'ticker:AAPL:309.69');
+  assert.ok(requested.some((u) => u.includes('AAPL')));
+});

@@ -143,6 +143,22 @@ const SUBJECT_TRAIL_RE =
 // or on a chain name written in caps.
 const TICKER_RE = /(?:^|[^A-Za-z])([A-Z]{1,5})(?![A-Za-z])/;
 
+// True when a parameter holds a whole question rather than the bare value
+// the endpoint documents. Telegraph hands the caller's question straight
+// through as the parameter itself, so protocol can arrive as "How much
+// value is locked in Uniswap?", and a route that trusts it verbatim then
+// searches for a protocol by that entire sentence and finds nothing.
+// Deliberately conservative: a real protocol slug or ticker is a single
+// token, so a question mark or three-plus words is a safe signal that this
+// is prose, and a bare value can never trip it.
+export function looksLikeSentence(value) {
+  if (typeof value !== 'string') return false;
+  const text = value.trim();
+  if (!text) return false;
+  if (text.includes('?')) return true;
+  return text.split(/\s+/).length >= 4;
+}
+
 // Reduces a whole question to the entity it is asking about. Returns null
 // when nothing survives, so the caller keeps its existing invalid_input
 // answer rather than searching for an empty string.
@@ -154,8 +170,12 @@ export function extractSubject(input) {
     .replace(SUBJECT_TRAIL_RE, ' ')
     // The framing strip can leave a dangling article or preposition at
     // either end ("the total value locked in Aave" -> "in Aave"). Peel
-    // those off repeatedly, since more than one can survive.
-    .replace(/^(?:\s*\b(?:the|a|an|of|for|in|on|at|to|is|are)\b)+\s*/i, '')
+    // those off repeatedly, since more than one can survive. "locked",
+    // "staked", "held" and "deposited" are peeled for the same reason:
+    // the lead strip stops at the first "is", so "How much value is locked
+    // in Uniswap?" arrives here as "locked in Uniswap". No protocol is
+    // named any of those words, so peeling them cannot eat a real subject.
+    .replace(/^(?:\s*\b(?:the|a|an|of|for|in|on|at|to|is|are|locked|staked|held|deposited)\b)+\s*/i, '')
     .replace(/(?:\s*\b(?:of|for|in|on|at|to|is|are|and)\b)+[\s,.'"]*$/i, '')
     .replace(/[\s,.'"]+$/, '')
     .trim();

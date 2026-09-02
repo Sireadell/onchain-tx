@@ -26,7 +26,7 @@ import {
 } from '../lib/defiLlamaApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { respondUnusableInput } from '../lib/unusableInput.js';
-import { extractSubject, freeTextParam } from '../lib/entityExtract.js';
+import { extractSubject, freeTextParam, looksLikeSentence } from '../lib/entityExtract.js';
 import { resolveChainLoose } from '../lib/chains.js';
 import { describeAddressMiss, ADDRESS_RE } from '../lib/addressContext.js';
 
@@ -46,10 +46,21 @@ async function handleTvl(req, res) {
   // to a subject, and a trailing "on <chain>" clause splits off as the
   // chain — both then go through the same alias resolution as an explicit
   // param, so a name DefiLlama has renamed still lands.
-  const question = !rawProtocol && !rawTvlChain ? freeTextParam(params) : null;
+  // A whole question can arrive *as* the protocol parameter, not only
+  // alongside it: the engine sends protocol="How much value is locked in
+  // Uniswap?" verbatim. Reading that as a protocol name looked one up by
+  // the entire sentence and always missed, so measured against the live
+  // network on 2026-09-02 this endpoint failed every natural-language TVL
+  // question put to it. Prose in the parameter is now treated as the
+  // question it is.
+  const protocolIsProse = looksLikeSentence(rawProtocol);
+  const usableProtocol = protocolIsProse ? null : rawProtocol;
+  const question = !usableProtocol && !rawTvlChain
+    ? (protocolIsProse ? rawProtocol : freeTextParam(params))
+    : null;
   const subject = question ? extractSubject(question) : null;
   const split = subject ? subject.match(/^(.*?)\s+\bon\s+(.+)$/i) : null;
-  const protocol = rawProtocol ?? (split ? split[1].trim() : subject ?? undefined);
+  const protocol = usableProtocol ?? (split ? split[1].trim() : subject ?? undefined);
   const tvlChain = rawTvlChain ?? (split ? split[2].trim() : undefined);
 
   if (!protocol && !tvlChain) {

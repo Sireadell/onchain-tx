@@ -8,6 +8,7 @@ import {
   freeTextParam,
   extractSubject,
   extractTicker,
+  looksLikeSentence,
 } from './entityExtract.js';
 
 const HASH = '0x' + '1'.repeat(64);
@@ -99,4 +100,36 @@ test('extractTicker prefers an explicit symbol over the prose name', () => {
   assert.equal(extractTicker('What is AAPL trading at?'), 'AAPL');
   assert.equal(extractTicker('What is Tesla stock price today?'), 'Tesla');
   assert.equal(extractTicker(null), null);
+});
+
+test('extractSubject strips a "locked in" clause the lead pattern leaves behind', () => {
+  // The lead strip stops at the first "is", so these arrive here as
+  // "locked in Uniswap" and used to be looked up under that name.
+  assert.equal(extractSubject('How much value is locked in Uniswap?'), 'Uniswap');
+  assert.equal(extractSubject('How much money is locked in Curve right now?'), 'Curve');
+  assert.equal(extractSubject('How much value is staked in Lido?'), 'Lido');
+});
+
+test('extractSubject leaves the cases that already worked alone', () => {
+  assert.equal(extractSubject('What is the TVL of Aave?'), 'Aave');
+  assert.equal(extractSubject('What is the total value locked in Lido?'), 'Lido');
+  assert.equal(extractSubject('uniswap'), 'uniswap');
+});
+
+test('looksLikeSentence tells prose from a bare value', () => {
+  assert.equal(looksLikeSentence('How much value is locked in Uniswap?'), true);
+  assert.equal(looksLikeSentence('How much is Apple stock right now'), true);
+  assert.equal(looksLikeSentence('uniswap'), false);
+  assert.equal(looksLikeSentence('AAPL'), false);
+  assert.equal(looksLikeSentence('aave-v3'), false);
+  // A chain name can legitimately run to three words; it must not be mistaken
+  // for a question and torn apart.
+  assert.equal(looksLikeSentence('Binance Smart Chain'), false);
+});
+
+test('looksLikeSentence is safe on non-strings and blanks', () => {
+  assert.equal(looksLikeSentence(undefined), false);
+  assert.equal(looksLikeSentence(null), false);
+  assert.equal(looksLikeSentence(42), false);
+  assert.equal(looksLikeSentence('   '), false);
 });
