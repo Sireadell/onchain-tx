@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { buildApp } from '../app.js';
 import { resetRpcCache } from './ankrRpc.js';
 import { resetBlockscoutCache } from './blockscoutApi.js';
-import { detectHandoff } from './misrouteHandoff.js';
+import { detectHandoff, requestText } from './misrouteHandoff.js';
 
 const ADDRESS = `0x${'a'.repeat(40)}`;
 const TX_HASH = `0x${'b'.repeat(64)}`;
@@ -297,4 +297,102 @@ test('handoff: a genuine price question stays on the price intent', () => {
       assert.equal(detectHandoff(path, text, { symbol: text }), null, `${path} ${text}`);
     }
   }
+});
+
+// The exact request the dispatcher sent to /check-tx twice on 2026-09-03,
+// address and all. It was refused for having no transaction hash both times.
+const LIVE_FRAUD_QUESTION = 'Intent: FRAUD_DETECTION. Assess fraud, abuse, malicious-contract, and counterparty risk for the proposed payment destination. Provide an explicit verdict/label and numeric confidence when the routed Miner supports them. For contract destinations, assess privileged upgrade, admin, owner, pause, or similar control risk when supported. Exact EVM subject: 0xb38d0405df1b15961aef29c7c45f2ed285822c14. Exact chainId: 84532. Network: Base Sepolia testnet. Do not substitute Base mainnet for Base Sepolia chainId 84532. Return verifiable intelligence explicitly bound to this exact subject and chain. Prefer live on-chain measurements over generic LLM-only speculation when a capable Miner is available. Explicitly repeat the exact subject address and exact chainId in structured output or in a schema-declared signal field so the evidence can be machine-bound without relying on request metadata. Do not assess a different address or chain. 0xb38d0405df1b15961aef29c7c45f2ed285822c14 base 84532';
+
+test('handoff: the fraud question that live traffic sent to transaction lookup moves to the fraud assessment', () => {
+  const params = {
+    address: '0xb38d0405df1b15961aef29c7c45f2ed285822c14',
+    chain: 'base',
+    chainId: '84532',
+    query: LIVE_FRAUD_QUESTION,
+  };
+  assert.equal(detectHandoff('/check-tx', requestText({ method: 'GET', query: params }), params), 'fraud');
+});
+
+test('handoff: shorter fraud phrasings on transaction lookup also move', () => {
+  for (const text of [
+    `Is ${ADDRESS} a known scam address?`,
+    `Assess the counterparty risk of paying ${ADDRESS}.`,
+    `Has ${ADDRESS} been sanctioned or blacklisted?`,
+    `Is it safe to send funds to ${ADDRESS}?`,
+    `Is ${ADDRESS} a malicious contract?`,
+  ]) {
+    assert.equal(detectHandoff('/check-tx', text, { query: text }), 'fraud', text);
+  }
+});
+
+test('handoff: an ordinary transaction question never becomes a fraud assessment', () => {
+  for (const text of [
+    `Is transaction ${TX_HASH} confirmed?`,
+    `Did the transfer from ${ADDRESS} go through?`,
+    `What block was ${TX_HASH} included in?`,
+    `Is there any risk this transaction from ${ADDRESS} is still pending?`,
+    `What method did ${ADDRESS} call in transaction ${TX_HASH}?`,
+  ]) {
+    assert.equal(detectHandoff('/check-tx', text, { query: text }), null, text);
+  }
+});
+
+test('handoff: a fraud question carrying its own transaction hash stays on transaction lookup', () => {
+  const text = `Was transaction ${TX_HASH} from ${ADDRESS} a scam?`;
+  assert.equal(detectHandoff('/check-tx', text, { query: text }), null);
+  assert.equal(detectHandoff('/check-tx', LIVE_FRAUD_QUESTION, { tx_hash: TX_HASH, query: LIVE_FRAUD_QUESTION }), null);
+});
+
+test('handoff: a balance or holder cue still wins over a fraud cue on the same question', () => {
+  const balance = `Is ${ADDRESS} a scam, and what is its balance?`;
+  assert.equal(detectHandoff('/check-tx', balance, { query: balance }), 'wallet');
+});
+
+test('handoff: fraud is not a destination from the endpoints with no live evidence for it', () => {
+  for (const path of ['/wallet-balance', '/token-holders', '/crypto-price', '/stock-price', '/ssl-check']) {
+    const text = `Is ${ADDRESS} a known scam address?`;
+    assert.notEqual(detectHandoff(path, text, { query: text }), 'fraud', path);
+  }
+});
+
+test('handoff: the live fraud question sent to transaction lookup reaches Sentinel and returns its verdict', async (t) => {
+  let seen = null;
+  mockFetch(t, async (original, url, options) => {
+    if (typeof url !== 'string' && url?.href) url = url.href;
+    if (typeof url === 'string' && url.includes('/assess-wallet')) {
+      seen = new URL(url);
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          label: 'HIGH',
+          reason: '0xb38d0405df1b15961aef29c7c45f2ed285822c14 on chainId 84532 shows high counterparty risk.',
+          confidence: 0.91,
+        }),
+      };
+    }
+    return original(url, options);
+  });
+  const base = startServer(t);
+  const query = new URLSearchParams({
+    address: '0xb38d0405df1b15961aef29c7c45f2ed285822c14',
+    chain: 'base',
+    chainId: '84532',
+    query: LIVE_FRAUD_QUESTION,
+  });
+  const response = await fetch(`${base}/check-tx?${query}`);
+  const body = await response.json();
+
+  // It went to Sentinel bound to the exact subject and chain the question named.
+  assert.ok(seen, 'expected the request to reach Sentinel');
+  assert.equal(seen.searchParams.get('wallet'), '0xb38d0405df1b15961aef29c7c45f2ed285822c14');
+  assert.equal(seen.searchParams.get('chainId'), '84532');
+  assert.equal(seen.searchParams.get('chain'), 'base');
+  assert.equal(seen.searchParams.get('query'), LIVE_FRAUD_QUESTION);
+
+  // And the caller got a verdict instead of the "no transaction hash" refusal.
+  assert.equal(response.status, 200);
+  assert.equal(body.status, 'HIGH');
+  assert.notEqual(body.status, 'invalid_input');
+  assert.match(body.summary, /counterparty risk/);
 });

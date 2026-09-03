@@ -36,7 +36,7 @@ async function proxySentinel(req, res, path) {
 
   try {
     const target = new URL(`${sentinelBaseUrl()}${path}`);
-    for (const [key, value] of Object.entries(req.query)) {
+    for (const [key, value] of Object.entries(req.query ?? {})) {
       if (typeof value === 'string') target.searchParams.set(key, value);
     }
 
@@ -117,6 +117,14 @@ async function proxySentinel(req, res, path) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+// Exposed so the misroute handoff can answer a fraud question that the
+// dispatcher sent to another one of our endpoints, without an HTTP call back
+// into this service. Takes the same synthetic request shape the other
+// handoff targets take: { method, query, body }.
+export function handleFraudAssessment(req, res) {
+  return proxySentinel(req, res, '/assess-wallet');
 }
 
 router.post('/fraud-query', (req, res) => proxySentinel(req, res, '/fraud-query'));

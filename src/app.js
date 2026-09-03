@@ -56,6 +56,7 @@ const misrouteHandoffMiddleware = createMisrouteHandoffMiddleware({
   walletBalance: checkWalletBalanceRateLimit,
   tokenHolders: checkTokenHoldersRateLimit,
   ipGeolocation: checkIpGeolocationRateLimit,
+  fraud: sentinelFraudRateLimit,
 });
 const refusalFallbackMiddleware = createRefusalFallbackMiddleware();
 

@@ -8,6 +8,7 @@ import { handleCheckTx } from '../routes/checkTx.js';
 import { handleWalletBalance } from '../routes/checkWalletBalance.js';
 import { handleTokenHolders } from '../routes/checkTokenHolders.js';
 import { handleIpGeolocation } from '../routes/checkIpGeolocation.js';
+import { handleFraudAssessment } from '../routes/sentinelFraud.js';
 
 function requestParams(req) {
   return req.method === 'GET' ? req.query : req.body;
@@ -102,6 +103,31 @@ function walletOrHolderCue(text) {
   return null;
 }
 
+
+// A fraud assessment names what it wants in plain words. Confirmed in live
+// traffic twice on 2026-09-03: the dispatcher sent "Intent: FRAUD_DETECTION.
+// Assess fraud, abuse, malicious-contract, and counterparty risk ..." for a
+// Base Sepolia address to /check-tx, which refused it for having no
+// transaction hash while our own fraud endpoint could have answered it.
+//
+// Deliberately does not treat a bare "risk" as a cue. A transaction question
+// can mention risk in passing, and every phrase below pairs it with the thing
+// being assessed, so a genuine confirmation lookup never matches.
+const FRAUD_WORDS = [
+  'fraud', 'fraudulent', 'scam', 'scammer', 'scams',
+  'malicious', 'phishing', 'illicit', 'sanctioned', 'blacklisted', 'blocklisted',
+];
+const FRAUD_PHRASES = [
+  'fraud risk', 'counterparty risk', 'risk score', 'risk assessment',
+  'malicious-contract', 'safe to send', 'safe to pay', 'safe to interact',
+];
+
+function fraudCue(text) {
+  if (hasAnyWord(text, FRAUD_WORDS)) return true;
+  const lower = text.toLowerCase();
+  return FRAUD_PHRASES.some((phrase) => lower.includes(phrase));
+}
+
 function detectHandoff(path, text, params) {
   if (!text) return null;
   if (hasIndependentStructuredInput(path, params, text)) return null;
@@ -112,6 +138,9 @@ function detectHandoff(path, text, params) {
   if (path === '/check-tx' && !extractTxHash(text) && extractAddress(text)) {
     const cue = walletOrHolderCue(text);
     if (cue) return cue;
+    // Checked only after the balance and holder cues, so a question that
+    // names one of those keeps the destination it already had.
+    if (fraudCue(text)) return 'fraud';
   }
 
   // These two intents get swapped for each other directly, in both
@@ -155,7 +184,27 @@ function detectHandoff(path, text, params) {
   return null;
 }
 
-function targetRequest(req, text) {
+function targetRequest(req, text, target) {
+  // Sentinel reads the subject from `wallet` and the question from `query`,
+  // and it is a real outbound HTTP call, so it gets a clean parameter set
+  // rather than every field the original request happened to carry. The
+  // chain identifiers are kept when present because a fraud verdict is
+  // bound to one address on one chain.
+  if (target === 'fraud') {
+    const source = requestParams(req) ?? {};
+    // `text` is every parameter joined together, which for this shape repeats
+    // the address and chain that the question already names. Sentinel reads
+    // this field as prose, so it gets the caller's own question verbatim when
+    // there is one, and only falls back to the joined text otherwise.
+    const fraudParams = { wallet: extractAddress(text), query: freeTextParam(source)?.trim() || text };
+    if (typeof source.chain === 'string' && source.chain.trim()) fraudParams.chain = source.chain.trim();
+    const chainId = source.chainId ?? source.chain_id;
+    if (chainId !== undefined && String(chainId).trim()) fraudParams.chainId = String(chainId).trim();
+    return req.method === 'POST'
+      ? { method: 'POST', query: undefined, body: fraudParams }
+      : { method: 'GET', query: fraudParams, body: undefined };
+  }
+
   const params = { ...(requestParams(req) ?? {}), question: text };
   // The IP route's primary parameter is ip, while an SSL call commonly
   // carries the whole question in domain. Supplying it here is an internal
@@ -196,7 +245,7 @@ export function createMisrouteHandoffMiddleware(limiters) {
   const target = detectHandoff(endpointPath(req), text, requestParams(req));
   if (!target) return next();
 
-  const routedReq = targetRequest(req, text);
+  const routedReq = targetRequest(req, text, target);
   console.log(`[misroute-handoff] called=${endpointPath(req)} target=${target}`);
   const limiter = target === 'wallet'
     ? limiters.walletBalance
@@ -204,11 +253,16 @@ export function createMisrouteHandoffMiddleware(limiters) {
       ? limiters.tokenHolders
       : target === 'tx'
         ? limiters.transaction
-        : limiters.ipGeolocation;
+        : target === 'fraud'
+          ? limiters.fraud
+          : limiters.ipGeolocation;
   if (!await runLimiter(limiter, req, res)) return undefined;
   if (target === 'wallet') return withRpcBudget(() => handleWalletBalance(routedReq, res));
   if (target === 'holders') return withRpcBudget(() => handleTokenHolders(routedReq, res));
   if (target === 'tx') return withRpcBudget(() => handleCheckTx(routedReq, res));
+  // Sentinel is an outbound HTTP call, not a chain RPC call, so it spends no
+  // RPC budget and is not wrapped in it.
+  if (target === 'fraud') return handleFraudAssessment(routedReq, res);
   return handleIpGeolocation(routedReq, res);
   };
 }
