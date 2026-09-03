@@ -90,9 +90,12 @@ test('crypto-price: coin_id and price_chain/token both supplied answered with gu
   assert.equal((await res.json()).status, 'invalid_input');
 });
 
+// "ethereum" used to be the case here. It now resolves as a coin instead,
+// see the recovery tests at the end of this file, so this keeps the same
+// assertion on a chain name that is not also a coin.
 test('crypto-price: price_chain without token answered with guidance', async (t) => {
   const base = startServer(t);
-  const res = await fetch(`${base}/crypto-price?price_chain=ethereum`);
+  const res = await fetch(`${base}/crypto-price?price_chain=base`);
   assert.equal(res.status, 200);
   assert.equal((await res.json()).status, 'invalid_input');
 });
@@ -311,4 +314,68 @@ test('crypto-price: unknown coin returns not_found, not an error', async (t) => 
   const body = await res.json();
   assert.equal(body.status, 'not_found');
   assert.equal(body.price_usd, null);
+});
+
+
+// The exact request live traffic sent twice every two hours through
+// 2026-09-02 and 03, refused every time before this. See the
+// CHAIN_NAME_COIN_IDS comment in checkCryptoPrice.js for the root cause.
+function mockEthPrice(t) {
+  resetDefiLlamaCache();
+  mockFetchWithCoinGecko(t, {
+    coinpaprika: async () => ({
+      status: 200,
+      json: async () => ({ currencies: [{ id: 'eth-ethereum', symbol: 'ETH', is_active: true, rank: 2 }] }),
+    }),
+    coinpaprikaTicker: async (url) => {
+      assert.equal(url, 'https://api.coinpaprika.com/v1/tickers/eth-ethereum');
+      return {
+        status: 200,
+        json: async () => ({
+          symbol: 'ETH',
+          last_updated: '2026-09-03T09:00:00Z',
+          quotes: { USD: { price: 2544.19, market_cap: 306000000000, percent_change_24h: 1.5 } },
+        }),
+      };
+    },
+  });
+}
+
+test('crypto-price: a bare price_chain=ethereum is priced as the coin, not refused', async (t) => {
+  mockEthPrice(t);
+  const base = startServer(t);
+  const res = await fetch(`${base}/crypto-price?price_chain=ethereum`);
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.status, 'ok');
+  assert.notEqual(body.status, 'invalid_input');
+  assert.equal(body.symbol, 'ETH');
+  assert.equal(body.price_usd, 2544.19);
+  assert.equal(body.query_type, 'coin_id');
+  assert.match(body.summary, /\$2,544\.19 USD/);
+});
+
+test('crypto-price: an empty token alongside price_chain=ethereum is treated the same', async (t) => {
+  mockEthPrice(t);
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/crypto-price?price_chain=ethereum&token=`)).json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.symbol, 'ETH');
+});
+
+test('crypto-price: a chain that is not a coin still gets the honest refusal', async (t) => {
+  const base = startServer(t);
+  for (const chain of ['base', 'polygon', 'linea', 'scroll']) {
+    const body = await (await fetch(`${base}/crypto-price?price_chain=${chain}`)).json();
+    assert.equal(body.status, 'invalid_input', chain);
+  }
+});
+
+test('crypto-price: a real contract lookup is untouched by the recovery', async (t) => {
+  mockFetch(t, async () => ({ ok: true, status: 200, json: async () => ({ coins: { [`ethereum:${TOKEN}`]: { price: 1.0005, symbol: 'USDC', timestamp: 1756900000 } } }) }));
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/crypto-price?price_chain=ethereum&token=${TOKEN}`)).json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.query_type, 'chain_token');
+  assert.equal(body.symbol, 'USDC');
 });

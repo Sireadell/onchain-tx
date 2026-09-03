@@ -86,6 +86,40 @@ async function getFreshestCoinPrice(coinId) {
   };
 }
 
+
+// Chain names that are also the canonical id of a major coin. Used only to
+// recover a lookup the dispatcher put in the wrong field, never to guess.
+//
+// Root cause, found 2026-09-03 in Render request logs: this miner's own
+// miner.yaml gave "ethereum" as the example value for price_chain. A
+// question about the price of ether therefore matched that example, and the
+// dispatcher filled price_chain="ethereum" with no token, because there is
+// no contract address in a question about ether. This endpoint then refused
+// the pair as incomplete. It arrived twice every two hours through the whole
+// of 2026-09-02 and 03 and was refused every time, which is consistent with
+// CRYPTO_PRICE holding rank 1 on a score of essentially zero.
+//
+// A recovered lookup can be no worse than the refusal it replaces: both
+// score zero if the reading is wrong, and the refusal scores zero always.
+// The table is explicit rather than a search so a chain that is not a coin
+// ("base") keeps the honest refusal instead of matching some unrelated
+// ticker by fuzzy name.
+const CHAIN_NAME_COIN_IDS = {
+  ethereum: 'ethereum',
+  ether: 'ethereum',
+  bitcoin: 'bitcoin',
+  solana: 'solana',
+  cardano: 'cardano',
+  litecoin: 'litecoin',
+  dogecoin: 'dogecoin',
+  tron: 'tron',
+  avalanche: 'avalanche-2',
+  arbitrum: 'arbitrum',
+  optimism: 'optimism',
+  fantom: 'fantom',
+  celo: 'celo',
+};
+
 const router = Router();
 
 const TOKEN_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
@@ -99,7 +133,7 @@ async function handleCryptoPrice(req, res) {
   // lookups still require the explicit price_chain + token pair, because
   // guessing which chain an address lives on would be a coin flip.
   const question = freeTextParam(params);
-  const priceChain = params?.price_chain;
+  let priceChain = params?.price_chain;
   const token = params?.token;
   let coinId = params?.coin_id ?? (!priceChain && !token && question ? extractSubject(question) : undefined);
   // "one ether" means one unit of Ethereum, not Harmony's ONE token.
@@ -107,6 +141,19 @@ async function handleCryptoPrice(req, res) {
   // ONE, producing a plausible-looking but completely wrong price.
   const coinText = question ?? params?.coin_id;
   if (coinText && /\b(?:one\s+)?(?:ether|eth)\b/i.test(coinText)) coinId = 'ethereum';
+
+  // A chain named on its own, with no contract address to pair it with, is a
+  // coin name in the wrong field. Recover it rather than refusing the pair as
+  // incomplete. Only ever applies when no token was supplied at all, so a
+  // genuine contract lookup is untouched.
+  const tokenSupplied = typeof token === 'string' ? token.trim() : token;
+  if (!coinId && priceChain && !tokenSupplied) {
+    const recovered = CHAIN_NAME_COIN_IDS[String(priceChain).trim().toLowerCase()];
+    if (recovered) {
+      coinId = recovered;
+      priceChain = undefined;
+    }
+  }
 
   const chainTokenMode = Boolean(priceChain || token);
   if (!coinId && !chainTokenMode) {

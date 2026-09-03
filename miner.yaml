@@ -156,10 +156,14 @@ endpoints:
       change and market cap where the feed supplies them, cross-checked
       across independent sources and reported with a source count. For the
       cost of transacting on a chain use GAS_PRICE instead. Params: either
-      coin_id alone (a CoinGecko id, e.g. "bitcoin"), or price_chain (a
-      free-text DefiLlama chain name, e.g. "ethereum") together with token
-      (0x-prefixed, 40 hex characters, the token's contract address).
-      Exactly one of those two modes.
+      coin_id alone, or price_chain together with token. Exactly one of
+      those two modes. Any coin named in words goes in coin_id, including a
+      coin that shares its name with a chain: ether or Ethereum is
+      coin_id="ethereum", and likewise "bitcoin", "solana". price_chain is
+      only for pricing one specific contract, is never sent on its own, and
+      always needs token (0x-prefixed, 40 hex characters, the token's
+      contract address) alongside it, as in price_chain="base" with the
+      contract to price.
   - path: /stock-price
     external_path: /stock-price
     method: GET
