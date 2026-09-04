@@ -15,11 +15,24 @@
 // fault, and reporting them as answers would hide genuine downtime.
 export const UNUSABLE_INPUT_STATUS = 'invalid_input';
 
-export function respondUnusableInput(res, summary) {
+// A refusal used to go out at confidence 1.0, which asserted full certainty
+// in a body that contains no answer. miner.yaml names `confidence` as the
+// signal_mapping confidence_field, so that number is what any consumer reads
+// as "how much should this response be trusted" — and claiming the maximum
+// for a non-answer can only ever cost us. Low, not zero: we remain certain
+// about the one thing the body does say, which is what the endpoint needs.
+//
+// Judgment call, not a measured one: Telegraph does not publish how (or
+// whether) the scorer weighs confidence, so this is reasoning from what the
+// field means rather than from an observed score change. Revisit if a real
+// scoring signal ever contradicts it.
+export const UNUSABLE_INPUT_CONFIDENCE = 0.1;
+
+export function respondUnusableInput(res, summary, confidence = UNUSABLE_INPUT_CONFIDENCE) {
   return res.status(200).json({
     status: UNUSABLE_INPUT_STATUS,
     summary,
-    confidence: 1.0,
+    confidence,
   });
 }
 

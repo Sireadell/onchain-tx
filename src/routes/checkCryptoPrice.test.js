@@ -379,3 +379,73 @@ test('crypto-price: a real contract lookup is untouched by the recovery', async 
   assert.equal(body.query_type, 'chain_token');
   assert.equal(body.symbol, 'USDC');
 });
+
+// The live bug this covers: on 2026-09-04 the deployed miner answered
+// invalid_input to symbol=BTC and asset=bitcoin at HTTP 200, so the miss was
+// never booked as a failure and CRYPTO_PRICE scored near zero across epochs
+// 307 and 308 with an empty failure_reason. Every competing CRYPTO_PRICE
+// miner accepts at least one of these names.
+function mockBitcoin(t) {
+  mockFetchWithCoinGecko(t, {
+    coinpaprika: async () => ({
+      status: 200,
+      json: async () => ({ currencies: [{ id: 'btc-bitcoin', symbol: 'BTC', is_active: true, rank: 1 }] }),
+    }),
+    coinpaprikaTicker: async () => ({
+      status: 200,
+      json: async () => ({
+        symbol: 'BTC',
+        last_updated: '2026-09-04T02:01:24Z',
+        quotes: { USD: { price: 79694.28, market_cap: 1600243864692, percent_change_24h: -1.88 } },
+      }),
+    }),
+  });
+}
+
+test('crypto-price: the asset can arrive under an alias instead of coin_id', async (t) => {
+  for (const key of ['symbol', 'asset', 'coin', 'ticker', 'coin_symbol', 'token_symbol', 'crypto']) {
+    await t.test(key, async (t2) => {
+      resetDefiLlamaCache();
+      mockBitcoin(t2);
+      const base = startServer(t2);
+      const body = await (await fetch(`${base}/crypto-price?${key}=bitcoin`)).json();
+      assert.equal(body.status, 'ok', key);
+      assert.equal(body.price_usd, 79694.28, key);
+      assert.equal(body.symbol, 'BTC', key);
+    });
+  }
+});
+
+test('crypto-price: an alias holding a whole question reduces to the coin', async (t) => {
+  resetDefiLlamaCache();
+  mockBitcoin(t);
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/crypto-price?asset=${encodeURIComponent('what is bitcoin worth right now')}`)).json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.symbol, 'BTC');
+});
+
+test('crypto-price: a contract lookup is untouched when an alias is also present', async (t) => {
+  mockFetch(t, async () => ({ ok: true, status: 200, json: async () => ({ coins: { [`ethereum:${TOKEN}`]: { price: 1.0005, symbol: 'USDC', timestamp: 1756900000 } } }) }));
+  const base = startServer(t);
+  // price_chain + token is a complete contract lookup. An alias alongside it
+  // must not turn this into the two-modes-at-once refusal.
+  const body = await (await fetch(`${base}/crypto-price?price_chain=ethereum&token=${TOKEN}&symbol=USDC`)).json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.query_type, 'chain_token');
+});
+
+test('crypto-price: currency is not read as the asset', async (t) => {
+  const base = startServer(t);
+  // `currency` holds the quote currency, not the thing being priced. Reading
+  // it as a coin name would answer a question nobody asked.
+  const body = await (await fetch(`${base}/crypto-price?currency=usd`)).json();
+  assert.equal(body.status, 'invalid_input');
+});
+
+test('crypto-price: a refusal no longer claims full confidence', async (t) => {
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/crypto-price`)).json();
+  assert.equal(body.status, 'invalid_input');
+  assert.ok(body.confidence < 0.5, `expected a low confidence on a non-answer, got ${body.confidence}`);
+});

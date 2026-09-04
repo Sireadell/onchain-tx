@@ -30,7 +30,7 @@ import { getCoinPrice, CoinNotFoundError } from '../lib/defiLlamaApi.js';
 import { getCoinPaprikaPrice } from '../lib/coinPaprikaApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
-import { extractSubject, freeTextParam } from '../lib/entityExtract.js';
+import { extractSubject, freeTextParam, coinAliasParam } from '../lib/entityExtract.js';
 import { resolveChainLoose } from '../lib/chains.js';
 import { describeAddressMiss } from '../lib/addressContext.js';
 
@@ -135,11 +135,25 @@ async function handleCryptoPrice(req, res) {
   const question = freeTextParam(params);
   let priceChain = params?.price_chain;
   const token = params?.token;
-  let coinId = params?.coin_id ?? (!priceChain && !token && question ? extractSubject(question) : undefined);
+  // The asset can arrive under a name other than coin_id — `symbol`, `asset`,
+  // `ticker` and friends are what the competing CRYPTO_PRICE miners publish,
+  // so the dispatcher reaches for them too. Read them before falling back to
+  // the whole question. Ticker values need no table here: CoinPaprika's
+  // /v1/search already resolves "BTC" and "SOL" to the right asset, verified
+  // live against the deployed miner.
+  // An alias is weaker evidence than an explicit coin_id, so it defers to a
+  // contract lookup rather than colliding with one: price_chain + token +
+  // symbol=USDC is a complete contract lookup that happens to name its
+  // ticker, not a caller asking two ways at once. An explicit coin_id in
+  // that position still gets the two-modes refusal below, unchanged.
+  const alias = (!priceChain && !token) ? coinAliasParam(params) : undefined;
+  let coinId = params?.coin_id
+    ?? alias
+    ?? (!priceChain && !token && question ? extractSubject(question) : undefined);
   // "one ether" means one unit of Ethereum, not Harmony's ONE token.
   // CoinPaprika's search otherwise sees the leading word "one" and returns
   // ONE, producing a plausible-looking but completely wrong price.
-  const coinText = question ?? params?.coin_id;
+  const coinText = question ?? params?.coin_id ?? alias;
   if (coinText && /\b(?:one\s+)?(?:ether|eth)\b/i.test(coinText)) coinId = 'ethereum';
 
   // A chain named on its own, with no contract address to pair it with, is a

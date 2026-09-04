@@ -192,3 +192,32 @@ export function extractTicker(input) {
   if (match) return match[1];
   return extractSubject(input);
 }
+
+// The dispatcher does not always use the parameter name a route documents.
+// Live-checked 2026-09-04 against the deployed miner: /crypto-price answered
+// invalid_input to `symbol=BTC` and `asset=bitcoin` while every competing
+// CRYPTO_PRICE miner accepts one or both, because this route only ever read
+// `coin_id`. That refusal returns HTTP 200, so it is never booked as a
+// failure — it is simply scored as a wrong answer, which matches
+// CRYPTO_PRICE sitting near zero across epochs 307 and 308 with an empty
+// failure_reason.
+//
+// Deliberately excludes `currency` (holds the quote currency, "usd", not the
+// asset) and `token` (already this route's contract-address parameter).
+const COIN_ALIAS_KEYS = [
+  'symbol', 'asset', 'coin', 'ticker', 'coin_name', 'coin_symbol',
+  'token_symbol', 'asset_symbol', 'asset_name', 'crypto', 'cryptocurrency',
+];
+
+// Returns whichever alias the caller used for the asset being priced, reduced
+// to a bare name when the value arrived as a whole question. Never guesses:
+// an absent alias returns null and the caller keeps its existing refusal.
+export function coinAliasParam(params) {
+  if (!params || typeof params !== 'object') return null;
+  for (const key of COIN_ALIAS_KEYS) {
+    const value = params[key];
+    if (typeof value !== 'string' || !value.trim()) continue;
+    return looksLikeSentence(value) ? extractSubject(value) : value.trim();
+  }
+  return null;
+}
