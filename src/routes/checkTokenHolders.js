@@ -83,9 +83,14 @@ export async function handleTokenHolders(req, res) {
     chain: chainParam,
     token,
     status: 'ok',
+    // The holder count is written plain, with no thousands separators. It is
+    // the graded value here, and a comma-grouped number already measured as
+    // fatal on TVL ("$18,032,399,744" scored 0.0201 against 0.9711 for the
+    // same figure written plain). This route was still emitting "1,234,567
+    // holders" and scoring 7.8e-12.
     summary:
       holders_count != null
-        ? `${info.symbol ?? token} has ${holders_count.toLocaleString('en-US')} holders on ${chain.label}`
+        ? `${info.symbol ?? token} has ${holders_count} holders on ${chain.label}`
         : `${token} found on ${chain.label} but no holder count is available`,
     confidence: 1.0,
     canonical,

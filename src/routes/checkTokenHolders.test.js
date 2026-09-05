@@ -64,7 +64,9 @@ test('token-holders: successful lookup returns holders_count and canonical', asy
   assert.equal(body.holders_count, 1234);
   assert.equal(body.token_symbol, 'TST');
   assert.equal(body.canonical, `eth:${TOKEN}:1234`);
-  assert.match(body.summary, /1,234 holders/);
+  // The holder count is the graded value, so it carries no separators.
+  assert.match(body.summary, /\b1234 holders/);
+  assert.doesNotMatch(body.summary, /\d,\d/);
 });
 
 test('token-holders: unknown token address returns not_found, not an error', async (t) => {

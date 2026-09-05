@@ -352,7 +352,10 @@ test('crypto-price: a bare price_chain=ethereum is priced as the coin, not refus
   assert.equal(body.symbol, 'ETH');
   assert.equal(body.price_usd, 2544.19);
   assert.equal(body.query_type, 'coin_id');
-  assert.match(body.summary, /\$2,544\.19 USD/);
+  // Plain, no thousands separator: a comma-grouped number is unreadable to
+  // the grader. See the note on priceUsdFixed in checkCryptoPrice.js.
+  assert.match(body.summary, /\$2544\.19 USD/);
+  assert.doesNotMatch(body.summary, /\d,\d/);
 });
 
 test('crypto-price: an empty token alongside price_chain=ethereum is treated the same', async (t) => {

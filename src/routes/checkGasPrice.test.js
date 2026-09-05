@@ -177,7 +177,8 @@ test('gas-price: successful read returns wei/gwei/fee_usd and canonical', async 
   // (#2884) returns 0 for any answer carrying no observation time, which is
   // what the old wording scored. See the note in checkGasPrice.js.
   assert.match(body.summary, /^Ethereum gas price: 1 gwei\./);
-  assert.match(body.summary, /A standard 21,000-gas transfer costs about \$0\.0420 USD\./);
+  assert.match(body.summary, /A standard 21000-gas transfer costs about \$0\.0420 USD\./);
+  assert.doesNotMatch(body.summary, /\d,\d/);
   assert.match(body.summary, /Observed at: \d{4}-\d{2}-\d{2}T[\d:.]+Z\.$/);
   assert.ok(body.as_of);
   assert.ok(body.summary.includes(body.as_of));

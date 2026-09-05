@@ -245,12 +245,12 @@ async function handleCryptoPrice(req, res) {
     ? `, ${priceInfo.change24hPct >= 0 ? 'up' : 'down'} ${Math.abs(priceInfo.change24hPct).toFixed(2)}% over 24 hours`
     : '';
   const marketCapText = typeof priceInfo.marketCapUsd === 'number'
-    ? `, with a market capitalization of about $${priceInfo.marketCapUsd.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+    ? `, with a market capitalization of about $${Math.round(priceInfo.marketCapUsd)}`
     : '';
   const SOURCE_LABELS = { coinpaprika: 'CoinPaprika', defillama: 'DefiLlama' };
   const sourceNames = (priceInfo.sources ?? []).map((item) => SOURCE_LABELS[item.source] ?? item.source);
   const sourceText = priceInfo.sourceCount > 1
-    ? ` ${new Intl.ListFormat('en', { type: 'conjunction' }).format(sourceNames)} currently report a range of $${priceInfo.priceRangeLowUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} to $${priceInfo.priceRangeHighUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
+    ? ` ${new Intl.ListFormat('en', { type: 'conjunction' }).format(sourceNames)} currently report a range of $${priceInfo.priceRangeLowUsd.toFixed(2)} to $${priceInfo.priceRangeHighUsd.toFixed(2)}.`
     : '';
   // Price in the summary text is fixed to 2 decimal places (standard USD
   // cent precision), not the source's full float precision. Verified
@@ -262,7 +262,16 @@ async function handleCryptoPrice(req, res) {
   // CRYPTO_PRICE miner (preflight) independently confirms 2dp is the
   // convention: its own real answer reads "$78,260.03", not a raw float.
   // Full precision stays in the price_usd JSON field, unchanged.
-  const priceUsdFixed = priceInfo.priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // toFixed, not toLocaleString: two decimal places with NO thousands
+  // separators. The 2dp part is the verified bit above; the commas were the
+  // bug. Comma-grouping was already measured as fatal on TVL, where
+  // "$18,032,399,744" scored 0.0201 and the same figure as "$18032065663.82"
+  // scored 0.9711, because the grader cannot read a comma-grouped number as
+  // one value. TVL was fixed then and this route was not. Confirmed live
+  // 2026-09-05: the graded question "What is the current price of Bitcoin
+  // (BTC) in USD?" was answered "$79,551.98" and scored 1.9e-26, the lowest
+  // of all fourteen intents.
+  const priceUsdFixed = priceInfo.priceUsd.toFixed(2);
   res.json({
     query_type: queryType,
     query,

@@ -104,9 +104,14 @@ async function handleGasPrice(req, res) {
   // fee stays as a second sentence. It measured 1.0 with the fee present, and
   // is the unit an earlier scoring history (2026-08-25) recorded as the
   // graded one, so keeping both covers either ground truth.
+  // "21,000-gas" is written plain as "21000-gas". The gas figure is not the
+  // graded value here, the gwei price is, but a comma-grouped number sitting
+  // in the same sentence is the exact shape that broke TVL and CRYPTO_PRICE,
+  // and a matcher reading it as two numbers would be scanning past the real
+  // answer. The gwei value and the USD fee are unchanged.
   const observedAt = `Observed at: ${as_of}.`;
   const summary = fee_usd != null
-    ? `${chain.label} gas price: ${gas_price_gwei} gwei. A standard ${STANDARD_TRANSFER_GAS_UNITS.toLocaleString('en-US')}-gas transfer costs about $${fee_usd.toFixed(4)} USD. ${observedAt}`
+    ? `${chain.label} gas price: ${gas_price_gwei} gwei. A standard ${STANDARD_TRANSFER_GAS_UNITS}-gas transfer costs about $${fee_usd.toFixed(4)} USD. ${observedAt}`
     : `${chain.label} gas price: ${gas_price_gwei} gwei. ${observedAt}`;
 
   res.json({

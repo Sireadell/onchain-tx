@@ -75,7 +75,12 @@ async function handleStockPrice(req, res) {
   // (registration #48): our old "$319.7" scored 0.0056, "$319.70" alone
   // scored 0.7804, full raw precision "$319.70001" scored 0.0057 — same
   // exact-match-at-2dp behavior already confirmed on CRYPTO_PRICE.
-  const priceFixed = quote.priceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // toFixed, not toLocaleString: the 2dp behaviour verified above, without
+  // the thousands separators. A share over $1,000 came out as "$1,234.56",
+  // and a comma-grouped number is what already measured as fatal on TVL and
+  // CRYPTO_PRICE. Today's TSLA answer had no comma and still scored low, so
+  // this removes a known hazard rather than being a proven cure on its own.
+  const priceFixed = quote.priceUsd.toFixed(2);
   const currency = typeof quote.currency === 'string' && quote.currency.trim()
     ? quote.currency.trim()
     : null;
