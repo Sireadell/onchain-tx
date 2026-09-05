@@ -119,6 +119,40 @@ test('assess-wallet GET extracts a bare address out of a plain-language query pa
   }
 });
 
+test('assess-wallet POST re-derives the address when wallet is present but not a valid address', async () => {
+  const originalFetch = global.fetch;
+  const address = `0x${'d'.repeat(40)}`;
+  global.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    assert.equal(body.wallet, address);
+    return new Response(JSON.stringify({
+      label: 'HIGH', reason: 'sanctions match', confidence: 0.95, assessment_status: 'ASSESSED',
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+
+  try {
+    await withServer(async (base) => {
+      // Mirrors what Telegraph's dispatcher actually sent in live traffic: a
+      // `wallet` key that exists but is not a clean address, alongside the
+      // full question in `query`.
+      const response = await originalFetch(`${base}/assess-wallet`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          wallet: `Is Ethereum wallet ${address} linked to fraud or sanctions? Give me the evidence.`,
+          query: `Is Ethereum wallet ${address} linked to fraud or sanctions? Give me the evidence.`,
+          chain: 'ethereum',
+        }),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.label, 'HIGH');
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('assess-wallet still rejects cleanly when no address is present anywhere in the request', async () => {
   const originalFetch = global.fetch;
   global.fetch = async () => new Response(

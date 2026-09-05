@@ -52,19 +52,28 @@ async function proxySentinel(req, res, path) {
       if (text) outgoingBody.query = text;
     }
 
-    // /assess-wallet requires a literal `wallet` field. Telegraph's own
-    // dispatcher sometimes routes a plain-language fraud question straight
-    // to this path without ever filling that field, so a genuinely
-    // answerable question ("Is 0xabc...123 linked to fraud?") was rejected
-    // as unusable input purely because the address never made it into the
-    // one field Sentinel reads. Pull a bare 0x-address out of whatever text
-    // did arrive, the same way the `query` fallback above already does.
-    // Regex only, deliberately: an LLM "fixing" a wallet address here could
-    // silently substitute the wrong address and return a confident verdict
-    // for a wallet nobody asked about, which is worse than a clean reject.
-    if (path === '/assess-wallet' && typeof outgoingBody.wallet !== 'string') {
-      const text = freeTextParam(outgoingBody) ?? Object.values(outgoingBody).find((v) => typeof v === 'string');
-      const address = extractAddress(text) ?? extractAddress(Object.values(req.query ?? {}).find((v) => typeof v === 'string'));
+    // /assess-wallet requires a literal `wallet` field holding a bare
+    // address. Telegraph's own dispatcher sometimes routes a plain-language
+    // fraud question straight to this path either without filling that
+    // field at all, or filling it with the whole question instead of a bare
+    // address — its own routing rationale can claim "wallet can be
+    // extracted" while the value it actually sends still fails validation,
+    // because an address buried in a sentence is not the same as a clean
+    // 42-character value. Either way a genuinely answerable question ("Is
+    // 0xabc...123 linked to fraud?") was rejected as unusable input purely
+    // because a clean address never reached the one field Sentinel reads.
+    // Always re-derive and overwrite with whatever address can be found
+    // (in `wallet` itself first, then other fields), so a sentence sitting
+    // in `wallet` gets normalized down to the bare address it contains
+    // rather than being passed through unchanged just because something was
+    // technically present. Regex only, deliberately: an LLM "fixing" a
+    // wallet address here could silently substitute the wrong one and
+    // return a confident verdict for an address nobody asked about.
+    if (path === '/assess-wallet') {
+      const address = extractAddress(outgoingBody.wallet)
+        ?? extractAddress(freeTextParam(outgoingBody))
+        ?? extractAddress(Object.values(outgoingBody).find((v) => typeof v === 'string'))
+        ?? extractAddress(Object.values(req.query ?? {}).find((v) => typeof v === 'string'));
       if (address) {
         outgoingBody.wallet = address;
         if (req.method === 'GET') target.searchParams.set('wallet', address);
