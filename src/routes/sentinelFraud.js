@@ -1,6 +1,6 @@
 import express from 'express';
 import { respondUnusableInput } from '../lib/unusableInput.js';
-import { freeTextParam } from '../lib/entityExtract.js';
+import { extractAddress, freeTextParam } from '../lib/entityExtract.js';
 
 const router = express.Router();
 const DEFAULT_SENTINEL_BASE_URL = 'https://telegraph-sentinel-40vp.onrender.com';
@@ -50,6 +50,25 @@ async function proxySentinel(req, res, path) {
     if (req.method === 'POST' && typeof outgoingBody.query !== 'string') {
       const text = freeTextParam(outgoingBody);
       if (text) outgoingBody.query = text;
+    }
+
+    // /assess-wallet requires a literal `wallet` field. Telegraph's own
+    // dispatcher sometimes routes a plain-language fraud question straight
+    // to this path without ever filling that field, so a genuinely
+    // answerable question ("Is 0xabc...123 linked to fraud?") was rejected
+    // as unusable input purely because the address never made it into the
+    // one field Sentinel reads. Pull a bare 0x-address out of whatever text
+    // did arrive, the same way the `query` fallback above already does.
+    // Regex only, deliberately: an LLM "fixing" a wallet address here could
+    // silently substitute the wrong address and return a confident verdict
+    // for a wallet nobody asked about, which is worse than a clean reject.
+    if (path === '/assess-wallet' && typeof outgoingBody.wallet !== 'string') {
+      const text = freeTextParam(outgoingBody) ?? Object.values(outgoingBody).find((v) => typeof v === 'string');
+      const address = extractAddress(text) ?? extractAddress(Object.values(req.query ?? {}).find((v) => typeof v === 'string'));
+      if (address) {
+        outgoingBody.wallet = address;
+        if (req.method === 'GET') target.searchParams.set('wallet', address);
+      }
     }
 
     const upstream = await fetch(target, {

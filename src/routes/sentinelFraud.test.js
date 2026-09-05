@@ -68,6 +68,80 @@ test('assess-wallet answers Sentinel validation errors instead of failing', asyn
   }
 });
 
+test('assess-wallet POST extracts a bare address out of a plain-language question when wallet is missing', async () => {
+  const originalFetch = global.fetch;
+  const address = `0x${'b'.repeat(40)}`;
+  global.fetch = async (url, options) => {
+    assert.equal(url.toString(), 'https://telegraph-sentinel-40vp.onrender.com/assess-wallet');
+    const body = JSON.parse(options.body);
+    assert.equal(body.wallet, address);
+    return new Response(JSON.stringify({
+      label: 'HIGH', reason: 'sanctions match', confidence: 0.95, assessment_status: 'ASSESSED',
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+
+  try {
+    await withServer(async (base) => {
+      const response = await originalFetch(`${base}/assess-wallet`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ question: `Is Ethereum wallet ${address} linked to fraud or sanctions? Give me the evidence.` }),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.label, 'HIGH');
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('assess-wallet GET extracts a bare address out of a plain-language query param when wallet is missing', async () => {
+  const originalFetch = global.fetch;
+  const address = `0x${'c'.repeat(40)}`;
+  global.fetch = async (url) => {
+    assert.equal(url.searchParams.get('wallet'), address);
+    return new Response(JSON.stringify({
+      label: 'LOW', reason: 'known exchange wallet', confidence: 0.9, assessment_status: 'ASSESSED',
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+
+  try {
+    await withServer(async (base) => {
+      const question = encodeURIComponent(`Before I send anything to ${address}, is there anything I should know about it?`);
+      const response = await originalFetch(`${base}/assess-wallet?question=${question}`);
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.label, 'LOW');
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('assess-wallet still rejects cleanly when no address is present anywhere in the request', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response(
+    JSON.stringify({ error: 'wallet is required' }),
+    { status: 400, headers: { 'content-type': 'application/json' } },
+  );
+
+  try {
+    await withServer(async (base) => {
+      const response = await originalFetch(`${base}/assess-wallet`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ question: 'Should I be worried about this wallet? What is the risk level?' }),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.status, 'invalid_input');
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('Sentinel outage returns an honest inconclusive answer instead of a failed request', async () => {
   const originalFetch = global.fetch;
   global.fetch = async () => new Response(
