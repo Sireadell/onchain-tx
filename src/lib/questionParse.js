@@ -110,6 +110,13 @@ function stripTimeWords(text) {
 // caller geocodes them in turn and keeps the first that resolves, which is
 // far more robust than trying to decide up front which one is right: a
 // wrong guess costs one extra geocode call, not a failed answer.
+// Cuts a trailing time window off a candidate place name, so the place is
+// left behind on its own. "beijing over the next 48 hours" -> "beijing".
+function stripWindowTail(value) {
+  const match = value.match(/\s+(?:in|over|for|within|during|across|through)\s+(?:the\s+)?next\s/i);
+  return match ? value.slice(0, match.index).trim() : value;
+}
+
 export function locationCandidates(text) {
   if (typeof text !== 'string') return [];
   const raw = text.trim();
@@ -151,6 +158,14 @@ export function locationCandidates(text) {
 
   for (const place of possessivePlaces) push(place);
   if (prepositional) push(prepositional[1]);
+  // The same phrase with the time window cut off, and with no capital
+  // letter required. "storm risk in beijing over the next 48 hours" only
+  // ever produced "beijing over the next 48 hours", which matches no place,
+  // and the capitalised run below cannot see a lowercase name at all, so the
+  // whole question was refused. Live traffic sends lowercase city names,
+  // confirmed 2026-09-05. Added after the untrimmed phrase, so anything that
+  // already resolved still resolves on its first candidate.
+  if (prepositional) push(stripWindowTail(prepositional[1]));
   if (capitalised) push(capitalised[1]);
   push(raw.replace(LEADING_NOISE, ''));
   push(raw);

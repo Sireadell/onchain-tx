@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isTruncatedFirstDay, fetchForecast } from './weatherForecast.js';
+import { isTruncatedFirstDay, fetchForecast, withQuestionFallback, WeatherLookupError, WeatherUpstreamError } from './weatherForecast.js';
 import { toOpenMeteoDaily } from './metnoFallback.js';
 
 // The first day of a forecast is dropped only when it is a remnant rather
@@ -55,4 +55,42 @@ test('weather: a forecast returns the number of days asked for', async () => {
   assert.equal(result.days.length, 3);
   // Whatever the window, no returned day may be a collapsed stub.
   assert.ok(result.days[0].temp_max >= result.days[0].temp_min);
+});
+
+
+// The dispatcher sliced the question and sent the fragment as `location`
+// while the intact question rode along in `query`. Seen live 2026-09-04 on
+// both storm alert and weather forecast, refused both times.
+test('withQuestionFallback: retries on the whole question when the sliced location names no place', async () => {
+  const seen = [];
+  const run = async (candidate) => {
+    seen.push(candidate);
+    if (candidate === 'Tokyo over the next') throw new WeatherLookupError("no location found matching 'Tokyo over the next'");
+    return { name: 'Tokyo, Japan' };
+  };
+  const result = await withQuestionFallback(run, 'Tokyo over the next', 'What is the storm risk in Tokyo over the next 24 hours?');
+  assert.equal(result.name, 'Tokyo, Japan');
+  assert.deepEqual(seen, ['Tokyo over the next', 'What is the storm risk in Tokyo over the next 24 hours?']);
+});
+
+test('withQuestionFallback: a location that resolves is never retried', async () => {
+  let calls = 0;
+  const result = await withQuestionFallback(async () => { calls += 1; return { name: 'London' }; }, 'London', 'Will it rain in London?');
+  assert.equal(result.name, 'London');
+  assert.equal(calls, 1);
+});
+
+test('withQuestionFallback: the original refusal survives when the question fails too', async () => {
+  const run = async () => { throw new WeatherLookupError("no location found matching 'nowhere at all'"); };
+  await assert.rejects(
+    () => withQuestionFallback(run, 'nowhere at all', 'Where is nowhere at all?'),
+    (err) => err instanceof WeatherLookupError && /nowhere at all/.test(err.message),
+  );
+});
+
+test('withQuestionFallback: an outage is not retried as if the input were bad', async () => {
+  let calls = 0;
+  const run = async () => { calls += 1; throw new WeatherUpstreamError('provider down'); };
+  await assert.rejects(() => withQuestionFallback(run, 'Tokyo over the next', 'storm risk in Tokyo?'), WeatherUpstreamError);
+  assert.equal(calls, 1);
 });

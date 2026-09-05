@@ -9,7 +9,7 @@
 // answers about rain, in London, tomorrow.
 
 import { Router } from 'express';
-import { fetchForecast, WeatherLookupError, WeatherUpstreamError } from '../lib/weatherForecast.js';
+import { fetchForecast, withQuestionFallback, WeatherLookupError, WeatherUpstreamError } from '../lib/weatherForecast.js';
 import { parseWhen, parseFocus } from '../lib/questionParse.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { questionMatchesIntent, WEATHER_CUES } from '../lib/intentGuard.js';
@@ -145,6 +145,13 @@ async function handleWeatherForecast(req, res) {
   }
 
   const text = String(rawLocation);
+  // Only when the caller chose `location` itself: the whole question, when a
+  // different one was sent alongside, to retry with if the location names no
+  // place. See withQuestionFallback in weatherForecast.js.
+  const fallbackText = params?.location != null
+    ? [params?.query, params?.q, params?.question]
+      .find((value) => typeof value === 'string' && value.trim() && value.trim() !== String(rawLocation).trim())
+    : null;
   if (!questionMatchesIntent(text, WEATHER_CUES)) {
     return respondUnusableInput(
       res,
@@ -165,7 +172,7 @@ async function handleWeatherForecast(req, res) {
     // 11pm, so the spent-day skip is suppressed for them and only applies
     // where no particular day was named.
     const keepToday = when?.label === 'today' || when?.label === 'tonight';
-    result = await fetchForecast(text, days, startDay, { keepToday });
+    result = await withQuestionFallback((candidate) => fetchForecast(candidate, days, startDay, { keepToday }), text, fallbackText);
   } catch (err) {
     if (err instanceof WeatherLookupError) {
       return respondUnusableInput(

@@ -248,6 +248,31 @@ async function fetchWithFallback(url, label, location, shape) {
 // tomorrow?"). Question forms are handled by trying the candidate places
 // questionParse pulls out, in order, and keeping the first that geocodes:
 // a wrong guess costs one extra geocode call rather than a failed answer.
+// Runs a lookup on the caller's `location`, and if that names no place,
+// retries once on the whole question when one was sent alongside it.
+//
+// The dispatcher sometimes slices the question badly and sends the fragment
+// as `location` while the intact question rides along in `query`. Seen live
+// 2026-09-04: location="Tokyo over the next" with query="What is the storm
+// risk in Tokyo over the next 24 hours?". The fragment matches no place, so
+// the request was refused while the answer sat unread in the next field.
+// The original error is what surfaces if the retry fails too, because it
+// describes the input the caller actually chose.
+export async function withQuestionFallback(run, text, fallbackText) {
+  try {
+    return await run(text);
+  } catch (err) {
+    if (err instanceof WeatherLookupError && fallbackText) {
+      try {
+        return await run(fallbackText);
+      } catch {
+        // Keep the original failure below.
+      }
+    }
+    throw err;
+  }
+}
+
 export async function resolveLocation(input) {
   // Coordinates win over any place name in the same sentence, and cost no
   // geocode call at all. Covers both a bare "lat,lon" and the long form

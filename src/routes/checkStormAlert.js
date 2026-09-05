@@ -9,7 +9,7 @@
 // Optional: hours (1-384, default 48, or read from the question).
 
 import { Router } from 'express';
-import { fetchStormRisk, WeatherLookupError, WeatherUpstreamError } from '../lib/weatherForecast.js';
+import { fetchStormRisk, withQuestionFallback, WeatherLookupError, WeatherUpstreamError } from '../lib/weatherForecast.js';
 import { parseWhen } from '../lib/questionParse.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { freeTextMatchesIntent, questionMatchesIntent, STORM_CUES } from '../lib/intentGuard.js';
@@ -54,6 +54,13 @@ async function handleStormAlert(req, res) {
   }
 
   const text = String(rawLocation);
+  // Only when the caller chose `location` itself: the whole question, when a
+  // different one was sent alongside, to retry with if the location names no
+  // place. See withQuestionFallback in weatherForecast.js.
+  const fallbackText = params?.location != null
+    ? [params?.query, params?.q, params?.question]
+      .find((value) => typeof value === 'string' && value.trim() && value.trim() !== String(rawLocation).trim())
+    : null;
   const explicitFreeText = params?.location == null;
   if (!(explicitFreeText ? freeTextMatchesIntent(text, STORM_CUES) : questionMatchesIntent(text, STORM_CUES))) {
     return respondUnusableInput(
@@ -67,7 +74,7 @@ async function handleStormAlert(req, res) {
 
   let result;
   try {
-    result = await fetchStormRisk(text, hours);
+    result = await withQuestionFallback((candidate) => fetchStormRisk(candidate, hours), text, fallbackText);
   } catch (err) {
     if (err instanceof WeatherLookupError) {
       return respondUnusableInput(
