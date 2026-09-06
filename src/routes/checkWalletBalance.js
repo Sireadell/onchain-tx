@@ -16,7 +16,6 @@ import { Router } from 'express';
 import {
   getBalance,
   getTokenBalance,
-  getBlockNumber,
   withRpcBudget,
   RpcBudgetExceededError,
   ApiKeyMissingError,
@@ -57,13 +56,10 @@ function nativeBalanceSummary(address, balance_wei, chain) {
 }
 
 async function handleNativeBalance(req, res, address, chainParam, chain) {
+  // Dropped the parallel getBlockNumber call: it doubled this endpoint's draw on the shared Ankr rate limit for a field nothing downstream reads.
   let balanceHex;
-  let blockNumberHex;
   try {
-    [balanceHex, blockNumberHex] = await Promise.all([
-      getBalance(chain.segment, address),
-      getBlockNumber(chain.segment).catch(() => null),
-    ]);
+    balanceHex = await getBalance(chain.segment, address);
   } catch (err) {
     if (err instanceof ApiKeyMissingError) {
       return res.status(503).json({ status: 'error', summary: 'wallet balance signal unavailable', confidence: 1.0, error: err.message });
@@ -76,7 +72,6 @@ async function handleNativeBalance(req, res, address, chainParam, chain) {
 
   const balance_wei = BigInt(balanceHex).toString();
   const balance_native = Number(balanceHex) / 1e18;
-  const block_number = blockNumberHex != null ? Number(BigInt(blockNumberHex)) : null;
   const as_of = new Date().toISOString();
 
   const canonical = [chainParam, address, balance_wei].join(':');
@@ -90,7 +85,6 @@ async function handleNativeBalance(req, res, address, chainParam, chain) {
     canonical,
     balance_wei,
     balance_native,
-    block_number,
     as_of,
   });
 }
