@@ -118,9 +118,18 @@ test('gas-price: terse unrelated q values are refused before any upstream call',
   assert.equal(called, false);
 });
 
+// Was written against Avalanche, which is now RPC-enabled (see chains.js,
+// re-checked live 2026-09-07). Optimism carries the case instead: a real
+// chain we recognize by name but cannot read, which must reach the
+// supported-chain guidance rather than the "not a gas question" refusal.
 test('gas-price: real unsupported chain wording reaches supported-chain guidance', async (t) => {
+  const previous = process.env.ANKR_ENABLE_OPTIMISM;
+  delete process.env.ANKR_ENABLE_OPTIMISM;
+  t.after(() => {
+    if (previous !== undefined) process.env.ANKR_ENABLE_OPTIMISM = previous;
+  });
   const base = startServer(t);
-  const res = await fetch(`${base}/gas-price?q=${encodeURIComponent('What does a transaction cost on Avalanche?')}`);
+  const res = await fetch(`${base}/gas-price?q=${encodeURIComponent('What does a transaction cost on Optimism?')}`);
   const body = await res.json();
   assert.equal(body.status, 'invalid_input');
   assert.match(body.summary, /current RPC provider|not available/i);
@@ -233,4 +242,53 @@ test('gas-price: omitted chain param falls back to default chain', async (t) => 
   const res = await fetch(`${base}/gas-price`);
   const body = await res.json();
   assert.equal(body.chain, 'eth');
+});
+
+// Regression for the same crash already fixed once in checkWalletBalance.js:
+// an RPC can return the bare string "0x" for an empty result, BigInt("0x")
+// throws "Cannot convert 0x to a BigInt", and thrown outside any try/catch
+// that dropped the response entirely. Telegraph's grader books a dropped
+// response as a timeout, not an error. See ../lib/safeBigInt.js.
+test('gas-price: a bare "0x" RPC result answers zero instead of dropping the request', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  resetRpcCache();
+  resetDefiLlamaCache();
+  mockFetchWithPrice(t, async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ jsonrpc: '2.0', id: 1, result: '0x' }),
+  }));
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/gas-price?chain=eth`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.gas_price_wei, '0');
+  assert.equal(body.gas_price_gwei, 0);
+  assert.equal(body.block_number, 0);
+});
+
+// Avalanche was disabled on the basis of an Ankr key that had no access to
+// it. Re-checked live 2026-09-07 with the production key: it answers. This
+// locks in that a gas question about Avalanche now reaches the RPC path and
+// gets a real number, instead of the "not available through the current RPC
+// provider" refusal it used to return.
+test('gas-price: Avalanche is served, not refused as unsupported', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  resetRpcCache();
+  resetDefiLlamaCache();
+  mockFetchWithPrice(t, async (url, options) => {
+    assert.ok(url.includes('rpc.ankr.com/avalanche/'), url);
+    const { method } = JSON.parse(options.body);
+    const result = method === 'eth_gasPrice' ? '0x5d21dba00' : '0x5a4c940';
+    return { ok: true, status: 200, json: async () => ({ jsonrpc: '2.0', id: 1, result }) };
+  }, 7.89);
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/gas-price?chain=avalanche`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.notEqual(body.status, 'invalid_input');
+  assert.equal(body.gas_price_wei, '25000000000');
+  assert.equal(body.gas_price_gwei, 25);
 });

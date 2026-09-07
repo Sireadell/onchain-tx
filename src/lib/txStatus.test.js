@@ -123,3 +123,19 @@ test('current block behind the transaction block (negative depth) — capped at 
   assert.equal(r.status, 'confirmed');
   assert.equal(r.confidence, 0.8);
 });
+
+// Regression for the BigInt("0x") crash: an RPC can return "0x" for an empty
+// value field, and this evaluator is a pure function called from a route
+// with no try/catch on the path, so the throw dropped the response instead
+// of answering. See ./safeBigInt.js.
+test('a bare "0x" value field is read as zero instead of throwing', () => {
+  const r = evaluateTransaction(txAtDepth('0xf0', deepBlock, { tx: { value: '0x' } }));
+  assert.equal(r.value_wei, '0');
+  assert.equal(r.status, 'confirmed');
+});
+
+test('a bare "0x" current block number does not throw', () => {
+  const r = evaluateTransaction(txAtDepth('0xf0', '0x'));
+  assert.equal(r.value_wei, '0');
+  assert.ok(typeof r.status === 'string');
+});

@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "id": "A_bare_label_what_sentinel_submits",
+      "question": "How likely is address 0x28C6c06298d514Db089934071355E5743bf21d60 to be involved in fraud?",
+      "ground_truth": "LOW: this address is a publicly identified centralized-exchange wallet, not an unattributed private address, so exchange-scale volume is expected behaviour rather than a fraud signal.",
+      "good_answer": "LOW",
+      "bad_answer": "zzz"
+    },
+    {
+      "id": "B_summary_sentence_what_txlens_submits",
+      "question": "How likely is address 0x28C6c06298d514Db089934071355E5743bf21d60 to be involved in fraud?",
+      "ground_truth": "LOW: this address is a publicly identified centralized-exchange wallet, not an unattributed private address, so exchange-scale volume is expected behaviour rather than a fraud signal.",
+      "good_answer": "LOW: this address is a publicly identified centralized-exchange wallet, not an unattributed private address, so exchange-scale volume is expected behaviour rather than a fraud signal.",
+      "bad_answer": "zzz"
+    },
+    {
+      "id": "C_bare_label_WRONG_class",
+      "question": "How likely is address 0x28C6c06298d514Db089934071355E5743bf21d60 to be involved in fraud?",
+      "ground_truth": "HIGH: this address shows strong indicators of fraudulent activity.",
+      "good_answer": "LOW",
+      "bad_answer": "zzz"
+    },
+    {
+      "id": "D_sentence_vs_differently_worded_gt",
+      "question": "How likely is address 0x28C6c06298d514Db089934071355E5743bf21d60 to be involved in fraud?",
+      "ground_truth": "This wallet belongs to a known exchange (Binance). Fraud risk is low; large transfer volume is normal for exchange hot wallets.",
+      "good_answer": "LOW: this address is a publicly identified centralized-exchange wallet, not an unattributed private address, so exchange-scale volume is expected behaviour rather than a fraud signal.",
+      "bad_answer": "zzz"
+    },
+    {
+      "id": "E_bare_label_vs_differently_worded_gt",
+      "question": "How likely is address 0x28C6c06298d514Db089934071355E5743bf21d60 to be involved in fraud?",
+      "ground_truth": "This wallet belongs to a known exchange (Binance). Fraud risk is low; large transfer volume is normal for exchange hot wallets.",
+      "good_answer": "LOW",
+      "bad_answer": "zzz"
+    }
+  ]
+}

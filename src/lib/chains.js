@@ -42,12 +42,16 @@ export const CHAINS = {
   arbitrum: { key: 'arbitrum', segment: 'arbitrum', label: 'Arbitrum', nativeSymbol: 'ETH', blockscoutHost: 'arbitrum.blockscout.com', nativeCoingeckoId: 'ethereum' },
   optimism: { key: 'optimism', segment: 'optimism', label: 'Optimism', nativeSymbol: 'ETH', blockscoutHost: 'explorer.optimism.io', nativeCoingeckoId: 'ethereum' },
   polygon: { key: 'polygon', segment: 'polygon', label: 'Polygon', nativeSymbol: 'POL', blockscoutHost: 'polygon.blockscout.com', nativeCoingeckoId: 'polygon-ecosystem-token' },
-  // Real chain, no Ankr RPC access — `segment: null` keeps it out of
-  // resolveRpcChainLoose (same gating resolveRpcChainLoose already does for
-  // optimism without a key) while resolveChainLoose still recognizes the
-  // name, so a caller asking about it gets "not available through the
-  // current RPC provider" instead of a silent, wrong answer for Ethereum.
-  avalanche: { key: 'avalanche', segment: null, label: 'Avalanche', nativeSymbol: 'AVAX', blockscoutHost: null, nativeCoingeckoId: 'avalanche-2' },
+  // Was `segment: null` on the basis that the Ankr key had no Avalanche
+  // access. Re-checked live 2026-09-07 with the production key and that is
+  // no longer true: rpc.ankr.com/avalanche answered eth_blockNumber,
+  // eth_gasPrice and a real eth_getBalance, and coins.llama.fi resolves
+  // `avalanche-2` for the AVAX price the gas route needs. So RPC-backed
+  // routes (transactions, balances, gas) are enabled here.
+  // `blockscoutHost` stays null on purpose: Avalanche has no instance on
+  // the shared blockscout.com domain (avalanche.blockscout.com 404s), so
+  // the Blockscout-backed holder count genuinely has no data source.
+  avalanche: { key: 'avalanche', segment: 'avalanche', label: 'Avalanche', nativeSymbol: 'AVAX', blockscoutHost: null, nativeCoingeckoId: 'avalanche-2' },
 };
 
 export const DEFAULT_CHAIN = process.env.CHAIN || 'eth';

@@ -117,6 +117,48 @@ function stripWindowTail(value) {
   return match ? value.slice(0, match.index).trim() : value;
 }
 
+// Country abbreviations the geocoder does not understand. "London, UK"
+// matches nothing there, and the bare "UK" left over as the next candidate
+// matches a village called Uk in Irkutsk Oblast, Russia. That is what we
+// answered a live storm alert with on 2026-09-07: confidently, and about
+// the wrong hemisphere. Spelling the country out makes the full string
+// resolve on its own, before any single-token candidate is reached.
+const COUNTRY_ABBREVIATIONS = new Map([
+  ['uk', 'United Kingdom'], ['u.k.', 'United Kingdom'], ['gb', 'United Kingdom'],
+  ['us', 'United States'], ['u.s.', 'United States'], ['usa', 'United States'],
+  ['u.s.a.', 'United States'], ['uae', 'United Arab Emirates'],
+  ['nz', 'New Zealand'], ['nl', 'Netherlands'], ['de', 'Germany'],
+  ['fr', 'France'], ['es', 'Spain'], ['it', 'Italy'], ['jp', 'Japan'],
+  ['cn', 'China'], ['kr', 'South Korea'], ['za', 'South Africa'],
+  ['ca', 'Canada'], ['au', 'Australia'], ['ie', 'Ireland'], ['ru', 'Russia'],
+  ['br', 'Brazil'], ['mx', 'Mexico'], ['in', 'India'], ['ng', 'Nigeria'],
+]);
+
+// Rewrites a trailing country abbreviation to its full name, so
+// "London, UK" becomes "London, United Kingdom" and a bare "UK" becomes
+// "United Kingdom". Returns null when there is nothing to rewrite, so the
+// caller can skip pushing a duplicate candidate.
+export function expandCountryAbbreviation(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  const parts = text.split(',');
+  const tail = parts[parts.length - 1].trim().toLowerCase();
+  const full = COUNTRY_ABBREVIATIONS.get(tail);
+  if (!full || full.toLowerCase() === tail) return null;
+  return [...parts.slice(0, -1).map((part) => part.trim()), full].filter(Boolean).join(', ');
+}
+
+// The part before the first comma, which in a "City, Country" string is the
+// more specific place and the one worth trying on its own. Returns null when
+// there is no comma or the leading part is too short to be a place name.
+function leadingCommaSegment(value) {
+  const text = String(value ?? '');
+  const index = text.indexOf(',');
+  if (index < 0) return null;
+  const head = text.slice(0, index).trim();
+  return head.length >= 2 ? head : null;
+}
+
 export function locationCandidates(text) {
   if (typeof text !== 'string') return [];
   const raw = text.trim();
@@ -154,7 +196,21 @@ export function locationCandidates(text) {
   // the string itself leads unless it is plainly a sentence — in which case
   // the extracted place leads instead and the sentence is the fallback.
   const looksLikeQuestion = /[?]/.test(raw) || raw.split(/\s+/).length > 3 || LEADING_NOISE.test(raw);
+  const expanded = looksLikeQuestion ? null : expandCountryAbbreviation(raw);
+  // A bare abbreviation is only ever meant as the country, so the spelled
+  // out name leads. Left as-is, "UK" geocodes to a village in Siberia.
+  if (expanded && !raw.includes(',')) push(expanded);
   if (!looksLikeQuestion) push(raw);
+
+  // Both of these come before the capitalised run below, because on a
+  // "City, ABBREV" string that run yields the bare abbreviation and the
+  // geocoder will happily match it to some unrelated hamlet. Trying the
+  // spelled-out country and then the city on its own settles it first.
+  if (expanded) push(expanded);
+  if (!looksLikeQuestion) {
+    const head = leadingCommaSegment(raw);
+    if (head) push(head);
+  }
 
   for (const place of possessivePlaces) push(place);
   if (prepositional) push(prepositional[1]);
@@ -166,6 +222,12 @@ export function locationCandidates(text) {
   // confirmed 2026-09-05. Added after the untrimmed phrase, so anything that
   // already resolved still resolves on its first candidate.
   if (prepositional) push(stripWindowTail(prepositional[1]));
+  // The same cut applied to the whole string, for the case where the place
+  // leads and the window follows with no preposition in front of the place:
+  // "beijing over the next 48 hours". The prepositional match above latches
+  // onto the "over" and captures only "the next 48 hours", so without this
+  // the place name never appears as a candidate at all.
+  push(stripWindowTail(raw));
   if (capitalised) push(capitalised[1]);
   push(raw.replace(LEADING_NOISE, ''));
   push(raw);

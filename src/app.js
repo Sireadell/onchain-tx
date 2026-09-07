@@ -144,6 +144,55 @@ const answerFieldMiddleware = (req, res, next) => {
   next();
 };
 
+// Express 4 only sends an error to the four-argument error handler when a
+// handler throws synchronously. Every route here is async, and a rejected
+// promise from an async handler is not passed on at all: the request just
+// hangs until the caller gives up. So the error middleware at the bottom of
+// buildApp() would never see the exact class of failure it exists for
+// unless rejections are forwarded to it explicitly. This walks a router's
+// handlers once, at startup, and wraps each one so a returned promise
+// rejects into next(err). Same effect as the express-async-errors package,
+// without adding a dependency, and it runs before any request is served so
+// there's no per-request cost.
+export function forwardAsyncErrors(router) {
+  const stack = router?.stack;
+  if (!Array.isArray(stack)) return router;
+  for (const layer of stack) {
+    const handlers = layer.route ? layer.route.stack : [layer];
+    for (const entry of handlers) {
+      const handle = entry.handle;
+      if (typeof handle !== 'function' || handle.length >= 4 || handle.__asyncWrapped) continue;
+      const wrapped = function (req, res, next) {
+        try {
+          const out = handle.call(this, req, res, next);
+          if (out && typeof out.catch === 'function') out.catch(next);
+          return out;
+        } catch (err) {
+          return next(err);
+        }
+      };
+      wrapped.__asyncWrapped = true;
+      entry.handle = wrapped;
+    }
+    if (layer.handle?.stack) forwardAsyncErrors(layer.handle);
+  }
+  return router;
+}
+
+// Exported so a test can exercise the real handler, not a copy of it.
+// eslint-disable-next-line no-unused-vars -- Express only treats a
+// four-argument function as an error handler, so `next` has to stay.
+export function errorHandler(err, req, res, next) {
+  console.error(`unhandled route error: ${req.method} ${req.originalUrl}`, err);
+  if (res.headersSent) return;
+  res.status(500).json({
+    status: 'error',
+    summary: 'This request could not be answered because of an unexpected internal error.',
+    confidence: 0,
+    error: err?.message ?? String(err),
+  });
+}
+
 export function buildApp() {
   const app = express();
   // Same reasoning as Miner #1: exactly one proxy hop on Render, `1` not
@@ -160,23 +209,34 @@ export function buildApp() {
   // passes back out through the same chain a route's own answer does.
   app.use(refusalFallbackMiddleware);
 
-  app.use('/health', healthRouter);
-  app.use('/check-tx', checkTxRateLimit, misrouteHandoffMiddleware, checkTxRouter);
-  app.use('/gas-price', checkGasPriceRateLimit, checkGasPriceRouter);
-  app.use('/wallet-balance', checkWalletBalanceRateLimit, misrouteHandoffMiddleware, checkWalletBalanceRouter);
-  app.use('/token-holders', checkTokenHoldersRateLimit, misrouteHandoffMiddleware, checkTokenHoldersRouter);
-  app.use('/tvl', checkTvlRateLimit, checkTvlRouter);
-  app.use('/crypto-price', checkCryptoPriceRateLimit, misrouteHandoffMiddleware, checkCryptoPriceRouter);
-  app.use('/stock-price', checkStockPriceRateLimit, misrouteHandoffMiddleware, checkStockPriceRouter);
-  app.use('/ssl-check', checkSslVerificationRateLimit, misrouteHandoffMiddleware, checkSslVerificationRouter);
-  app.use('/weather-forecast', checkWeatherForecastRateLimit, checkWeatherForecastRouter);
-  app.use('/storm-alert', checkStormAlertRateLimit, checkStormAlertRouter);
-  app.use('/ip-geolocate', checkIpGeolocationRateLimit, checkIpGeolocationRouter);
-  app.use('/academic-search', checkAcademicSearchRateLimit, checkAcademicSearchRouter);
-  app.use('/web-search', checkWebSearchRateLimit, checkWebSearchRouter);
+  app.use('/health', forwardAsyncErrors(healthRouter));
+  app.use('/check-tx', checkTxRateLimit, misrouteHandoffMiddleware, forwardAsyncErrors(checkTxRouter));
+  app.use('/gas-price', checkGasPriceRateLimit, forwardAsyncErrors(checkGasPriceRouter));
+  app.use('/wallet-balance', checkWalletBalanceRateLimit, misrouteHandoffMiddleware, forwardAsyncErrors(checkWalletBalanceRouter));
+  app.use('/token-holders', checkTokenHoldersRateLimit, misrouteHandoffMiddleware, forwardAsyncErrors(checkTokenHoldersRouter));
+  app.use('/tvl', checkTvlRateLimit, forwardAsyncErrors(checkTvlRouter));
+  app.use('/crypto-price', checkCryptoPriceRateLimit, misrouteHandoffMiddleware, forwardAsyncErrors(checkCryptoPriceRouter));
+  app.use('/stock-price', checkStockPriceRateLimit, misrouteHandoffMiddleware, forwardAsyncErrors(checkStockPriceRouter));
+  app.use('/ssl-check', checkSslVerificationRateLimit, misrouteHandoffMiddleware, forwardAsyncErrors(checkSslVerificationRouter));
+  app.use('/weather-forecast', checkWeatherForecastRateLimit, forwardAsyncErrors(checkWeatherForecastRouter));
+  app.use('/storm-alert', checkStormAlertRateLimit, forwardAsyncErrors(checkStormAlertRouter));
+  app.use('/ip-geolocate', checkIpGeolocationRateLimit, forwardAsyncErrors(checkIpGeolocationRouter));
+  app.use('/academic-search', checkAcademicSearchRateLimit, forwardAsyncErrors(checkAcademicSearchRouter));
+  app.use('/web-search', checkWebSearchRateLimit, forwardAsyncErrors(checkWebSearchRouter));
   app.use('/fraud-query', sentinelFraudRateLimit, misrouteHandoffMiddleware);
   app.use('/assess-wallet', sentinelFraudRateLimit, misrouteHandoffMiddleware);
-  app.use('/', sentinelFraudRouter);
+  app.use('/', forwardAsyncErrors(sentinelFraudRouter));
+
+  // Last middleware in the chain, deliberately. Express only routes an error
+  // to a four-argument handler, and until now there was none anywhere in the
+  // app, so any exception a route threw left the request hanging with no
+  // response ever sent. Telegraph's grader books that as a timeout rather
+  // than an error, which hides the cause completely: the BigInt("0x") crash
+  // took three graded questions down before anyone could see why. Answer
+  // with a real JSON error instead, in the same shape every route uses, so a
+  // future uncaught bug costs one visible failed answer and not a silent
+  // one.
+  app.use(errorHandler);
 
   return app;
 }

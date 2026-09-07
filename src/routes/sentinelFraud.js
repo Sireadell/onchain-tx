@@ -21,6 +21,34 @@ function timeoutMs() {
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_TIMEOUT_MS;
 }
 
+// Sentinel accepts exactly two values for its `chain` parameter, `eth` and
+// `base`, and answers anything else with a 400. Render logs showed 97 of 99
+// recent requests failing that way: callers send the chain under a longer or
+// differently spelled name ("ethereum", "polygon") and we forwarded it
+// untouched. A request with no chain at all is accepted and defaults to eth,
+// so an unrecognized value is dropped rather than passed on. No chain beats
+// a rejected chain. Known spellings of the two supported chains are mapped
+// instead of dropped so they keep answering for the chain that was asked for.
+const SENTINEL_CHAINS = new Set(['eth', 'base']);
+const SENTINEL_CHAIN_ALIASES = {
+  ethereum: 'eth',
+  'eth-mainnet': 'eth',
+  'ethereum-mainnet': 'eth',
+  mainnet: 'eth',
+  'base-mainnet': 'base',
+  'base mainnet': 'base',
+  basechain: 'base',
+};
+
+// Returns 'eth', 'base', or null when the value is neither and should be
+// left off the outgoing request entirely.
+export function normalizeSentinelChain(value) {
+  if (typeof value !== 'string') return null;
+  const key = value.trim().toLowerCase();
+  if (SENTINEL_CHAINS.has(key)) return key;
+  return SENTINEL_CHAIN_ALIASES[key] ?? null;
+}
+
 function respondSentinelUnavailable(res, detail) {
   return res.json({
     status: 'inconclusive',
@@ -37,7 +65,13 @@ async function proxySentinel(req, res, path) {
   try {
     const target = new URL(`${sentinelBaseUrl()}${path}`);
     for (const [key, value] of Object.entries(req.query ?? {})) {
-      if (typeof value === 'string') target.searchParams.set(key, value);
+      if (typeof value !== 'string') continue;
+      if (key.toLowerCase() === 'chain') {
+        const chain = normalizeSentinelChain(value);
+        if (chain) target.searchParams.set(key, chain);
+        continue;
+      }
+      target.searchParams.set(key, value);
     }
 
     // Sentinel only accepts its free-text field under the literal key
@@ -47,6 +81,11 @@ async function proxySentinel(req, res, path) {
     // forwarding req.body unchanged threw that text away, so Sentinel saw
     // no `query` and rejected a perfectly good question as unusable input.
     const outgoingBody = { ...(req.body ?? {}) };
+    if ('chain' in outgoingBody) {
+      const chain = normalizeSentinelChain(outgoingBody.chain);
+      if (chain) outgoingBody.chain = chain;
+      else delete outgoingBody.chain;
+    }
     if (req.method === 'POST' && typeof outgoingBody.query !== 'string') {
       const text = freeTextParam(outgoingBody);
       if (text) outgoingBody.query = text;

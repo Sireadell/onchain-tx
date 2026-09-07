@@ -52,3 +52,42 @@ test('the graded answer is a full sentence, not a bare status word', async (t) =
   assert.notEqual(body.answer, body.status);
   assert.ok(body.answer.length > 40, 'the graded answer must carry real content');
 });
+
+// The app had no error-handling middleware at all, so an exception in any
+// route left the request hanging with no response ever sent, and Telegraph's
+// grader recorded that as a timeout rather than an error. These cover both
+// halves of the fix: the handler itself, and the forwarding that gets an
+// async route's rejection to it (Express 4 does not do that on its own).
+test('an uncaught error in a route answers with a JSON error instead of hanging', async (t) => {
+  const { errorHandler, forwardAsyncErrors } = await import('./app.js');
+  const router = express.Router();
+  router.get('/sync-boom', () => {
+    throw new Error('sync boom');
+  });
+  router.get('/async-boom', async () => {
+    await new Promise((r) => setTimeout(r, 1));
+    throw new Error('async boom');
+  });
+
+  const app = express();
+  app.use('/', forwardAsyncErrors(router));
+  app.use(errorHandler);
+  const base = startServer(t, app);
+
+  for (const [path, message] of [['/sync-boom', 'sync boom'], ['/async-boom', 'async boom']]) {
+    const res = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(5_000) });
+    assert.equal(res.status, 500, `${path} should answer, not hang`);
+    const body = await res.json();
+    assert.equal(body.status, 'error');
+    assert.ok(body.summary);
+    assert.equal(body.error, message);
+  }
+});
+
+test('the real app registers the error handler last', async () => {
+  const app = buildApp();
+  const stack = app._router.stack;
+  const last = stack[stack.length - 1];
+  assert.equal(last.handle.length, 4, 'last layer must be the four-argument error handler');
+  assert.equal(stack.filter((l) => l.handle.length === 4).length, 1);
+});

@@ -236,3 +236,37 @@ test('Optimism is refused before RPC until the current Ankr key supports it', as
   assert.match(body.summary, /current RPC provider/);
   assert.equal(called, false);
 });
+
+// Regression for the BigInt("0x") crash that already took down
+// WALLET_BALANCE_CHECK: an RPC returning the bare string "0x" for an empty
+// value field reached BigInt() unguarded on this path too, and a throw here
+// dropped the response instead of answering it. See ../lib/safeBigInt.js.
+test('a bare "0x" transaction value answers zero instead of dropping the request', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  resetRpcCache();
+  mockFetch(t, async (url, options) => {
+    const { method } = JSON.parse(options.body);
+    const result = method === 'eth_getTransactionByHash'
+      ? {
+          hash: `0x${'6'.repeat(64)}`,
+          from: `0x${'a'.repeat(40)}`,
+          to: `0x${'b'.repeat(40)}`,
+          value: '0x',
+          input: '0x',
+          blockNumber: '0x10',
+        }
+      : method === 'eth_getTransactionReceipt'
+        ? { blockHash: `0x${'c'.repeat(64)}`, status: '0x1' }
+        : '0x';
+    return { ok: true, status: 200, json: async () => ({ jsonrpc: '2.0', id: 1, result }) };
+  });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/check-tx?chain=eth&tx_hash=0x${'6'.repeat(64)}`, {
+    signal: AbortSignal.timeout(10_000),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.value_wei, '0');
+  assert.ok(body.summary.includes('sent 0 ETH'), body.summary);
+});

@@ -1,3 +1,5 @@
+import { safeBigIntFromHex } from './safeBigInt.js';
+
 // Turns (tx, receipt, currentBlockNumber) into the three signal_mapping
 // fields (status/summary/confidence) plus the structured fields, per
 // BUILD_SPEC.md Confidence Semantics. Pure function, no I/O — kept separate
@@ -6,9 +8,11 @@
 
 const CONFIRMATION_DEPTH = Number(process.env.CONFIRMATION_DEPTH) || 12;
 
-function hexToBigInt(hex) {
-  return BigInt(hex);
-}
+// Guarded conversion: an RPC can return "0x" for a field that's simply
+// empty, and a bare BigInt("0x") throws from inside this pure function, out
+// through the route, with no try/catch anywhere on the path. See
+// ./safeBigInt.js.
+const hexToBigInt = safeBigIntFromHex;
 
 export function evaluateTransaction({ tx, receipt, currentBlockNumberHex }) {
   if (!tx) {

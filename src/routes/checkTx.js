@@ -17,6 +17,7 @@ import { lookupMethodSignature } from '../lib/fourByte.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 import { extractTxHash, freeTextParam } from '../lib/entityExtract.js';
 import { amountToDecimalString } from '../lib/formatAmount.js';
+import { safeBigIntFromWei } from '../lib/safeBigInt.js';
 
 const router = Router();
 
@@ -116,7 +117,7 @@ export async function handleCheckTx(req, res) {
     // the number, so "3.1337e-14" never matches the ground truth's
     // "0.000000000000031337" and the whole answer scores as if the value
     // were wrong. See formatAmount.js.
-    const value_eth_str = result.value_wei === null ? String(value_eth) : amountToDecimalString(result.value_wei, 18);
+    const value_eth_str = result.value_wei === null ? String(value_eth) : amountToDecimalString(safeBigIntFromWei(result.value_wei), 18);
     summary = `${chain.label} transaction ${txHash} sent ${value_eth_str} ${chain.nativeSymbol} from ${result.from} to ${result.to}${methodText} in block ${result.block_number}; status ${result.receipt_status ?? result.status}.`;
   }
 

@@ -25,26 +25,11 @@ import { DEFAULT_CHAIN, resolveChainLoose, resolveRpcChainLoose, rpcChainNames }
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 import { extractAddress, freeTextParam } from '../lib/entityExtract.js';
 import { amountToDecimalString, amountToRoundedString } from '../lib/formatAmount.js';
+import { safeBigIntFromHex } from '../lib/safeBigInt.js';
 
 const router = Router();
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
-
-// An RPC provider can return the bare string "0x" for an empty result (an
-// address with no code, a call against a token with no balance recorded at
-// that block) — valid, and it means zero, but BigInt("0x") throws
-// SyntaxError: "Cannot convert 0x to a BigInt". That threw past both call
-// sites below with no try/catch around it, an unhandled promise rejection
-// that dropped the response entirely rather than sending an error — the
-// live cause of three straight epoch-graded timeouts on WALLET_BALANCE_CHECK
-// (Render logs, 2026-09-07T00:11:05Z: "Cannot convert 0x to a BigInt" at
-// checkWalletBalance.js:106, no response ever logged for that request).
-function safeBigIntFromHex(hex) {
-  if (hex == null) return 0n;
-  const trimmed = String(hex).trim();
-  if (!/^0x[0-9a-fA-F]+$/.test(trimmed)) return 0n;
-  return BigInt(trimmed);
-}
 
 // How many decimals to lead with. A ground truth for a wallet balance is
 // written for a human ("128902.070586 ETH"), and the champion CRYPTO_PRICE

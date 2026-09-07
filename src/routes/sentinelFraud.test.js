@@ -264,3 +264,92 @@ test('Sentinel empty 204 becomes inconclusive with zero confidence', async () =>
     });
   } finally { global.fetch = originalFetch; }
 });
+
+// Regression for a live bug (Render logs, 2026-09-07): 97 of 99 recent
+// requests came back 400 because whatever chain name the caller sent was
+// forwarded to Sentinel untouched, and Sentinel accepts only "eth" or
+// "base". A request with no chain at all is accepted and defaults to eth,
+// so an unrecognized value is now dropped rather than passed on.
+test('assess-wallet drops a chain Sentinel does not accept instead of forwarding it', async () => {
+  const originalFetch = global.fetch;
+  let seenUrl = null;
+  global.fetch = async (url) => {
+    seenUrl = url.toString();
+    return new Response(JSON.stringify({ label: 'LOW_RISK', reason: 'Nothing found.' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+
+  try {
+    await withServer(async (base) => {
+      const wallet = `0x${'a'.repeat(40)}`;
+      const response = await originalFetch(`${base}/assess-wallet?wallet=${wallet}&chain=polygon`);
+      assert.equal(response.status, 200);
+      assert.equal(new URL(seenUrl).searchParams.has('chain'), false);
+      assert.equal(new URL(seenUrl).searchParams.get('wallet'), wallet);
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('assess-wallet maps a known chain spelling instead of dropping it', async () => {
+  const originalFetch = global.fetch;
+  let seenUrl = null;
+  global.fetch = async (url) => {
+    seenUrl = url.toString();
+    return new Response(JSON.stringify({ label: 'LOW_RISK', reason: 'Nothing found.' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+
+  try {
+    await withServer(async (base) => {
+      const wallet = `0x${'a'.repeat(40)}`;
+      await originalFetch(`${base}/assess-wallet?wallet=${wallet}&chain=Ethereum`);
+      assert.equal(new URL(seenUrl).searchParams.get('chain'), 'eth');
+
+      await originalFetch(`${base}/assess-wallet?wallet=${wallet}&chain=base-mainnet`);
+      assert.equal(new URL(seenUrl).searchParams.get('chain'), 'base');
+
+      await originalFetch(`${base}/assess-wallet?wallet=${wallet}&chain=base`);
+      assert.equal(new URL(seenUrl).searchParams.get('chain'), 'base');
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('fraud-query normalizes the chain field in a POST body', async () => {
+  const originalFetch = global.fetch;
+  let seenBody = null;
+  global.fetch = async (url, options) => {
+    seenBody = JSON.parse(options.body);
+    return new Response(JSON.stringify({ label: 'ANSWERED', reason: 'Yes.' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+
+  try {
+    await withServer(async (base) => {
+      await originalFetch(`${base}/fraud-query`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ query: 'Is this address risky?', chain: 'ethereum' }),
+      });
+      assert.equal(seenBody.chain, 'eth');
+
+      await originalFetch(`${base}/fraud-query`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ query: 'Is this address risky?', chain: 'polygon' }),
+      });
+      assert.equal('chain' in seenBody, false);
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});

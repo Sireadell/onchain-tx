@@ -20,6 +20,7 @@ import { DEFAULT_CHAIN, resolveChainLoose, resolveRpcChainLoose, rpcChainNames }
 import { freeTextParam } from '../lib/entityExtract.js';
 import { freeTextMatchesIntent, GAS_CUES } from '../lib/intentGuard.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
+import { safeBigIntFromHex } from '../lib/safeBigInt.js';
 
 const STANDARD_TRANSFER_GAS_UNITS = 21_000;
 
@@ -69,9 +70,12 @@ async function handleGasPrice(req, res) {
     return res.status(502).json({ status: 'error', summary: 'upstream RPC call failed', confidence: 0, error: err.message });
   }
 
-  const gas_price_wei = BigInt(gasPriceHex).toString();
-  const gas_price_gwei = Number(gasPriceHex) / 1e9;
-  const block_number = blockNumberHex != null ? Number(BigInt(blockNumberHex)) : null;
+  // Guarded: an RPC can answer "0x" here and BigInt("0x") throws, which
+  // outside a try/catch drops the response instead of sending one. See
+  // ../lib/safeBigInt.js.
+  const gas_price_wei = safeBigIntFromHex(gasPriceHex).toString();
+  const gas_price_gwei = Number(safeBigIntFromHex(gasPriceHex)) / 1e9;
+  const block_number = blockNumberHex != null ? Number(safeBigIntFromHex(blockNumberHex)) : null;
   const as_of = new Date().toISOString();
 
   let fee_usd = null;
