@@ -82,6 +82,41 @@ test('wallet-balance: successful read returns wei/native and canonical', async (
   assert.equal(body.canonical, `eth:${ADDRESS}:1000000000000000000`);
 });
 
+// Regression for a live bug found in Render logs 2026-09-07: an RPC "0x"
+// result (valid, means zero) reached BigInt(balanceHex) with no guard,
+// threw "Cannot convert 0x to a BigInt" as an unhandled rejection, and the
+// request was dropped with no response at all — which is exactly what
+// Telegraph's epoch grader saw three epochs running as a timeout
+// ("context deadline exceeded") on an endpoint that answers instantly for
+// every other input. A dropped response, not a slow one, was the cause.
+test('wallet-balance: a bare "0x" native balance answers zero instead of dropping the request', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  resetRpcCache();
+  mockFetch(t, async () => ({ ok: true, status: 200, json: async () => ({ jsonrpc: '2.0', id: 1, result: '0x' }) }));
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/wallet-balance?chain=eth&address=${ADDRESS}`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.balance_wei, '0');
+  assert.equal(body.balance_native, 0);
+});
+
+test('wallet-balance: a bare "0x" token balance answers zero instead of dropping the request', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  resetRpcCache();
+  resetBlockscoutCache();
+  mockFetch(t, async () => ({ ok: true, status: 200, json: async () => ({ jsonrpc: '2.0', id: 1, result: '0x' }) }));
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/wallet-balance?chain=eth&address=${ADDRESS}&token=${ADDRESS}`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.balance_wei, '0');
+});
+
 const TOKEN = '0x' + 'b'.repeat(40);
 
 test('wallet-balance: malformed token param is answered with guidance', async (t) => {

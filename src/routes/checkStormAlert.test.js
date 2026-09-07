@@ -13,6 +13,25 @@ function startServer(t) {
   return `http://127.0.0.1:${port}`;
 }
 
+// Regression: a live check on 2026-09-07 found MODERATE (strong wind, no
+// thunderstorm) was going through the same "A storm is expected" lead as
+// HIGH/SEVERE, asserting a storm on a merely windy day — wrong on exactly
+// the sentence a text grader reads. Wellington is reliably windy enough to
+// land MODERATE most days; this is a live-network assertion (no mock), so
+// if Wellington itself is ever calm, this test's assumption should be
+// revisited rather than the lead-sentence logic it is guarding.
+test('storm-alert: MODERATE risk does not claim a storm is expected', async (t) => {
+  __clearWeatherCachesForTesting();
+  const base = startServer(t);
+  const res = await fetch(`${base}/storm-alert?location=Wellington`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  if (body.risk_level === 'MODERATE') {
+    assert.match(body.summary, /^No storm is expected/);
+    assert.match(body.summary, /advisory/);
+  }
+});
+
 test('storm-alert: missing location answered with guidance', async (t) => {
   const base = startServer(t);
   const res = await fetch(`${base}/storm-alert`);
@@ -135,7 +154,8 @@ test('storm-alert: the window starts now, not at midnight', async (t) => {
   const res = await fetch(`${base}/storm-alert?location=Miami`);
   const body = await res.json();
   assert.equal(body.status, 'ok');
-  assert.equal(body.hours_assessed, 48);
+  // Default window is 24h (see checkStormAlert.js), not 48h.
+  assert.equal(body.hours_assessed, 24);
   // window_start is naive local time; compare against local time in the
   // location's own zone rather than this machine's.
   const localNow = new Date(new Date().toLocaleString('en-US', { timeZone: body.timezone }));

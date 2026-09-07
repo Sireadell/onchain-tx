@@ -447,7 +447,7 @@ export async function fetchStormRisk(input, hours = 48) {
   const params = new URLSearchParams({
     latitude: location.latitude,
     longitude: location.longitude,
-    hourly: 'windgusts_10m,windspeed_10m,winddirection_10m,weathercode,precipitation',
+    hourly: 'windgusts_10m,windspeed_10m,winddirection_10m,weathercode,precipitation,snowfall',
     // One day more than the window needs: the window starts at the current
     // hour, not at midnight, so it runs past the end of the last whole day.
     forecast_days: String(Math.min(Math.ceil(span / 24) + 1, 16)),
@@ -474,6 +474,7 @@ export async function fetchStormRisk(input, hours = 48) {
   const speeds = at('windspeed_10m');
   const codes = at('weathercode');
   const precip = at('precipitation');
+  const snowfall = at('snowfall');
   if (gusts.length === 0) throw new WeatherLookupError(`no forecast hours available for '${input}'`);
 
   const peakGustKmh = Math.max(...gusts);
@@ -529,6 +530,10 @@ export async function fetchStormRisk(input, hours = 48) {
     // Reporting the sum in the graded summary line cost real score; kept
     // here too since it's genuinely useful and not misleading on its own.
     peak_precipitation_mm: precip.length ? Number(Math.max(...precip.map((v) => v ?? 0)).toFixed(1)) : null,
+    // Absent (not zero) on the MET Norway fallback, which does not publish
+    // snowfall outside the Nordics — null distinguishes "not measured" from
+    // "measured zero" the same way total_precipitation_mm already does.
+    total_snowfall_cm: snowfall.length ? Number(snowfall.reduce((a, b) => a + (b ?? 0), 0).toFixed(1)) : null,
     beaufort_force: force,
     thunderstorm_hours: thunderstormHours,
     severe_hail_hours: severeHailHours,

@@ -30,6 +30,22 @@ const router = Router();
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
+// An RPC provider can return the bare string "0x" for an empty result (an
+// address with no code, a call against a token with no balance recorded at
+// that block) — valid, and it means zero, but BigInt("0x") throws
+// SyntaxError: "Cannot convert 0x to a BigInt". That threw past both call
+// sites below with no try/catch around it, an unhandled promise rejection
+// that dropped the response entirely rather than sending an error — the
+// live cause of three straight epoch-graded timeouts on WALLET_BALANCE_CHECK
+// (Render logs, 2026-09-07T00:11:05Z: "Cannot convert 0x to a BigInt" at
+// checkWalletBalance.js:106, no response ever logged for that request).
+function safeBigIntFromHex(hex) {
+  if (hex == null) return 0n;
+  const trimmed = String(hex).trim();
+  if (!/^0x[0-9a-fA-F]+$/.test(trimmed)) return 0n;
+  return BigInt(trimmed);
+}
+
 // How many decimals to lead with. A ground truth for a wallet balance is
 // written for a human ("128902.070586 ETH"), and the champion CRYPTO_PRICE
 // scorer's fact-matcher needs the ground truth's own precision present in
@@ -70,8 +86,8 @@ async function handleNativeBalance(req, res, address, chainParam, chain) {
     return res.status(502).json({ status: 'error', summary: 'upstream RPC call failed', confidence: 1.0, error: err.message });
   }
 
-  const balance_wei = BigInt(balanceHex).toString();
-  const balance_native = Number(balanceHex) / 1e18;
+  const balance_wei = safeBigIntFromHex(balanceHex).toString();
+  const balance_native = Number(balance_wei) / 1e18;
   const as_of = new Date().toISOString();
 
   const canonical = [chainParam, address, balance_wei].join(':');
@@ -103,7 +119,7 @@ async function handleTokenBalance(req, res, address, chainParam, chain, token) {
     return res.status(502).json({ status: 'error', summary: 'upstream RPC call failed', confidence: 1.0, error: err.message });
   }
 
-  const balance_wei = BigInt(balanceHex ?? '0x0').toString();
+  const balance_wei = safeBigIntFromHex(balanceHex).toString();
 
   let decimals = null;
   let token_symbol = null;
@@ -186,10 +202,21 @@ export async function handleWalletBalance(req, res) {
     );
   }
 
-  if (token) {
-    return handleTokenBalance(req, res, address, chainParam, chain, token);
+  // Neither handler below is otherwise wrapped past its own RPC try/catch,
+  // so any other unexpected error (a formatting bug, a null field a
+  // provider stops sending) would again become an unhandled rejection that
+  // drops the response instead of answering it — the exact failure mode
+  // the safeBigIntFromHex fix above addresses for the one cause found live.
+  // This is the general safety net for any cause not yet seen.
+  try {
+    if (token) {
+      return await handleTokenBalance(req, res, address, chainParam, chain, token);
+    }
+    return await handleNativeBalance(req, res, address, chainParam, chain);
+  } catch (err) {
+    if (res.headersSent) throw err;
+    return res.status(502).json({ status: 'error', summary: 'wallet balance lookup failed', confidence: 1.0, error: err.message });
   }
-  return handleNativeBalance(req, res, address, chainParam, chain);
 }
 
 router.get('/', (req, res) => withRpcBudget(() => handleWalletBalance(req, res)));

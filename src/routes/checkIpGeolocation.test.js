@@ -73,6 +73,27 @@ test('ip-geolocate: pulls an IP out of a whole question and reports risk flags i
   assert.equal(typeof body.is_mobile, 'boolean');
 });
 
+test('ip-geolocate: a private-range address is reported as non-routable, not sent to a provider', async (t) => {
+  const base = startServer(t);
+  const res = await fetch(`${base}/ip-geolocate?ip=${encodeURIComponent('192.168.1.1')}`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.is_private_range, true);
+  assert.equal(body.private_range_kind, 'private');
+  assert.equal(body.country, null);
+  assert.match(body.summary, /not a publicly routable one/);
+});
+
+test('ip-geolocate: loopback address is reported as loopback', async (t) => {
+  const base = startServer(t);
+  const res = await fetch(`${base}/ip-geolocate?ip=127.0.0.1`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.is_private_range, true);
+  assert.equal(body.private_range_kind, 'loopback');
+});
+
 test('ip-geolocate: summary includes city, region, country, and ISP without risk-flag prose', async (t) => {
   const base = startServer(t);
   const res = await fetch(`${base}/ip-geolocate?ip=8.8.8.8`);

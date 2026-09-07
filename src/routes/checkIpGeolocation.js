@@ -37,6 +37,38 @@ export async function handleIpGeolocation(req, res) {
     return res.status(502).json({ status: 'error', summary: 'IP geolocation failed', confidence: 1.0, error: err.message });
   }
 
+  // A private/reserved address (10.x, 192.168.x, 127.0.0.1, ::1, etc.) has
+  // no public geolocation — reporting that plainly, rather than sending it
+  // to a provider that would either error or return a meaningless guess,
+  // is a behavior the current rank-3 IP_GEOLOCATION miner advertises.
+  if (result.is_private_range) {
+    return res.json({
+      query: rawIp,
+      status: 'ok',
+      summary: `${result.ip} is a ${result.private_range_kind} address, not a publicly routable one, so it has no geographic location.`,
+      confidence: 1.0,
+      canonical: ['ip-geo', result.ip].join(':'),
+      ip: result.ip,
+      is_private_range: true,
+      private_range_kind: result.private_range_kind,
+      country: null,
+      country_code: null,
+      region: null,
+      city: null,
+      zip: null,
+      latitude: null,
+      longitude: null,
+      timezone: null,
+      isp: null,
+      org: null,
+      asn: null,
+      is_mobile: null,
+      is_proxy_or_vpn: null,
+      is_hosting: null,
+      checked_at: new Date().toISOString(),
+    });
+  }
+
   // Keep the graded location phrase complete. Each part is conditional so
   // a provider response that omits city or region still reads naturally.
   const summary = `${result.ip} is located in ${[result.city, result.region, result.country].filter(Boolean).join(', ')}, operated by ${result.isp}${result.asn ? ` (${result.asn})` : ''}.`;

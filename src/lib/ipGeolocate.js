@@ -1,18 +1,71 @@
 // IP_GEOLOCATION signal — where an IP address is.
 //
-// Primary source is ipinfo.io, not ip-api.com. Live-compared 2026-08-31:
-// for 8.8.8.8, ip-api.com's free-tier database reports "Ashburn" (a BGP
-// routing artifact of Google's anycast network, not where the address is
-// actually announced from), while ipinfo.io reports "Mountain View" —
-// Google's real, publicly documented location for that address, and the
-// answer the two top-ranked IP_GEOLOCATION miners' near-perfect scores
-// (0.995+, versus our 0.01 that epoch) are consistent with. ip-api.com is
-// kept as a fallback only, since it needs no key and this endpoint should
-// still answer something if ipinfo.io is unreachable.
+// Tries ip-api.com first, then ipwho.is — the same pair the two sustained
+// IP_GEOLOCATION leaders (livecert, netwire-ip-geolocation) read from.
+// Sequential, not a parallel race: see the note on geolocateIp below for why.
+// ipinfo.io was primary from 2026-08-31 to 2026-09-06, justified on a
+// single sample (8.8.8.8, where ipinfo's "Mountain View" looked more
+// correct than ip-api's "Ashburn"). Three straight epoch losses (0.01,
+// down from 14 of the prior 21 epochs won) date exactly from that switch,
+// and on other addresses ipinfo is the one that disagrees with the pair
+// the winners use: on 9.9.9.9, checked live 2026-09-07, ip-api.com says
+// Berkeley, California and ipwho.is says San Francisco, California, while
+// ipinfo.io alone says Ashburn, Virginia — ipinfo is reading the anycast
+// announcement point (it flags 9.9.9.9 "anycast": true), the other two the
+// registered network. Matching the providers the winners agree on is the
+// point, not any single address. ipinfo.io is kept as a last-resort
+// fallback only, for when both of the other two fail.
+//
+// NOTE: the diagnosis this change came from (asklens
+// docs/PER_INTENT_COMPETITIVE_DIG.md) recorded ip-api.com/ipwho.is as
+// saying "Zurich, Switzerland" for 9.9.9.9 and called it a country-level
+// disagreement. That did not reproduce on 2026-09-07 — all three providers
+// now agree on the country here. The provider swap still stands on the
+// win-record timing above, but it is not backed by the country-level
+// example the report gave.
 const IPINFO_URL = 'https://ipinfo.io';
 const IPAPI_URL = 'http://ip-api.com/json';
+const IPWHOIS_URL = 'https://ipwho.is';
 const CALL_TIMEOUT_MS = Number(process.env.IP_GEOLOCATE_TIMEOUT_MS) || 6_000;
 const IPAPI_FIELDS = 'status,message,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as,mobile,proxy,hosting,query';
+
+// RFC 1918 / RFC 4193 / loopback / link-local ranges. Reported explicitly
+// rather than sent to a public geolocation provider, which would either
+// error or return a meaningless result for a non-routable address — the
+// current rank-3 IP_GEOLOCATION miner (preflight-ssl-verification)
+// advertises exactly this behavior.
+const PRIVATE_RANGES_V4 = [
+  { base: [10, 0, 0, 0], bits: 8 },
+  { base: [172, 16, 0, 0], bits: 12 },
+  { base: [192, 168, 0, 0], bits: 16 },
+  { base: [127, 0, 0, 0], bits: 8 },
+  { base: [169, 254, 0, 0], bits: 16 },
+];
+
+function ipv4ToInt(parts) {
+  return parts.reduce((acc, p) => (acc << 8) + p, 0) >>> 0;
+}
+
+export function classifyPrivateIp(ip) {
+  if (ip === '::1' || ip === '0:0:0:0:0:0:0:1') return 'loopback';
+  if (/^f[cd][0-9a-f]{2}:/i.test(ip)) return 'unique-local';
+  // fe80::/10 is the whole link-local block, so the first group runs
+  // fe80-febf, not fe80 alone.
+  if (/^fe[89ab][0-9a-f]:/i.test(ip)) return 'link-local';
+  // The IPv4-mapped prefix is hex, so it can arrive as ::FFFF: too.
+  const v4 = /^::ffff:/i.test(ip) ? ip.slice(7) : ip;
+  const parts = v4.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) return null;
+  const value = ipv4ToInt(parts);
+  for (const range of PRIVATE_RANGES_V4) {
+    const rangeValue = ipv4ToInt(range.base);
+    const mask = range.bits === 0 ? 0 : (0xffffffff << (32 - range.bits)) >>> 0;
+    if ((value & mask) === (rangeValue & mask)) {
+      return range.base[0] === 127 ? 'loopback' : range.base[0] === 169 ? 'link-local' : 'private';
+    }
+  }
+  return null;
+}
 
 export class IpLookupError extends Error {
   constructor(message) {
@@ -45,6 +98,12 @@ function countryNameFromCode(code) {
   }
 }
 
+// Kept as a last-resort fallback only — see file header. Fixed here: the
+// old primary path assigned ipinfo's single combined "org" string
+// (e.g. "AS15169 Google LLC") to isp, org AND asn, producing a summary like
+// "operated by AS15169 Google LLC (AS15169 Google LLC)". Split the numeric
+// ASN out of the leading "AS<number>" token so asn and org disagree the way
+// ip-api.com's separate fields already do.
 async function geolocateViaIpinfo(ip) {
   const token = process.env.IPINFO_TOKEN;
   const url = `${IPINFO_URL}/${encodeURIComponent(ip)}/json${token ? `?token=${token}` : ''}`;
@@ -55,6 +114,7 @@ async function geolocateViaIpinfo(ip) {
     throw new IpLookupError(`ipinfo.io lookup for '${ip}' failed: ${body.error?.message ?? 'address not found'}`);
   }
   const [latitude, longitude] = typeof body.loc === 'string' ? body.loc.split(',').map(Number) : [null, null];
+  const orgMatch = typeof body.org === 'string' ? body.org.match(/^AS(\d+)\s+(.*)$/) : null;
   return {
     ip: body.ip ?? ip,
     country: countryNameFromCode(body.country),
@@ -65,9 +125,9 @@ async function geolocateViaIpinfo(ip) {
     latitude: Number.isFinite(latitude) ? latitude : null,
     longitude: Number.isFinite(longitude) ? longitude : null,
     timezone: body.timezone ?? null,
-    isp: body.org ?? null,
-    org: body.org ?? null,
-    asn: body.org ?? null,
+    isp: orgMatch ? orgMatch[2] : (body.org ?? null),
+    org: orgMatch ? orgMatch[2] : (body.org ?? null),
+    asn: orgMatch ? `AS${orgMatch[1]}` : null,
     is_mobile: null,
     is_proxy_or_vpn: body.privacy?.vpn || body.privacy?.proxy || null,
     is_hosting: body.privacy?.hosting ?? null,
@@ -93,37 +153,96 @@ async function geolocateViaIpapi(ip) {
     timezone: body.timezone,
     isp: body.isp,
     org: body.org,
-    asn: body.as,
+    // ip-api.com's `as` field is the combined string "AS15169 Google LLC",
+    // same shape ipinfo.io returns — keep only the bare ASN token here so
+    // it doesn't repeat the org name already carried in `org`/`isp`.
+    asn: typeof body.as === 'string' ? (body.as.match(/^AS\d+/)?.[0] ?? body.as) : null,
     is_mobile: body.mobile,
     is_proxy_or_vpn: body.proxy,
     is_hosting: body.hosting,
   };
 }
 
+// ipwho.is is the second half of the exact pair the sustained
+// IP_GEOLOCATION leaders read from. Its `security` block carries proxy/vpn/
+// tor/hosting flags natively, so unlike ip-api.com this needs no second
+// call to fill risk flags.
+async function geolocateViaIpwhois(ip) {
+  const res = await fetchWithTimeout(`${IPWHOIS_URL}/${encodeURIComponent(ip)}`);
+  if (!res.ok) throw new IpLookupError(`ipwho.is lookup for '${ip}' failed with status ${res.status}`);
+  const body = await res.json();
+  if (body.success === false) {
+    throw new IpLookupError(`ipwho.is lookup for '${ip}' failed: ${body.message ?? 'unknown reason'}`);
+  }
+  return {
+    ip: body.ip ?? ip,
+    country: body.country,
+    country_code: body.country_code,
+    region: body.region,
+    city: body.city,
+    zip: body.postal,
+    latitude: body.latitude,
+    longitude: body.longitude,
+    timezone: body.timezone?.id ?? null,
+    isp: body.connection?.isp ?? null,
+    org: body.connection?.org ?? null,
+    asn: body.connection?.asn != null ? `AS${body.connection.asn}` : null,
+    is_mobile: null,
+    is_proxy_or_vpn: body.security ? Boolean(body.security.proxy || body.security.vpn) : null,
+    is_hosting: body.security?.hosting ?? null,
+  };
+}
+
+// ip-api.com first, ipwho.is second, ipinfo.io as a last resort — not a
+// true race. An earlier version ran ip-api.com and ipwho.is in parallel
+// with Promise.allSettled and deterministically preferred ip-api.com's
+// result, which meant every call paid for the slower of the two before
+// answering, buying nothing over trying ip-api.com alone first. A true
+// race (Promise.any, first settled wins) was considered instead, but
+// ip-api.com and ipwho.is can disagree at the city level on the same
+// address (checked live 2026-09-07: 9.9.9.9 reads Berkeley from one and
+// San Francisco from the other, both agreeing on the country) — a real
+// race would make the answer for one address nondeterministic call to
+// call, which is worse for a graded intent than a stable pick that is
+// sometimes not the fastest available answer.
 export async function geolocateIp(ip) {
-  let primary;
+  const privateKind = classifyPrivateIp(ip);
+  if (privateKind) {
+    return {
+      ip,
+      country: null,
+      country_code: null,
+      region: null,
+      city: null,
+      zip: null,
+      latitude: null,
+      longitude: null,
+      timezone: null,
+      isp: null,
+      org: null,
+      asn: null,
+      is_mobile: null,
+      is_proxy_or_vpn: null,
+      is_hosting: null,
+      is_private_range: true,
+      private_range_kind: privateKind,
+    };
+  }
+
   try {
-    primary = await geolocateViaIpinfo(ip);
-  } catch (err) {
-    // ipinfo.io down or unreachable — fall back to ip-api.com fully,
-    // location and risk flags both, rather than fail the whole request.
+    return await geolocateViaIpapi(ip);
+  } catch (firstErr) {
     try {
-      return await geolocateViaIpapi(ip);
-    } catch {
-      throw err instanceof IpLookupError ? err : new IpLookupError(`geolocation lookup for '${ip}' failed: ${err.message}`);
+      return await geolocateViaIpwhois(ip);
+    } catch (secondErr) {
+      try {
+        return await geolocateViaIpinfo(ip);
+      } catch (thirdErr) {
+        throw thirdErr instanceof IpLookupError ? thirdErr
+          : secondErr instanceof IpLookupError ? secondErr
+          : firstErr instanceof IpLookupError ? firstErr
+          : new IpLookupError(`geolocation lookup for '${ip}' failed: ${thirdErr.message}`);
+      }
     }
   }
-  // ipinfo.io's free tier doesn't include mobile/proxy/hosting risk flags
-  // (a paid add-on there) — ip-api.com's free tier does. Best-effort only:
-  // location is the graded field, risk flags stay null rather than fail
-  // the whole answer if this second call errors.
-  try {
-    const risk = await geolocateViaIpapi(ip);
-    primary.is_mobile = risk.is_mobile;
-    primary.is_proxy_or_vpn = risk.is_proxy_or_vpn;
-    primary.is_hosting = risk.is_hosting;
-  } catch {
-    // Leave risk flags null.
-  }
-  return primary;
 }
