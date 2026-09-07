@@ -1009,3 +1009,52 @@ limitations:
     property: length
     value_num: 42
     operator: eq
+
+on_chain:
+  description: >-
+    The answer, the reason behind it, and the numbers a contract can threshold
+    on.
+  transform: direct
+  min_price_usdc: 0.01
+  fields:
+    strings:
+      - index: 0
+        name: answer
+        description: One-line answer to the question that was asked.
+        source_path: answer
+      - index: 1
+        name: summary
+        description: The finding in plain language.
+        source_path: summary
+    integers:
+      - index: 0
+        name: confidence_x10000
+        description: Confidence from 0 to 1, multiplied by 10000.
+        source_path: confidence
+        multiplier: 10000
+      - index: 1
+        name: risk_score_x10000
+        description: >-
+          Storm risk from 0 to 1, multiplied by 10000. /storm-alert only.
+        source_path: risk_score
+        multiplier: 10000
+  request:
+    - endpoint: check-tx
+      method: GET
+      query_params:
+        tx_hash: { source: strings.0 }
+        chain:   { source: strings.1 }
+    - endpoint: storm-alert
+      method: GET
+      query_params:
+        location: { source: strings.0 }
+        hours:    { source: numbers.0 }
+    - endpoint: weather-forecast
+      method: GET
+      query_params:
+        location: { source: strings.0 }
+        hours:    { source: numbers.0 }
+    - endpoint: ssl-check
+      method: GET
+      query_params:
+        domain: { source: strings.0 }
