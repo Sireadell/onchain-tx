@@ -221,3 +221,25 @@ export function coinAliasParam(params) {
   }
   return null;
 }
+
+// Peels the words people put around a company name off a stock lookup.
+//
+// Live-checked 2026-09-07 against the deployed miner: ticker="Apple stock"
+// answered "no stock quote found for 'Apple stock'", while ticker="Apple"
+// resolved to AAPL and priced correctly. Two words is under the
+// three-plus-word bar looksLikeSentence uses, so the value went to the
+// price API untouched and the symbol search could not match it either.
+// Returns null when nothing but noise is left, so the caller keeps the
+// original input rather than searching for an empty string.
+const STOCK_NOISE_RE = /\b(?:stocks?|shares?|share|equity|equities|ticker|symbol|price|prices|quote|quotes|corp|corporation|incorporated|inc|company|co|ltd|plc|holdings?|group|nasdaq|nyse)\b/gi;
+
+export function stripStockNoiseWords(input) {
+  if (typeof input !== 'string') return null;
+  const cleaned = input
+    .replace(STOCK_NOISE_RE, ' ')
+    .replace(/[.,'"]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned || cleaned.toLowerCase() === input.trim().toLowerCase()) return null;
+  return cleaned;
+}

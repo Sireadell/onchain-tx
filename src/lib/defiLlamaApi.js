@@ -31,9 +31,11 @@ const PROTOCOL_LIST_CACHE_TTL_MS = Number(process.env.DEFILLAMA_PROTOCOL_LIST_CA
 // chain that DefiLlama's chain list doesn't itself recognize. Deliberately
 // small and hand-verified rather than a large speculative list — an
 // unverified guess here would misreport one protocol's TVL as another's.
-// Fantom/Sonic and Optimism/OP Mainnet were checked and excluded: DefiLlama
-// tracks each pair as genuinely separate entries, not a rename, so aliasing
-// them would be wrong, not just incomplete.
+// Fantom/Sonic was checked and excluded: DefiLlama tracks both as genuinely
+// separate live chains, not a rename, so aliasing them would be wrong rather
+// than just incomplete. Optimism/OP Mainnet was excluded here for the same
+// reason and that still holds for protocol lookups, but the chain-level TVL
+// list turned out to be a different case. See CHAIN_TVL_ALIASES below.
 const PROTOCOL_ALIASES = {
   maker: 'sky-lending',
   makerdao: 'sky-lending',
@@ -50,6 +52,25 @@ const CHAIN_ALIASES = {
   'bnb chain': 'BSC',
   bnb: 'BSC',
   avax: 'Avalanche',
+};
+// Chain-level TVL only (/v2/chains), deliberately NOT applied to a
+// protocol's per-chain breakdown. Verified live 2026-09-07: DefiLlama's
+// chain list carries dead $0 stub entries literally named "Optimism" and
+// "Binance" sitting beside the real live entries "OP Mainnet" ($443M) and
+// "BSC" ($5.79B), so asking for a chain by the name a person actually uses
+// returned "$0.00 TVL" with full confidence. "Hyperliquid", the 7th largest
+// chain at $1.54B, is listed only as "Hyperliquid L1" and wasn't found at
+// all. The same check confirmed a protocol's own currentChainTvls map still
+// keys those chains as "Optimism" and "Binance", which is why these aliases
+// live in their own table instead of CHAIN_ALIASES: applying them to
+// getProtocolChainTvl would break lookups that currently work.
+// Fantom/Sonic stays excluded on purpose. Both are live, separately tracked
+// chains ($4.86M and $16.5M), not a rename.
+const CHAIN_TVL_ALIASES = {
+  optimism: 'OP Mainnet',
+  binance: 'BSC',
+  'binance smart chain': 'BSC',
+  hyperliquid: 'Hyperliquid L1',
 };
 
 export class ProtocolNotFoundError extends Error {
@@ -258,7 +279,9 @@ export async function getProtocolChainTvl(rawSlug, rawChainName) {
 // asked for.
 export async function getChainTvl(rawChainName) {
   const trimmed = String(rawChainName).trim();
-  const chainName = CHAIN_ALIASES[trimmed.toLowerCase()] ?? trimmed;
+  const chainName = CHAIN_TVL_ALIASES[trimmed.toLowerCase()]
+    ?? CHAIN_ALIASES[trimmed.toLowerCase()]
+    ?? trimmed;
   if (!chainListCache || Date.now() - chainListCache.storedAt >= CHAIN_LIST_CACHE_TTL_MS) {
     const res = await fetchDefiLlama('api.llama.fi', '/v2/chains');
     if (res.status !== 200) {
@@ -268,9 +291,13 @@ export async function getChainTvl(rawChainName) {
     chainListCache = { value: list, storedAt: Date.now() };
   }
 
-  const match = chainListCache.value.find(
+  const matches = chainListCache.value.filter(
     (c) => typeof c.name === 'string' && c.name.toLowerCase() === chainName.toLowerCase()
   );
+  // Prefer a live entry over a $0 one when both answer to the same name, so
+  // a new dead stub appearing under a name we haven't aliased yet still
+  // can't turn a real answer into "$0.00 TVL".
+  const match = matches.find((c) => typeof c.tvl === 'number' && c.tvl > 0) ?? matches[0];
   if (!match || typeof match.tvl !== 'number') {
     throw new ChainNotFoundError(`no DefiLlama chain found for name '${rawChainName}'`);
   }
@@ -308,6 +335,53 @@ export async function getCoinPrice(coinKey) {
   priceCache.set(cacheKeyStr, { value, storedAt: Date.now() });
   if (priceCache.size > MAX_CACHE_ENTRIES) {
     priceCache.delete(priceCache.keys().next().value);
+  }
+  return value;
+}
+
+// Returns the USD price a coin traded at on a past day, for the historical
+// side of CRYPTO_PRICE. Same coinKey shape as getCoinPrice ("coingecko:
+// bitcoin" or "ethereum:0xdAC1..."), so both of that route's modes are
+// covered by the one call.
+//
+// DefiLlama is the only historical source here: CoinPaprika's historical
+// endpoint is paid ("Getting minute historical data is not allowed in this
+// plan", checked live 2026-09-07) and CoinGecko already 403s from this
+// host. Live-checked 2026-09-07: coins.llama.fi/prices/historical returned
+// BTC at $16542.46 for 2023-01-01 and USDT at $1 by contract address.
+//
+// Past prices never change, so these are cached far longer than live ones.
+const HISTORICAL_PRICE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const historicalPriceCache = new Map();
+
+export async function getHistoricalCoinPrice(coinKey, unixSeconds) {
+  const cacheKeyStr = `historical:${coinKey}:${unixSeconds}`;
+  const hit = historicalPriceCache.get(cacheKeyStr);
+  if (hit && Date.now() - hit.storedAt < HISTORICAL_PRICE_CACHE_TTL_MS) {
+    return hit.value;
+  }
+
+  const res = await fetchDefiLlama(
+    'coins.llama.fi',
+    `/prices/historical/${unixSeconds}/${encodeURIComponent(coinKey)}`,
+  );
+  if (res.status !== 200) {
+    throw new CoinNotFoundError(`no DefiLlama price found for '${coinKey}'`);
+  }
+  const body = await res.json();
+  const entry = body?.coins?.[coinKey];
+  if (!entry || typeof entry.price !== 'number') {
+    throw new CoinNotFoundError(`no DefiLlama price found for '${coinKey}'`);
+  }
+
+  const value = {
+    priceUsd: entry.price,
+    symbol: entry.symbol ?? null,
+    asOfUnix: entry.timestamp ?? unixSeconds,
+  };
+  historicalPriceCache.set(cacheKeyStr, { value, storedAt: Date.now() });
+  if (historicalPriceCache.size > MAX_CACHE_ENTRIES) {
+    historicalPriceCache.delete(historicalPriceCache.keys().next().value);
   }
   return value;
 }

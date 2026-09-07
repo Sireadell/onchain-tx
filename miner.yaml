@@ -163,7 +163,10 @@ endpoints:
       only for pricing one specific contract, is never sent on its own, and
       always needs token (0x-prefixed, 40 hex characters, the token's
       contract address) alongside it, as in price_chain="base" with the
-      contract to price.
+      contract to price. It also answers what a coin was worth on a past
+      day: send that day as date ("2023-01-01"), in either mode, and the
+      answer is the price on that date rather than the price now. Leave
+      date off for the current price.
   - path: /stock-price
     external_path: /stock-price
     method: GET
@@ -171,8 +174,13 @@ endpoints:
     description: >
       STOCK_PRICE. Answers "what is Apple trading at", "current share price
       of TSLA", "how much is NVDA stock". Names a listed equity or ticker
-      and returns its current USD share price. Params: ticker (required, a
-      stock symbol, e.g. "AAPL").
+      and returns its current USD share price. It also answers what a stock
+      was worth on a past day, such as "what did NVDA close at on 15
+      January 2024": send that day as date and the answer is the closing
+      price on it, naming the last trading day before it when the market
+      was shut that day. Params: ticker (required, a stock symbol, e.g.
+      "AAPL") and date (optional, a past day as "2024-01-15"; leave it off
+      for the current price).
   - path: /ssl-check
     external_path: /ssl-check
     method: GET

@@ -412,3 +412,108 @@ test('stock-price: a bare ticker is still used exactly as supplied', async (t) =
   assert.equal((await res.json()).canonical, 'ticker:AAPL:309.69');
   assert.ok(requested.some((u) => u.includes('AAPL')));
 });
+
+// Historical prices. Found 2026-09-07 in the Render request logs:
+// GET /stock-price?date=2024-01-15&ticker=NVDA had been arriving for days
+// and was answered with today's price, because the route never read `date`.
+test('stock-price: a past date is answered with that day\'s close', async (t) => {
+  withTwelveDataKey(t);
+  let requested = null;
+  mockTwelveDataFetch(t, async (url) => {
+    requested = url;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        meta: { symbol: 'AAPL', currency: 'USD', exchange: 'NASDAQ' },
+        values: [{ datetime: '2023-06-30', close: '193.97000' }],
+        status: 'ok',
+      }),
+    };
+  });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/stock-price?ticker=AAPL&date=2023-06-30`);
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.status, 'ok');
+  assert.match(requested, /time_series/);
+  assert.equal(body.summary, 'AAPL closed at $193.97 USD on 2023-06-30.');
+  assert.equal(body.requested_date, '2023-06-30');
+  assert.equal(body.trading_day, '2023-06-30');
+});
+
+test('stock-price: a day the market was shut quotes the last session and says so', async (t) => {
+  withTwelveDataKey(t);
+  mockTwelveDataFetch(t, async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      meta: { symbol: 'NVDA', currency: 'USD', exchange: 'NASDAQ' },
+      // 2024-01-15 was Martin Luther King Day, so there is no bar for it.
+      values: [
+        { datetime: '2024-01-12', close: '54.71000' },
+        { datetime: '2024-01-11', close: '54.20000' },
+      ],
+      status: 'ok',
+    }),
+  }));
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/stock-price?ticker=NVDA&date=2024-01-15`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(
+    body.summary,
+    'NVDA closed at $54.71 USD on 2024-01-12, the last trading day on or before 2024-01-15.',
+  );
+});
+
+test('stock-price: today and later still take the live quote', async (t) => {
+  withTwelveDataKey(t);
+  mockTwelveDataFetch(t, async (url) => {
+    assert.ok(!url.includes('time_series'), `expected the live quote path, got ${url}`);
+    return { ok: true, status: 200, json: async () => ({ close: '319.97', name: 'Apple Inc.', currency: 'USD', exchange: 'NASDAQ' }) };
+  });
+  mockFetch(t, async () => ({ status: 500, statusText: 'Server Error', json: async () => ({}) }));
+  const base = startServer(t);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const res = await fetch(`${base}/stock-price?ticker=AAPL&date=${today}`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.requested_date, null);
+});
+
+// Live-checked 2026-09-07 against the deployed miner: ticker="Apple stock"
+// came back not_found while ticker="Apple" priced correctly, because two
+// words is under looksLikeSentence's bar and the symbol search could not
+// match the value as typed.
+test('stock-price: a company name with a trailing noise word still resolves', async (t) => {
+  withTwelveDataKey(t);
+  const searched = [];
+  mockTwelveDataFetch(t, async (url) => {
+    if (url.includes('symbol_search')) {
+      const query = new URL(url).searchParams.get('symbol');
+      searched.push(query);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => (query === 'Apple' ? { data: [{ symbol: 'AAPL' }] } : { data: [] }),
+      };
+    }
+    const symbol = new URL(url).searchParams.get('symbol');
+    if (symbol !== 'AAPL') {
+      return { ok: false, status: 404, json: async () => ({ status: 'error', message: 'symbol not found' }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ close: '319.97', name: 'Apple Inc.', currency: 'USD', exchange: 'NASDAQ' }) };
+  });
+  mockFetch(t, async () => ({ status: 404, json: async () => ({}) }));
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/stock-price?ticker=Apple%20stock`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.deepEqual(searched, ['Apple stock', 'Apple']);
+  assert.equal(body.summary, 'Apple Inc. (AAPL) is $319.97 USD.');
+});

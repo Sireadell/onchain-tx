@@ -90,3 +90,73 @@ export async function getStockQuote(ticker) {
     await new Promise((r) => setTimeout(r, jitteredDelay));
   }
 }
+
+// Historical closing price for a past day, the fallback behind Twelve Data
+// for the historical side of STOCK_PRICE. Yahoo's chart endpoint takes a
+// unix range and returns one bar per trading day, so the same
+// "last session on or before the day asked about" rule applies here as
+// there: weekends and market holidays have no bar of their own.
+const HISTORICAL_WINDOW_DAYS = 10;
+
+export async function getYahooHistoricalClose(ticker, isoDay) {
+  checkBudget();
+  const end = new Date(`${isoDay}T00:00:00Z`);
+  end.setUTCDate(end.getUTCDate() + 1);
+  const start = new Date(`${isoDay}T00:00:00Z`);
+  start.setUTCDate(start.getUTCDate() - HISTORICAL_WINDOW_DAYS);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CALL_TIMEOUT_MS);
+  let res;
+  try {
+    const url = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}`);
+    url.searchParams.set('period1', String(Math.floor(start.getTime() / 1000)));
+    url.searchParams.set('period2', String(Math.floor(end.getTime() / 1000)));
+    url.searchParams.set('interval', '1d');
+    res = await fetch(url, { signal: controller.signal });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error(`Yahoo Finance request timed out after ${CALL_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (res.status === 404) {
+    throw new TickerNotFoundError(`no Yahoo Finance history found for '${ticker}'`);
+  }
+  if (res.status !== 200) {
+    throw new Error(`Yahoo Finance request failed: ${res.status} ${res.statusText}`);
+  }
+
+  const body = await res.json().catch(() => null);
+  const result = body?.chart?.result?.[0];
+  const stamps = result?.timestamp ?? [];
+  const closes = result?.indicators?.quote?.[0]?.close ?? [];
+
+  // Walk back from the newest bar to the first one that is a real close on
+  // or before the day asked about. Yahoo can return a null close for a
+  // half-formed bar, which must not be read as a price of zero.
+  let bar = null;
+  for (let i = stamps.length - 1; i >= 0; i--) {
+    const day = new Date(stamps[i] * 1000).toISOString().slice(0, 10);
+    const close = Number(closes[i]);
+    if (day <= isoDay && Number.isFinite(close) && close > 0) {
+      bar = { close, day };
+      break;
+    }
+  }
+  if (!bar) {
+    throw new TickerNotFoundError(`no Yahoo Finance history found for '${ticker}' on or before ${isoDay}`);
+  }
+
+  return {
+    priceUsd: bar.close,
+    companyName: result?.meta?.longName ?? result?.meta?.shortName ?? null,
+    currency: result?.meta?.currency ?? null,
+    exchangeName: result?.meta?.fullExchangeName ?? result?.meta?.exchangeName ?? null,
+    tradingDay: bar.day,
+    source: 'yahoo_finance',
+  };
+}

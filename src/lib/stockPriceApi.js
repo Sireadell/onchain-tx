@@ -20,8 +20,18 @@
 // 429s and 5xxs with backoff, and Twelve Data still catches the case where
 // Yahoo is genuinely down.
 
-import { getTwelveDataStockQuote, TwelveDataTickerNotFoundError, searchTwelveDataSymbol } from './twelveDataApi.js';
-import { getStockQuote as getYahooStockQuote, TickerNotFoundError as YahooTickerNotFoundError } from './yahooFinanceApi.js';
+import {
+  getTwelveDataStockQuote,
+  getTwelveDataHistoricalClose,
+  TwelveDataTickerNotFoundError,
+  searchTwelveDataSymbol,
+} from './twelveDataApi.js';
+import {
+  getStockQuote as getYahooStockQuote,
+  getYahooHistoricalClose,
+  TickerNotFoundError as YahooTickerNotFoundError,
+} from './yahooFinanceApi.js';
+import { stripStockNoiseWords } from './entityExtract.js';
 
 export class TickerNotFoundError extends Error {
   constructor(message) {
@@ -73,13 +83,25 @@ async function tryQuote(ticker, errors) {
 // detection caught, producing a 502 on what was really just an
 // unrecognized company name — this both fixes that shape-detection gap
 // (see twelveDataApi.js) and actually resolves the name to AAPL.
+// Resolves whatever the caller sent to a real symbol: the value as typed
+// first, then the same value with the words people wrap a company name in
+// stripped out. Live-checked 2026-09-07: "Apple stock" matched nothing at
+// either provider or in symbol search and came back not_found, while the
+// stripped "Apple" resolves to AAPL. Returns null when neither works.
+async function resolveSymbol(rawTicker) {
+  const direct = await searchTwelveDataSymbol(rawTicker);
+  if (direct) return direct;
+  const stripped = stripStockNoiseWords(rawTicker);
+  return stripped ? searchTwelveDataSymbol(stripped) : null;
+}
+
 export async function getStockQuote(rawTicker) {
   const errors = [];
 
   const direct = await tryQuote(rawTicker, errors);
   if (direct) return direct;
 
-  const resolved = await searchTwelveDataSymbol(rawTicker);
+  const resolved = await resolveSymbol(rawTicker);
   if (resolved && resolved.toUpperCase() !== rawTicker.toUpperCase()) {
     const viaSearch = await tryQuote(resolved, errors);
     if (viaSearch) return viaSearch;
@@ -107,6 +129,61 @@ export async function getStockQuote(rawTicker) {
   );
   if (confirmedNotFound || errors.every(isNotFoundError)) {
     throw new TickerNotFoundError(`no stock quote found for '${rawTicker}'`);
+  }
+
+  throw new Error(errors.map((err) => err.message).join('; '));
+}
+
+// The historical twin of getStockQuote: the closing price on a past day.
+// Same resolution chain (the symbol as typed, then the company name with
+// its noise words stripped), and the same two providers, so a question
+// about what a stock was worth in 2024 is answered with the same coverage
+// as one about what it is worth right now.
+//
+// Twelve Data leads here rather than Yahoo. The Yahoo-first ordering above
+// was measured on the live quote, where Yahoo's intraday number matched the
+// graded one and Twelve Data's was six hours stale. A settled past close is
+// not a moving number: checked live 2026-09-07, both providers returned the
+// identical close for AAPL on 2023-06-30 and NVDA on 2024-01-15, and Twelve
+// Data returns it already at cent precision.
+async function tryHistorical(ticker, isoDay, errors) {
+  if (process.env.TWELVE_DATA_API_KEY) {
+    try {
+      return { ...(await getTwelveDataHistoricalClose(ticker, isoDay)), resolvedTicker: ticker };
+    } catch (err) {
+      err.provider = 'twelve_data';
+      errors.push(err);
+    }
+  }
+
+  try {
+    return { ...(await getYahooHistoricalClose(ticker, isoDay)), resolvedTicker: ticker };
+  } catch (err) {
+    err.provider = 'yahoo';
+    errors.push(err);
+  }
+
+  return null;
+}
+
+export async function getHistoricalStockQuote(rawTicker, isoDay) {
+  const errors = [];
+
+  const direct = await tryHistorical(rawTicker, isoDay, errors);
+  if (direct) return direct;
+
+  const resolved = await resolveSymbol(rawTicker);
+  if (resolved && resolved.toUpperCase() !== rawTicker.toUpperCase()) {
+    const viaSearch = await tryHistorical(resolved, isoDay, errors);
+    if (viaSearch) return viaSearch;
+  }
+
+  const confirmedNotFound = errors.some(
+    (err) => (err.provider === 'twelve_data' && err instanceof TwelveDataTickerNotFoundError)
+      || (err.provider === 'yahoo' && err instanceof YahooTickerNotFoundError),
+  );
+  if (confirmedNotFound || errors.every(isNotFoundError)) {
+    throw new TickerNotFoundError(`no stock quote found for '${rawTicker}' on ${isoDay}`);
   }
 
   throw new Error(errors.map((err) => err.message).join('; '));

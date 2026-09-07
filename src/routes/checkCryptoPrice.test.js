@@ -452,3 +452,104 @@ test('crypto-price: a refusal no longer claims full confidence', async (t) => {
   assert.equal(body.status, 'invalid_input');
   assert.ok(body.confidence < 0.5, `expected a low confidence on a non-answer, got ${body.confidence}`);
 });
+
+// Historical prices. Found 2026-09-07 in the Render request logs: the
+// dispatcher had been sending questions about a past day as
+// ?coin_id=bitcoin&date=2023-01-01 for days, and the route answered every
+// one of them with today's price.
+test('crypto-price: a past date is priced on that day, not today', async (t) => {
+  resetDefiLlamaCache();
+  let historicalUrl = null;
+  mockFetchWithCoinGecko(t, {
+    defillama: async (url) => {
+      historicalUrl = url;
+      return {
+        status: 200,
+        json: async () => ({
+          coins: {
+            'coingecko:bitcoin': { symbol: 'BTC', price: 16542.456148037014, timestamp: 1672531208 },
+          },
+        }),
+      };
+    },
+  });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/crypto-price?coin_id=bitcoin&date=2023-01-01`);
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.status, 'ok');
+  assert.equal(historicalUrl, 'https://coins.llama.fi/prices/historical/1672531200/coingecko%3Abitcoin');
+  assert.equal(body.summary, 'BTC was $16542.46 USD on 2023-01-01.');
+  assert.equal(body.requested_date, '2023-01-01');
+});
+
+test('crypto-price: a past date works by contract address too', async (t) => {
+  resetDefiLlamaCache();
+  mockFetchWithCoinGecko(t, {
+    defillama: async () => ({
+      status: 200,
+      json: async () => ({
+        coins: { [`ethereum:${TOKEN}`]: { symbol: 'USDT', price: 1, timestamp: 1672531222 } },
+      }),
+    }),
+  });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/crypto-price?price_chain=ethereum&token=${TOKEN}&date=2023-01-01`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.summary, 'USDT was $1.00 USD on 2023-01-01.');
+});
+
+test('crypto-price: a coin name in the token field is priced, not refused', async (t) => {
+  resetDefiLlamaCache();
+  mockFetchWithCoinGecko(t, {
+    coinpaprika: async () => ({
+      status: 200,
+      json: async () => ({ currencies: [{ id: 'btc-bitcoin', symbol: 'BTC', is_active: true, rank: 1 }] }),
+    }),
+    coinpaprikaTicker: async () => ({
+      status: 200,
+      json: async () => ({ symbol: 'BTC', quotes: { USD: { price: 79401.38 } } }),
+    }),
+    defillama: async () => ({ status: 404, json: async () => ({}) }),
+  });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/crypto-price?token=bitcoin`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.query_type, 'coin_id');
+  assert.match(body.summary, /^BTC is currently \$79401\.38 USD/);
+});
+
+test('crypto-price: two sources that resolved different assets are not reported as a range', async (t) => {
+  resetDefiLlamaCache();
+  mockFetchWithCoinGecko(t, {
+    coinpaprika: async () => ({
+      status: 200,
+      json: async () => ({ currencies: [{ id: 'doge-dogecoin', symbol: 'DOGE', is_active: true, rank: 9 }] }),
+    }),
+    coinpaprikaTicker: async () => ({
+      status: 200,
+      json: async () => ({ symbol: 'DOGE', quotes: { USD: { price: 0.08954437691686573 } } }),
+    }),
+    // The copycat "@DOGE" token DefiLlama resolves "doge" to, live-checked
+    // 2026-09-07. Three orders of magnitude out, and not the asset asked for.
+    defillama: async () => ({
+      status: 200,
+      json: async () => ({ coins: { 'coingecko:doge': { symbol: '@DOGE', price: 0.0000486712 } } }),
+    }),
+  });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/crypto-price?coin_id=doge`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.source_count, 1);
+  assert.equal(body.price_range_low_usd, 0.08954437691686573);
+  assert.ok(!body.summary.includes('range of'), `unexpected range sentence: ${body.summary}`);
+  // Cent precision would report this coin as "$0.09".
+  assert.match(body.summary, /^DOGE is currently \$0\.08954 USD/);
+});

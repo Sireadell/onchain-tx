@@ -4,11 +4,13 @@
 // Twelve Data is the primary source, with Yahoo Finance as a fallback.
 
 import { Router } from 'express';
-import { getStockQuote, TickerNotFoundError } from '../lib/stockPriceApi.js';
+import { getStockQuote, getHistoricalStockQuote, TickerNotFoundError } from '../lib/stockPriceApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { respondUnusableInput } from '../lib/unusableInput.js';
 import { extractTicker, freeTextParam, looksLikeSentence } from '../lib/entityExtract.js';
 import { stockTextMatchesIntent } from '../lib/intentGuard.js';
+import { historicalDateParam } from '../lib/asOfDate.js';
+import { formatUsdPrice } from '../lib/formatUsdPrice.js';
 
 const router = Router();
 
@@ -40,15 +42,24 @@ async function handleStockPrice(req, res) {
     );
   }
 
+  // "What was NVDA worth on 2024-01-15?" arrives as
+  // /stock-price?date=2024-01-15&ticker=NVDA. Until 2026-09-07 this route
+  // did not read `date` at all and answered every one of those with today's
+  // price, which is a confidently wrong answer to a question that was
+  // asked correctly. See asOfDate.js for the log evidence.
+  const asOf = historicalDateParam(params);
+
   let quote;
   try {
-    quote = await getStockQuote(ticker);
+    quote = asOf ? await getHistoricalStockQuote(ticker, asOf.isoDay) : await getStockQuote(ticker);
   } catch (err) {
     if (err instanceof TickerNotFoundError) {
       return res.json({
         query: ticker,
         status: 'not_found',
-        summary: `no stock quote found for '${ticker}'`,
+        summary: asOf
+          ? `no stock quote found for '${ticker}' on ${asOf.isoDay}`
+          : `no stock quote found for '${ticker}'`,
         confidence: 1.0,
         canonical: ['ticker', ticker, 'not_found'].join(':'),
         price_usd: null,
@@ -80,17 +91,27 @@ async function handleStockPrice(req, res) {
   // and a comma-grouped number is what already measured as fatal on TVL and
   // CRYPTO_PRICE. Today's TSLA answer had no comma and still scored low, so
   // this removes a known hazard rather than being a proven cure on its own.
-  const priceFixed = quote.priceUsd.toFixed(2);
+  const priceFixed = formatUsdPrice(quote.priceUsd);
   const currency = typeof quote.currency === 'string' && quote.currency.trim()
     ? quote.currency.trim()
     : null;
   const isUsd = currency?.toUpperCase() === 'USD';
   const quotedPrice = isUsd ? `$${priceFixed} ${currency}` : `${priceFixed}${currency ? ` ${currency}` : ''}`;
   const stockLabel = quote.companyName ? `${quote.companyName} (${resolvedTicker})` : resolvedTicker;
+  // A past close is stated as a close on its trading day, not as a current
+  // price. Markets shut at weekends and on holidays, so when the day asked
+  // about had no session the answer says which day it is quoting instead of
+  // silently substituting one: 2024-01-15 was Martin Luther King Day.
+  const historicalSummary = asOf
+    ? `${stockLabel} closed at ${quotedPrice} on ${quote.tradingDay ?? asOf.isoDay}`
+      + (quote.tradingDay && quote.tradingDay !== asOf.isoDay
+        ? `, the last trading day on or before ${asOf.isoDay}.`
+        : '.')
+    : null;
   res.json({
     query: ticker,
     status: 'ok',
-    summary: `${stockLabel} is ${quotedPrice}${as_of ? ` as of ${as_of}` : ''}.`,
+    summary: historicalSummary ?? `${stockLabel} is ${quotedPrice}${as_of ? ` as of ${as_of}` : ''}.`,
     confidence: 1.0,
     canonical: ['ticker', resolvedTicker, quote.priceUsd].join(':'),
     price: quote.priceUsd,
@@ -99,7 +120,9 @@ async function handleStockPrice(req, res) {
     currency,
     exchange: quote.exchangeName,
     price_source: quote.source,
-    as_of,
+    as_of: asOf ? `${quote.tradingDay ?? asOf.isoDay}T00:00:00.000Z` : as_of,
+    requested_date: asOf ? asOf.isoDay : null,
+    trading_day: quote.tradingDay ?? null,
     retrieved_at,
   });
 }

@@ -98,3 +98,76 @@ export async function searchTwelveDataSymbol(query) {
     clearTimeout(timer);
   }
 }
+
+// Returns the closing price on a past day, for the historical side of
+// STOCK_PRICE. Markets shut at weekends and on holidays, so this asks for a
+// window ending on the requested day and takes the most recent session in
+// it: 2024-01-15 was Martin Luther King Day and has no bar of its own, but
+// the honest answer to "what was NVDA worth on the 15th" is the last close
+// standing on that day, not a refusal.
+//
+// Live-checked 2026-09-07: time_series for NVDA over 2024-01-15..20 came
+// back with the 16th through the 19th and no 15th, exactly as expected.
+const HISTORICAL_WINDOW_DAYS = 10;
+
+export async function getTwelveDataHistoricalClose(ticker, isoDay) {
+  const apiKey = process.env.TWELVE_DATA_API_KEY;
+  if (!apiKey) throw new Error('TWELVE_DATA_API_KEY is not configured');
+
+  checkBudget();
+  const startDate = new Date(`${isoDay}T00:00:00Z`);
+  startDate.setUTCDate(startDate.getUTCDate() - HISTORICAL_WINDOW_DAYS);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CALL_TIMEOUT_MS);
+  let res;
+  try {
+    const url = new URL('https://api.twelvedata.com/time_series');
+    url.searchParams.set('symbol', ticker);
+    url.searchParams.set('interval', '1day');
+    url.searchParams.set('start_date', startDate.toISOString().slice(0, 10));
+    // end_date is exclusive. Checked live 2026-09-07: asking for
+    // end_date=2023-06-30, an ordinary Friday, returned the 29th and lost a
+    // whole trading day, so this asks through the following day and the
+    // filter below discards anything past the day that was requested.
+    const endDate = new Date(`${isoDay}T00:00:00Z`);
+    endDate.setUTCDate(endDate.getUTCDate() + 1);
+    url.searchParams.set('end_date', endDate.toISOString().slice(0, 10));
+    url.searchParams.set('order', 'DESC');
+    url.searchParams.set('apikey', apiKey);
+    res = await fetch(url, { signal: controller.signal });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error(`Twelve Data request timed out after ${CALL_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const body = await res.json().catch(() => null);
+  if (!res.ok || body?.status === 'error') {
+    const message = body?.message ?? `${res.status} ${res.statusText}`;
+    if (/not found|invalid symbol|symbol.*exist|missing or invalid|no data/i.test(message)) {
+      throw new TwelveDataTickerNotFoundError(`no Twelve Data history found for '${ticker}'`);
+    }
+    throw new Error(`Twelve Data request failed: ${message}`);
+  }
+
+  // Values arrive newest first, and any bar dated after the requested day
+  // would be a future price the asker never wanted.
+  const bar = (body?.values ?? []).find((row) => typeof row?.datetime === 'string' && row.datetime.slice(0, 10) <= isoDay);
+  const price = Number(bar?.close);
+  if (!Number.isFinite(price) || price <= 0) {
+    throw new TwelveDataTickerNotFoundError(`no Twelve Data history found for '${ticker}' on or before ${isoDay}`);
+  }
+
+  return {
+    priceUsd: price,
+    companyName: body?.meta?.name ?? null,
+    currency: body?.meta?.currency ?? 'USD',
+    exchangeName: body?.meta?.exchange ?? null,
+    tradingDay: bar.datetime.slice(0, 10),
+    source: 'twelve_data',
+  };
+}

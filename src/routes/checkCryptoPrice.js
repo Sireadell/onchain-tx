@@ -26,13 +26,15 @@
 // price by on-chain contract address at all.
 
 import { Router } from 'express';
-import { getCoinPrice, CoinNotFoundError } from '../lib/defiLlamaApi.js';
+import { getCoinPrice, getHistoricalCoinPrice, CoinNotFoundError } from '../lib/defiLlamaApi.js';
 import { getCoinPaprikaPrice } from '../lib/coinPaprikaApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 import { extractSubject, freeTextParam, coinAliasParam } from '../lib/entityExtract.js';
 import { resolveChainLoose } from '../lib/chains.js';
 import { describeAddressMiss } from '../lib/addressContext.js';
+import { historicalDateParam } from '../lib/asOfDate.js';
+import { formatUsdPrice } from '../lib/formatUsdPrice.js';
 
 // Tries both sources at once. Once one answers, the other gets a short
 // cross-check window. A slow provider cannot hold a good
@@ -74,13 +76,37 @@ async function getFreshestCoinPrice(coinId) {
     : { ...defiLlama.value, source: 'defillama' };
 
   const sources = [];
-  if (coinPaprika.status === 'fulfilled') sources.push({ source: 'coinpaprika', price_usd: coinPaprika.value.priceUsd });
-  if (defiLlama.status === 'fulfilled') sources.push({ source: 'defillama', price_usd: defiLlama.value.priceUsd });
-  const prices = sources.map((item) => item.price_usd);
+  if (coinPaprika.status === 'fulfilled') sources.push({ source: 'coinpaprika', price_usd: coinPaprika.value.priceUsd, symbol: coinPaprika.value.symbol ?? null });
+  if (defiLlama.status === 'fulfilled') sources.push({ source: 'defillama', price_usd: defiLlama.value.priceUsd, symbol: defiLlama.value.symbol ?? null });
+  // The two sources do not always resolve the same name to the same asset.
+  // Caught live 2026-09-07: coin_id=doge resolved at CoinPaprika to
+  // Dogecoin at $0.0895 and at DefiLlama to an unrelated copycat called
+  // @DOGE at $0.0000487, and the cross-check sentence then read "a range of
+  // $0.00 to $0.09" — one right price and one that is not the asset anyone
+  // asked about. A gap that size is never real market spread between two
+  // feeds a second apart, so it is treated as a resolution mismatch: the
+  // CoinPaprika reading is kept (it matches slug or symbol exactly and
+  // breaks ties by market rank) and the other is dropped rather than being
+  // presented as corroboration.
+  const MAX_CROSS_CHECK_RATIO = 1.25;
+  let agreeing = sources;
+  if (sources.length > 1) {
+    const symbols = sources.map((item) => item.symbol?.toUpperCase() ?? null);
+    const symbolsDisagree = symbols[0] && symbols[1] && symbols[0] !== symbols[1];
+    const values = sources.map((item) => item.price_usd);
+    const low = Math.min(...values);
+    const high = Math.max(...values);
+    const pricesDisagree = low > 0 && high / low > MAX_CROSS_CHECK_RATIO;
+    if (symbolsDisagree || pricesDisagree) {
+      agreeing = sources.filter((item) => item.source === primary.source);
+    }
+  }
+
+  const prices = agreeing.map((item) => item.price_usd);
   return {
     ...primary,
-    sources,
-    sourceCount: sources.length,
+    sources: agreeing.map(({ source, price_usd }) => ({ source, price_usd })),
+    sourceCount: agreeing.length,
     priceRangeLowUsd: prices.length ? Math.min(...prices) : primary.priceUsd,
     priceRangeHighUsd: prices.length ? Math.max(...prices) : primary.priceUsd,
   };
@@ -169,7 +195,31 @@ async function handleCryptoPrice(req, res) {
     }
   }
 
-  const chainTokenMode = Boolean(priceChain || token);
+  // A coin name in the token field is the same misfiling as a chain name
+  // with no token, one field over. Live-checked 2026-09-07 against the
+  // deployed miner: token=bitcoin was refused as an incomplete pair, and
+  // price_chain=Coinbase&token=ethereum was refused as an invalid contract
+  // address, when both plainly asked for the price of a major coin.
+  //
+  // Deliberately narrow. It only fires when the value is not a contract
+  // address, does read as a name, and no real chain was named beside it —
+  // price_chain=ethereum with a malformed address is a genuine contract
+  // lookup that got the address wrong, and that keeps the guidance below
+  // telling the caller what an address looks like. Same reasoning as the
+  // chain-name table above: where it does fire, a recovered lookup can be
+  // no worse than the refusal it replaces, because both score zero when
+  // wrong and the refusal scores zero always.
+  const COIN_NAME_RE = /^[A-Za-z][A-Za-z0-9 .-]{1,39}$/;
+  let recoveredCoinFromToken = false;
+  if (!coinId && tokenSupplied && !TOKEN_ADDRESS_RE.test(String(tokenSupplied))
+      && COIN_NAME_RE.test(String(tokenSupplied))
+      && !(priceChain && resolveChainLoose(String(priceChain)))) {
+    coinId = String(tokenSupplied).trim();
+    priceChain = undefined;
+    recoveredCoinFromToken = true;
+  }
+
+  const chainTokenMode = recoveredCoinFromToken ? false : Boolean(priceChain || token);
   if (!coinId && !chainTokenMode) {
     return respondUnusableInput(
       res,
@@ -200,9 +250,20 @@ async function handleCryptoPrice(req, res) {
   const coinKey = coinId ? `coingecko:${coinId}` : `${priceChain}:${token}`;
   const query = coinId ?? `${priceChain}:${token}`;
 
+  // "What was Bitcoin worth on 2023-01-01?" arrives as
+  // /crypto-price?coin_id=bitcoin&date=2023-01-01. Until 2026-09-07 this
+  // route ignored `date` and answered with today's price. Both modes are
+  // covered, because DefiLlama prices a past day by coin id and by contract
+  // address alike. See asOfDate.js for the log evidence.
+  const asOf = historicalDateParam(params);
+
   let priceInfo;
   try {
-    priceInfo = coinId ? await getFreshestCoinPrice(coinId) : await getCoinPrice(coinKey);
+    if (asOf) {
+      priceInfo = await getHistoricalCoinPrice(coinKey, asOf.unixSeconds);
+    } else {
+      priceInfo = coinId ? await getFreshestCoinPrice(coinId) : await getCoinPrice(coinKey);
+    }
   } catch (err) {
     if (err instanceof CoinNotFoundError) {
       // A contract-address lookup that finds no price is usually a question
@@ -211,7 +272,9 @@ async function handleCryptoPrice(req, res) {
       // restates the failure, and is graded against a real sentence it
       // shares almost nothing with. See addressContext.js for the live
       // signal that prompted this.
-      let summary = `no price found for '${query}'`;
+      let summary = asOf
+        ? `no price found for '${query}' on ${asOf.isoDay}`
+        : `no price found for '${query}'`;
       if (chainTokenMode) {
         const resolved = resolveChainLoose(String(priceChain));
         if (resolved) {
@@ -250,7 +313,7 @@ async function handleCryptoPrice(req, res) {
   const SOURCE_LABELS = { coinpaprika: 'CoinPaprika', defillama: 'DefiLlama' };
   const sourceNames = (priceInfo.sources ?? []).map((item) => SOURCE_LABELS[item.source] ?? item.source);
   const sourceText = priceInfo.sourceCount > 1
-    ? ` ${new Intl.ListFormat('en', { type: 'conjunction' }).format(sourceNames)} currently report a range of $${priceInfo.priceRangeLowUsd.toFixed(2)} to $${priceInfo.priceRangeHighUsd.toFixed(2)}.`
+    ? ` ${new Intl.ListFormat('en', { type: 'conjunction' }).format(sourceNames)} currently report a range of $${formatUsdPrice(priceInfo.priceRangeLowUsd)} to $${formatUsdPrice(priceInfo.priceRangeHighUsd)}.`
     : '';
   // Price in the summary text is fixed to 2 decimal places (standard USD
   // cent precision), not the source's full float precision. Verified
@@ -271,12 +334,14 @@ async function handleCryptoPrice(req, res) {
   // 2026-09-05: the graded question "What is the current price of Bitcoin
   // (BTC) in USD?" was answered "$79,551.98" and scored 1.9e-26, the lowest
   // of all fourteen intents.
-  const priceUsdFixed = priceInfo.priceUsd.toFixed(2);
+  const priceUsdFixed = formatUsdPrice(priceInfo.priceUsd);
   res.json({
     query_type: queryType,
     query,
     status: 'ok',
-    summary: `${symbol ?? query} is currently $${priceUsdFixed} USD${changeText}${marketCapText}.${sourceText}`,
+    summary: asOf
+      ? `${symbol ?? query} was $${priceUsdFixed} USD on ${asOf.isoDay}.`
+      : `${symbol ?? query} is currently $${priceUsdFixed} USD${changeText}${marketCapText}.${sourceText}`,
     confidence: 1.0,
     canonical: [queryType, query, priceInfo.priceUsd].join(':'),
     price_usd: priceInfo.priceUsd,
@@ -289,6 +354,7 @@ async function handleCryptoPrice(req, res) {
     change_24h_pct: priceInfo.change24hPct ?? null,
     market_cap_usd: priceInfo.marketCapUsd ?? null,
     as_of,
+    requested_date: asOf ? asOf.isoDay : null,
   });
 }
 
