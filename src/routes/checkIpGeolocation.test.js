@@ -151,6 +151,8 @@ test('ip-geolocate: a private address answer cites its block and standard', asyn
   assert.match(body.summary, /192\.168\.0\.0\/16/);
   assert.match(body.summary, /RFC 1918/);
   assert.match(body.summary, /no geographic location/);
+  assert.match(body.summary, /abuse or reputation history/);
+  assert.match(body.summary, /autonomous system/);
   assert.equal(body.reserved_cidr, '192.168.0.0/16');
   assert.equal(body.reserved_standard, 'RFC 1918');
   // "a unspecified" was the first draft of this sentence builder.
