@@ -34,37 +34,77 @@ const IPAPI_FIELDS = 'status,message,country,countryCode,regionName,city,zip,lat
 // error or return a meaningless result for a non-routable address — the
 // current rank-3 IP_GEOLOCATION miner (preflight-ssl-verification)
 // advertises exactly this behavior.
-const PRIVATE_RANGES_V4 = [
-  { base: [10, 0, 0, 0], bits: 8 },
-  { base: [172, 16, 0, 0], bits: 12 },
-  { base: [192, 168, 0, 0], bits: 16 },
-  { base: [127, 0, 0, 0], bits: 8 },
-  { base: [169, 254, 0, 0], bits: 16 },
+// Every IPv4 block that is reserved rather than publicly routable, with the
+// standard that reserves it and the CIDR to quote back. Answering these from
+// the table rather than from a geolocation provider is the whole point: a
+// provider either errors on them or, worse, invents a location. On
+// 2026-09-09 the live service answered 203.0.113.5 — TEST-NET-3, a block
+// reserved for documentation and examples — as "located in New York, New
+// York, United States, operated by TEST-NET-3", which is a confidently
+// wrong answer to a question with a known correct one. The documentation,
+// carrier-grade NAT, benchmark, multicast and reserved blocks were all
+// missing here and fell through to the provider.
+const RESERVED_RANGES_V4 = [
+  { base: [0, 0, 0, 0], bits: 8, kind: 'unspecified', cidr: '0.0.0.0/8', standard: 'RFC 1122' },
+  { base: [10, 0, 0, 0], bits: 8, kind: 'private', cidr: '10.0.0.0/8', standard: 'RFC 1918' },
+  { base: [100, 64, 0, 0], bits: 10, kind: 'carrier-grade NAT', cidr: '100.64.0.0/10', standard: 'RFC 6598' },
+  { base: [127, 0, 0, 0], bits: 8, kind: 'loopback', cidr: '127.0.0.0/8', standard: 'RFC 1122' },
+  { base: [169, 254, 0, 0], bits: 16, kind: 'link-local', cidr: '169.254.0.0/16', standard: 'RFC 3927' },
+  { base: [172, 16, 0, 0], bits: 12, kind: 'private', cidr: '172.16.0.0/12', standard: 'RFC 1918' },
+  { base: [192, 0, 2, 0], bits: 24, kind: 'documentation', cidr: '192.0.2.0/24 (TEST-NET-1)', standard: 'RFC 5737' },
+  { base: [192, 168, 0, 0], bits: 16, kind: 'private', cidr: '192.168.0.0/16', standard: 'RFC 1918' },
+  { base: [198, 18, 0, 0], bits: 15, kind: 'benchmarking', cidr: '198.18.0.0/15', standard: 'RFC 2544' },
+  { base: [198, 51, 100, 0], bits: 24, kind: 'documentation', cidr: '198.51.100.0/24 (TEST-NET-2)', standard: 'RFC 5737' },
+  { base: [203, 0, 113, 0], bits: 24, kind: 'documentation', cidr: '203.0.113.0/24 (TEST-NET-3)', standard: 'RFC 5737' },
+  { base: [224, 0, 0, 0], bits: 4, kind: 'multicast', cidr: '224.0.0.0/4', standard: 'RFC 5771' },
+  { base: [240, 0, 0, 0], bits: 4, kind: 'reserved', cidr: '240.0.0.0/4', standard: 'RFC 1112' },
+];
+
+const RESERVED_RANGES_V6 = [
+  { test: (ip) => ip === '::1' || ip === '0:0:0:0:0:0:0:1', kind: 'loopback', cidr: '::1/128', standard: 'RFC 4291' },
+  { test: (ip) => ip === '::' || /^0:0:0:0:0:0:0:0$/.test(ip), kind: 'unspecified', cidr: '::/128', standard: 'RFC 4291' },
+  { test: (ip) => /^2001:0*db8:/i.test(ip), kind: 'documentation', cidr: '2001:db8::/32', standard: 'RFC 3849' },
+  { test: (ip) => /^f[cd][0-9a-f]{2}:/i.test(ip), kind: 'unique-local', cidr: 'fc00::/7', standard: 'RFC 4193' },
+  // fe80::/10 is the whole link-local block, so the first group runs
+  // fe80-febf, not fe80 alone.
+  { test: (ip) => /^fe[89ab][0-9a-f]:/i.test(ip), kind: 'link-local', cidr: 'fe80::/10', standard: 'RFC 4291' },
+  { test: (ip) => /^ff[0-9a-f]{2}:/i.test(ip), kind: 'multicast', cidr: 'ff00::/8', standard: 'RFC 4291' },
 ];
 
 function ipv4ToInt(parts) {
   return parts.reduce((acc, p) => (acc << 8) + p, 0) >>> 0;
 }
 
-export function classifyPrivateIp(ip) {
-  if (ip === '::1' || ip === '0:0:0:0:0:0:0:1') return 'loopback';
-  if (/^f[cd][0-9a-f]{2}:/i.test(ip)) return 'unique-local';
-  // fe80::/10 is the whole link-local block, so the first group runs
-  // fe80-febf, not fe80 alone.
-  if (/^fe[89ab][0-9a-f]:/i.test(ip)) return 'link-local';
+// Returns { kind, cidr, standard } for a reserved address, or null for one
+// that is genuinely routable and worth a provider lookup.
+export function classifyReservedIp(ip) {
+  const text = String(ip ?? '').trim();
+  if (!text) return null;
+  for (const range of RESERVED_RANGES_V6) {
+    if (range.test(text)) return { kind: range.kind, cidr: range.cidr, standard: range.standard };
+  }
   // The IPv4-mapped prefix is hex, so it can arrive as ::FFFF: too.
-  const v4 = /^::ffff:/i.test(ip) ? ip.slice(7) : ip;
+  const v4 = /^::ffff:/i.test(text) ? text.slice(7) : text;
   const parts = v4.split('.').map(Number);
   if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) return null;
+  if (v4 === '255.255.255.255') {
+    return { kind: 'broadcast', cidr: '255.255.255.255/32', standard: 'RFC 919' };
+  }
   const value = ipv4ToInt(parts);
-  for (const range of PRIVATE_RANGES_V4) {
+  for (const range of RESERVED_RANGES_V4) {
     const rangeValue = ipv4ToInt(range.base);
     const mask = range.bits === 0 ? 0 : (0xffffffff << (32 - range.bits)) >>> 0;
     if ((value & mask) === (rangeValue & mask)) {
-      return range.base[0] === 127 ? 'loopback' : range.base[0] === 169 ? 'link-local' : 'private';
+      return { kind: range.kind, cidr: range.cidr, standard: range.standard };
     }
   }
   return null;
+}
+
+// Kept as the name the rest of the codebase already imports. Returns just
+// the kind, which is what the response field carries.
+export function classifyPrivateIp(ip) {
+  return classifyReservedIp(ip)?.kind ?? null;
 }
 
 export class IpLookupError extends Error {
@@ -206,10 +246,12 @@ async function geolocateViaIpwhois(ip) {
 // call, which is worse for a graded intent than a stable pick that is
 // sometimes not the fastest available answer.
 export async function geolocateIp(ip) {
-  const privateKind = classifyPrivateIp(ip);
-  if (privateKind) {
+  const reserved = classifyReservedIp(ip);
+  if (reserved) {
     return {
       ip,
+      reserved_cidr: reserved.cidr,
+      reserved_standard: reserved.standard,
       country: null,
       country_code: null,
       region: null,
@@ -225,7 +267,7 @@ export async function geolocateIp(ip) {
       is_proxy_or_vpn: null,
       is_hosting: null,
       is_private_range: true,
-      private_range_kind: privateKind,
+      private_range_kind: reserved.kind,
     };
   }
 

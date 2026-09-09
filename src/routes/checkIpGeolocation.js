@@ -9,6 +9,32 @@ import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 
 const router = Router();
 
+// What each reserved block is actually for, in the clause that follows the
+// address. A reader asking "where is 192.168.1.1" is owed the reason there
+// is no answer, not just the refusal of one.
+const RESERVED_PURPOSE = {
+  private: 'used inside local networks and never routed on the public internet',
+  loopback: 'which always refers to the host making the request',
+  'link-local': 'self-assigned by a host when no DHCP server answers, and never routed off the local link',
+  'carrier-grade NAT': 'used by internet providers to share public addresses between many subscribers',
+  documentation: 'set aside for documentation and examples, so no real host holds it',
+  benchmarking: 'set aside for network device benchmarking, so no real host holds it',
+  multicast: 'used to address a group of hosts rather than a single located machine',
+  broadcast: 'which addresses every host on the local network at once',
+  unspecified: 'which names no host at all',
+  reserved: 'held by the IETF for future use, so no real host holds it',
+  'unique-local': 'the IPv6 equivalent of a private range, used inside local networks only',
+};
+
+export function reservedSummary(result) {
+  const kind = result.private_range_kind;
+  const article = /^[aeiou]/i.test(kind) ? 'an' : 'a';
+  const block = result.reserved_cidr ? ` in ${result.reserved_cidr}` : '';
+  const standard = result.reserved_standard ? `, reserved by ${result.reserved_standard}` : '';
+  const purpose = RESERVED_PURPOSE[kind] ? `, ${RESERVED_PURPOSE[kind]}` : '';
+  return `${result.ip} is ${article} ${kind} address${block}${standard}${purpose}. It is not publicly routable, so it has no geographic location, no network operator and no country.`;
+}
+
 export async function handleIpGeolocation(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
   const rawIp = params?.ip ?? params?.query ?? params?.q ?? params?.question ?? params?.address;
@@ -45,12 +71,20 @@ export async function handleIpGeolocation(req, res) {
     return res.json({
       query: rawIp,
       status: 'ok',
-      summary: `${result.ip} is a ${result.private_range_kind} address, not a publicly routable one, so it has no geographic location.`,
+      // Name the block and the standard that reserves it. The one-line
+      // version ("is a private address, so it has no location") is true but
+      // thin, and this intent is graded against a reference answer that
+      // states the reason. The rank-1 miner on 2026-09-09 was answering the
+      // same private-address questions by citing RFC 1918 and explaining
+      // why no location exists; we were not.
+      summary: reservedSummary(result),
       confidence: 1.0,
       canonical: ['ip-geo', result.ip].join(':'),
       ip: result.ip,
       is_private_range: true,
       private_range_kind: result.private_range_kind,
+      reserved_cidr: result.reserved_cidr ?? null,
+      reserved_standard: result.reserved_standard ?? null,
       country: null,
       country_code: null,
       region: null,
