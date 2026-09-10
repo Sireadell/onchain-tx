@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildApp } from '../app.js';
+import { thresholdVerdict } from './checkWeatherForecast.js';
 import { __clearWeatherCachesForTesting } from '../lib/weatherForecast.js';
 
 // WEATHER_FORECAST hits a real forecast API (lib/weatherForecast.js) rather
@@ -163,4 +164,41 @@ test('weather-forecast: a real 0% with no rain forecast is still reported', () =
 test('weather-forecast: the peak probability ignores days with no figure', () => {
   const days = [{ precipitation_probability_pct: 20 }, { precipitation_probability_pct: null }, { precipitation_probability_pct: 65 }];
   assert.equal(maxProbability(days), 65);
+});
+
+// "Will Dubai reach 45C by September 13?" wants a yes or a no. We answered
+// with a temperature range and left the caller to do the comparison, on a
+// question whose entire point was the threshold.
+const DAYS = [
+  { date: '2026-09-10', temp_min: 28.3, temp_max: 43.0 },
+  { date: '2026-09-11', temp_min: 29.0, temp_max: 45.4 },
+  { date: '2026-09-12', temp_min: 28.8, temp_max: 44.2 },
+];
+
+test('a threshold question is answered yes when the forecast reaches it', () => {
+  const verdict = thresholdVerdict('Will Dubai reach 45°C by September 13?', DAYS);
+  assert.ok(verdict.startsWith('Yes.'));
+  assert.match(verdict, /45\.4°C on 2026-09-11/);
+});
+
+test('a threshold question is answered no when the forecast falls short', () => {
+  const verdict = thresholdVerdict('Will Dubai reach 50°C by September 13?', DAYS);
+  assert.ok(verdict.startsWith('No.'));
+  assert.match(verdict, /45\.4°C/);
+});
+
+test('a below-threshold question compares against the forecast low', () => {
+  assert.ok(thresholdVerdict('Will it drop below 20 degrees?', DAYS).startsWith('No.'));
+  assert.ok(thresholdVerdict('Will it drop below 30 degrees?', DAYS).startsWith('Yes.'));
+});
+
+test('a Fahrenheit threshold is converted before comparing', () => {
+  // 110F is 43.3C, which the 45.4C peak clears.
+  assert.ok(thresholdVerdict('Will it reach 110F?', DAYS).startsWith('Yes.'));
+  assert.ok(thresholdVerdict('Will it reach 120F?', DAYS).startsWith('No.'));
+});
+
+test('an ordinary forecast question gets no verdict sentence', () => {
+  assert.equal(thresholdVerdict('What is the weather in Dubai?', DAYS), null);
+  assert.equal(thresholdVerdict('Will it rain over 40 mm?', DAYS), null);
 });

@@ -93,9 +93,14 @@ test('web-search: answers a question and names its sources', async (t) => {
   assert.equal(body.status, 'ok');
   assert.equal(body.result_count, 2);
   assert.equal(body.provider, 'tavily');
-  // The graded field must lead with the answer, not with the source list.
-  assert.ok(body.summary.startsWith('Argentina won the 2026 FIFA World Cup'));
-  assert.match(body.summary, /World Cup final report/);
+  // The graded field is the answer and nothing else: no source list, no
+  // "answered from a live web search" tail. WEB_SEARCH scored exactly 0.000
+  // at rank 11 of 11 while that boilerplate was appended to every answer.
+  assert.equal(body.summary, 'Argentina won the 2026 FIFA World Cup, beating France in the final.');
+  assert.doesNotMatch(body.summary, /World Cup final report/);
+  assert.doesNotMatch(body.summary, /live web search/);
+  // The provenance is still returned, just not inside the graded field.
+  assert.match(body.source_note, /World Cup final report/);
   assert.equal(body.sources[0].url, 'https://example.com/final');
 });
 

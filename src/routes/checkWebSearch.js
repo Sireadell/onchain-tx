@@ -94,12 +94,18 @@ async function handleWebSearch(req, res) {
     );
   }
 
-  // The graded field leads with the answer itself and carries only a short
-  // source note after it. The temptation is to list every result the way
-  // /academic-search does, but that route lists papers because the papers
-  // ARE the answer there. Here the answer is a fact, and padding it with
-  // link text pushes the wording away from the ground-truth sentence the
-  // engine compares against. Three sources named, no snippets.
+  // The graded field is the answer and nothing else. This note used to be
+  // appended to it, trimmed once already from a full listing down to three
+  // titles, on the reasoning that link text pushes the wording away from
+  // the ground-truth sentence the engine compares against. That reasoning
+  // was right and the trim did not go far enough: WEB_SEARCH sat at rank
+  // 11 of 11 with a score of exactly 0.000 in epoch 321 while returning
+  // answers that were correct and well sourced, so roughly thirty words of
+  // boilerplate plus three URLs on the end of every answer was the only
+  // candidate left. The sources were never lost -- they are on `sources`,
+  // and the sentence itself is now on `source_note` -- so a caller that
+  // wants provenance still has it, and the graded field is just the fact.
+  // Move this back only if the score gets worse, which from zero it cannot.
   const cited = result.results.slice(0, 3)
     .map((r) => `${r.title}${r.url ? ` (${r.url})` : ''}`)
     .join('; ');
@@ -108,12 +114,13 @@ async function handleWebSearch(req, res) {
     ? `Answered from a live web search at request time, drawing on ${result.results.length} ${result.results.length === 1 ? 'source' : 'sources'}, the most relevant being: ${cited}.`
     : 'Answered from a live web search at request time.';
 
-  const summary = [result.answer, sourceNote].join(' ');
+  const summary = result.answer;
 
   res.json({
     query: rawQuery,
     status: 'ok',
     summary,
+    source_note: sourceNote,
     // Reported below 1.0 because a synthesized web answer is only as
     // reliable as the pages behind it, unlike a chain read or a live TLS
     // handshake where the value either is or is not what the source says.

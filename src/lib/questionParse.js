@@ -38,6 +38,100 @@ const RELATIVE_WINDOW_RE = /\b(?:in|over|for|within|during)?\s*(?:the\s+)?next\s
 const BARE_WINDOW_RE = /\b(?:in|within|over)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s*(hour|hours|day|days)\b/i;
 const NUMBER_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
 
+// Month names, long and abbreviated, for a question that names an actual
+// calendar date. Added 2026-09-10: live traffic asked "Will Dubai reach 45C
+// by September 13?" and the engine forwarded it as `when=September 13`.
+// Nothing here parsed a named date, so parseWhen returned null, the route
+// fell back to its default 3-day window, and we answered 2026-09-10 to
+// 2026-09-12 — a window that does not contain the day asked about. The
+// answer was confidently wrong rather than merely unhelpful.
+const MONTH_NAMES = [
+  'january', 'february', 'march', 'april', 'may', 'june',
+  'july', 'august', 'september', 'october', 'november', 'december',
+];
+const MONTH_INDEX = new Map();
+for (let i = 0; i < MONTH_NAMES.length; i += 1) {
+  MONTH_INDEX.set(MONTH_NAMES[i], i);
+  MONTH_INDEX.set(MONTH_NAMES[i].slice(0, 3), i);
+}
+// "sept" is the one common abbreviation the 3-letter rule above gets wrong.
+MONTH_INDEX.set('sept', 8);
+
+const MONTH_ALT = [...MONTH_INDEX.keys()].sort((a, b) => b.length - a.length).join('|');
+// "September 13", "Sept 13th", "September 13, 2026"
+const MONTH_DAY_RE = new RegExp(String.raw`\b(${MONTH_ALT})\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b`, 'i');
+// "13 September", "13th of September 2026"
+const DAY_MONTH_RE = new RegExp(String.raw`\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(${MONTH_ALT})\.?(?:,?\s+(\d{4}))?\b`, 'i');
+// "by 13 September", "until September 13" — the question asks about the
+// whole stretch between today and that date, not that one day alone.
+const THROUGH_DATE_RE = /\b(?:by|until|till|through|before|ahead of|leading up to)\s*$/i;
+
+// Whole days between two dates, counted on the calendar in UTC so a local
+// clock near midnight cannot shift the answer by a day.
+function daysBetweenUtc(from, to) {
+  const a = Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate());
+  const b = Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate());
+  return Math.round((b - a) / 86400000);
+}
+
+// Open-Meteo publishes 16 days of forecast. Past that there is no honest
+// answer to give, and silently substituting a nearer window is exactly what
+// produced the wrong-window bug in the first place.
+export const MAX_FORECAST_DAY_OFFSET = 15;
+
+// A named calendar date in `text`, in the same shape the rest of parseWhen
+// returns, or null when no date is named. `outOfRange` is set when the date
+// is real but beyond what any forecast covers, so the caller can say so
+// instead of quietly answering about a different day.
+export function parseCalendarDate(text, now = new Date()) {
+  if (typeof text !== 'string') return null;
+
+  let match = text.match(MONTH_DAY_RE);
+  let monthName;
+  let dayOfMonth;
+  let year;
+  if (match) {
+    [, monthName, dayOfMonth, year] = match;
+  } else {
+    match = text.match(DAY_MONTH_RE);
+    if (!match) return null;
+    [, dayOfMonth, monthName, year] = match;
+  }
+
+  const month = MONTH_INDEX.get(monthName.toLowerCase());
+  const day = Number(dayOfMonth);
+  if (month == null || !Number.isInteger(day) || day < 1 || day > 31) return null;
+
+  const explicitYear = year ? Number(year) : null;
+  let target = new Date(Date.UTC(explicitYear ?? now.getUTCFullYear(), month, day));
+  // Guards against a rolled-over date such as "February 31", which JS would
+  // silently turn into March 3rd and we would then answer about.
+  if (target.getUTCMonth() !== month || target.getUTCDate() !== day) return null;
+
+  let offset = daysBetweenUtc(now, target);
+  // A bare "January 5" asked in December means next January, not the one
+  // already gone. Only applied when the caller named no year.
+  if (offset < 0 && explicitYear == null) {
+    target = new Date(Date.UTC(now.getUTCFullYear() + 1, month, day));
+    offset = daysBetweenUtc(now, target);
+  }
+  if (offset < 0) return null;
+
+  const label = `${MONTH_NAMES[month][0].toUpperCase()}${MONTH_NAMES[month].slice(1)} ${day}`;
+  const isoDate = target.toISOString().slice(0, 10);
+  if (offset > MAX_FORECAST_DAY_OFFSET) {
+    return { label, date: isoDate, startDay: offset, days: 1, hours: (offset + 1) * 24, outOfRange: true };
+  }
+
+  // "by September 13" covers today through that date; a bare or "on"
+  // September 13 means that one day.
+  const through = THROUGH_DATE_RE.test(text.slice(0, match.index));
+  if (through) {
+    return { label: `through ${label}`, date: isoDate, startDay: 0, days: offset + 1, hours: (offset + 1) * 24 };
+  }
+  return { label, date: isoDate, startDay: offset, days: 1, hours: (offset + 1) * 24 };
+}
+
 const LAT_LON_RE = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/;
 
 // Coordinates written out in words inside a sentence, e.g. "at latitude
@@ -134,6 +228,59 @@ const COUNTRY_ABBREVIATIONS = new Map([
   ['br', 'Brazil'], ['mx', 'Mexico'], ['in', 'India'], ['ng', 'Nigeria'],
 ]);
 
+// Country and US-state names that commonly trail a city with no comma
+// between them. Live traffic on 2026-09-10 sent "Lagos Nigeria": the
+// geocoder matched nothing for the pair, the next candidate was the bare
+// capitalised run "Nigeria", and we answered with the country centroid —
+// light drizzle at 20C, when Lagos itself was having a thunderstorm at
+// 24.6C. The lowercase "lagos nigeria" had no capitalised run at all and
+// was refused outright. Only "Lagos, Nigeria" worked, so a comma the
+// caller had no reason to supply decided whether the answer was right.
+const TRAILING_REGIONS = [
+  'united kingdom', 'united states', 'united arab emirates', 'new zealand',
+  'south africa', 'south korea', 'north korea', 'saudi arabia', 'sri lanka',
+  'czech republic', 'dominican republic', 'costa rica', 'puerto rico',
+  'hong kong', 'south sudan', 'new caledonia', 'papua new guinea',
+  'nigeria', 'ghana', 'kenya', 'egypt', 'morocco', 'tanzania', 'uganda',
+  'ethiopia', 'senegal', 'angola', 'zambia', 'zimbabwe', 'cameroon',
+  'india', 'china', 'japan', 'france', 'germany', 'spain', 'italy',
+  'portugal', 'greece', 'turkey', 'poland', 'sweden', 'norway', 'denmark',
+  'finland', 'ireland', 'iceland', 'austria', 'belgium', 'netherlands',
+  'switzerland', 'russia', 'ukraine', 'romania', 'hungary', 'bulgaria',
+  'croatia', 'serbia', 'canada', 'mexico', 'brazil', 'argentina', 'chile',
+  'colombia', 'peru', 'venezuela', 'ecuador', 'bolivia', 'uruguay', 'cuba',
+  'jamaica', 'panama', 'guatemala', 'australia', 'indonesia', 'malaysia',
+  'singapore', 'thailand', 'vietnam', 'philippines', 'pakistan',
+  'bangladesh', 'nepal', 'israel', 'jordan', 'lebanon', 'iraq', 'iran',
+  'qatar', 'kuwait', 'oman', 'bahrain', 'afghanistan', 'kazakhstan',
+  'texas', 'california', 'florida', 'new york', 'louisiana', 'nevada',
+  'arizona', 'colorado', 'illinois', 'georgia', 'ohio', 'michigan',
+  'washington', 'oregon', 'massachusetts', 'virginia', 'maryland',
+  'pennsylvania', 'north carolina', 'south carolina', 'new jersey',
+  'new mexico', 'alabama', 'alaska', 'hawaii', 'utah', 'missouri',
+  'minnesota', 'wisconsin', 'indiana', 'tennessee', 'kentucky', 'oklahoma',
+  'kansas', 'iowa', 'arkansas', 'mississippi', 'connecticut', 'maine',
+].sort((a, b) => b.split(' ').length - a.split(' ').length);
+
+// Splits "Lagos Nigeria" into "Lagos, Nigeria" plus the bare city, so the
+// pair resolves the way the comma'd form already does. Returns [] when the
+// string has a comma already, names no known region, or is only the region.
+export function splitTrailingRegion(value) {
+  const text = String(value ?? '').trim();
+  if (!text || text.includes(',')) return [];
+  const lower = text.toLowerCase();
+  for (const region of TRAILING_REGIONS) {
+    if (!lower.endsWith(` ${region}`)) continue;
+    const city = text.slice(0, text.length - region.length - 1).trim();
+    if (city.length < 2) return [];
+    // Keep the caller's own spelling of the region rather than ours, so
+    // "Lagos NIGERIA" is not answered about a place called "Nigeria".
+    const regionAsWritten = text.slice(text.length - region.length);
+    return [`${city}, ${regionAsWritten}`, city];
+  }
+  return [];
+}
+
 // Rewrites a trailing country abbreviation to its full name, so
 // "London, UK" becomes "London, United Kingdom" and a bare "UK" becomes
 // "United Kingdom". Returns null when there is nothing to rewrite, so the
@@ -212,6 +359,10 @@ export function locationCandidates(text) {
     if (head) push(head);
   }
 
+  // Before any single-token fallback: a "City Region" pair written without
+  // a comma, which otherwise degrades to the region on its own.
+  for (const candidate of splitTrailingRegion(raw)) push(candidate);
+
   for (const place of possessivePlaces) push(place);
   if (prepositional) push(prepositional[1]);
   // The same phrase with the time window cut off, and with no capital
@@ -255,6 +406,11 @@ export function parseWhen(text) {
       };
     }
   }
+
+  // A named calendar date is the most specific thing a question can carry,
+  // so it is read before the vaguer "tomorrow"/"this week" phrases below.
+  const calendar = parseCalendarDate(text);
+  if (calendar) return calendar;
 
   if (/\btomorrow\b/.test(t)) return { label: 'tomorrow', startDay: 1, days: 1, hours: 48 };
   if (/\b(?:today|tonight|right now|currently|at the moment)\b/.test(t)) {

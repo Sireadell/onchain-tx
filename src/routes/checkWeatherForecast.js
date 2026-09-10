@@ -10,7 +10,7 @@
 
 import { Router } from 'express';
 import { fetchForecast, withQuestionFallback, WeatherLookupError, WeatherUpstreamError } from '../lib/weatherForecast.js';
-import { parseWhen, parseFocus } from '../lib/questionParse.js';
+import { parseWhen, parseFocus, MAX_FORECAST_DAY_OFFSET } from '../lib/questionParse.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { questionMatchesIntent, WEATHER_CUES } from '../lib/intentGuard.js';
 
@@ -46,6 +46,52 @@ function windPhrase(day) {
   const gust = day.wind_gust_max_kmh ? `, gusting to ${day.wind_gust_max_kmh.toFixed(0)} km/h` : '';
   const dir = day.wind_direction ? ` from the ${day.wind_direction}` : '';
   return `up to ${day.wind_max_kmh.toFixed(0)} km/h${dir}${gust}`;
+}
+
+// A question like "Will Dubai reach 45C by September 13?" wants yes or no,
+// not a temperature range. Reciting the range and leaving the caller to do
+// the comparison is what we were doing on 2026-09-10, on a question whose
+// whole point was the threshold. Returns null when the question names no
+// threshold, so ordinary forecasts are untouched.
+const ABOVE_RE = /\b(?:reach(?:es|ed)?|exceed(?:s|ed)?|hit(?:s)?|go(?:es)?\s+above|get(?:s)?\s+above|climb(?:s)?\s+(?:to|above)|rise(?:s)?\s+(?:to|above)|be\s+above|top(?:s)?|over)\s+(-?\d+(?:\.\d+)?)\s*(?:°\s*)?(c|f|celsius|fahrenheit)?\b/i;
+const BELOW_RE = /\b(?:drop(?:s)?\s+(?:to|below)|fall(?:s)?\s+(?:to|below)|go(?:es)?\s+below|get(?:s)?\s+(?:down\s+)?below|be\s+below|dip(?:s)?\s+below|under)\s+(-?\d+(?:\.\d+)?)\s*(?:°\s*)?(c|f|celsius|fahrenheit)?\b/i;
+
+const toCelsius = (value, unit) => (/^f/i.test(unit ?? '') ? (value - 32) * (5 / 9) : value);
+
+export function thresholdVerdict(text, days) {
+  if (typeof text !== 'string' || !days?.length) return null;
+  // Only a temperature threshold is answered here. "over 40 mm of rain" and
+  // similar need their own comparison and are left to the focus sentence
+  // rather than answered wrongly against a temperature.
+  const namesTemperature = /\b(?:degrees?|celsius|fahrenheit|temperature|hot|cold|warm|hotter|colder|warmer)\b/i.test(text)
+    || /°/.test(text)
+    // "Will it reach 110F?" names a temperature with no temperature word in
+    // it at all, so a bare number carrying a C or F unit counts too. "40 mm"
+    // and "40 cm" do not, because the unit letter is not on a word boundary.
+    || /\d\s*°?\s*[cf]\b/i.test(text);
+  if (!namesTemperature) return null;
+
+  const above = text.match(ABOVE_RE);
+  const below = !above ? text.match(BELOW_RE) : null;
+  const match = above ?? below;
+  if (!match) return null;
+
+  const threshold = toCelsius(Number(match[1]), match[2]);
+  if (!Number.isFinite(threshold)) return null;
+
+  const shown = `${Number(threshold.toFixed(1))}°C`;
+  if (above) {
+    const peak = Math.max(...days.map((d) => d.temp_max));
+    const peakDay = days.find((d) => d.temp_max === peak);
+    return peak >= threshold
+      ? `Yes. The forecast high reaches ${Number(peak.toFixed(1))}°C on ${peakDay.date}, at or above ${shown}.`
+      : `No. The highest forecast temperature is ${Number(peak.toFixed(1))}°C on ${peakDay.date}, short of ${shown}.`;
+  }
+  const low = Math.min(...days.map((d) => d.temp_min));
+  const lowDay = days.find((d) => d.temp_min === low);
+  return low <= threshold
+    ? `Yes. The forecast low drops to ${Number(low.toFixed(1))}°C on ${lowDay.date}, at or below ${shown}.`
+    : `No. The lowest forecast temperature is ${Number(low.toFixed(1))}°C on ${lowDay.date}, never reaching ${shown}.`;
 }
 
 // The sentence the answer opens with, when the question emphasised one
@@ -91,7 +137,7 @@ function focusSentence(focus, days, spanLabel) {
 // this field, and the competing miner that leads this intent answers in a
 // full paragraph that names every dimension it checked; a terse range
 // loses to that even when the underlying numbers are identical.
-function summarize(location, days, when, focus, source) {
+function summarize(location, days, when, focus, source, questionText) {
   const spanLabel = when
     ? (when.label === 'tomorrow' || when.label === 'today' || when.label === 'tonight' ? when.label : `over ${when.label}`)
     : (days.length === 1 ? 'today' : `over the next ${days.length} days`);
@@ -103,7 +149,10 @@ function summarize(location, days, when, focus, source) {
   const maxProb = maxProbability(days);
   const peakDay = days.reduce((best, d) => ((d.wind_gust_max_kmh ?? d.wind_max_kmh) > (best.wind_gust_max_kmh ?? best.wind_max_kmh) ? d : best), days[0]);
 
-  const opening = focusSentence(focus, days, spanLabel);
+  // A yes/no threshold question is answered as yes or no first; the focus
+  // sentence and the full forecast still follow it.
+  const verdict = thresholdVerdict(questionText, days);
+  const opening = [verdict, focusSentence(focus, days, spanLabel)].filter(Boolean).join(' ');
   const head = `The weather forecast for ${location} ${spanLabel} (${dateRange}) is as follows.`;
 
   const parts = [
@@ -161,6 +210,15 @@ async function handleWeatherForecast(req, res) {
   // An explicit when/focus param wins over one parsed from the question,
   // so a caller that knows what it wants is never second-guessed.
   const when = params?.when ? parseWhen(String(params.when)) : parseWhen(text);
+  // A date past the end of any forecast has no honest answer. Before this
+  // check, `when` was simply ignored and the default 3-day window answered
+  // in its place, which reads as a confident answer about the wrong days.
+  if (when?.outOfRange) {
+    return respondUnusableInput(
+      res,
+      `I cannot forecast weather for ${when.date}: it is ${when.startDay} days out, and forecasts only run ${MAX_FORECAST_DAY_OFFSET + 1} days ahead. Ask again nearer the date.`,
+    );
+  }
   const focus = params?.focus ? String(params.focus).toLowerCase() : parseFocus(text);
   const explicitDays = Number(params?.days);
   const days = Number.isFinite(explicitDays) && explicitDays > 0 ? explicitDays : (when?.days ?? 3);
@@ -195,7 +253,13 @@ async function handleWeatherForecast(req, res) {
     });
   }
 
-  const summary = summarize(result.name, result.days, when, focus, result.source);
+  // The verdict is read from whichever field actually carried the sentence:
+  // the engine sometimes reduces the question to `location`, and sometimes
+  // forwards the whole thing alongside it.
+  const questionText = [text, fallbackText, params?.question, params?.query, params?.q]
+    .filter((value) => typeof value === 'string')
+    .sort((a, b) => b.length - a.length)[0] ?? text;
+  const summary = summarize(result.name, result.days, when, focus, result.source, questionText);
   res.json({
     query: rawLocation,
     status: 'ok',
