@@ -138,8 +138,15 @@ function focusSentence(focus, days, spanLabel) {
 // full paragraph that names every dimension it checked; a terse range
 // loses to that even when the underlying numbers are identical.
 function summarize(location, days, when, focus, source, questionText) {
+  // Labels that are already a complete phrase read wrong with "over" in
+  // front of them: "over through September 13", "over tomorrow". A calendar
+  // label ("September 13") takes "on"; a span label ("through September 13")
+  // takes neither.
+  const bareLabel = when && (when.label === 'tomorrow' || when.label === 'today' || when.label === 'tonight'
+    || when.label.startsWith('through '));
+  const onLabel = when?.date && !when.label.startsWith('through ');
   const spanLabel = when
-    ? (when.label === 'tomorrow' || when.label === 'today' || when.label === 'tonight' ? when.label : `over ${when.label}`)
+    ? (bareLabel ? when.label : onLabel ? `on ${when.label}` : `over ${when.label}`)
     : (days.length === 1 ? 'today' : `over the next ${days.length} days`);
   const dateRange = days.length === 1 ? days[0].date : `${days[0].date} to ${days[days.length - 1].date}`;
 
