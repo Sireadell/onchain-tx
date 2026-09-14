@@ -13,6 +13,7 @@ import { fetchForecast, withQuestionFallback, WeatherLookupError, WeatherUpstrea
 import { parseWhen, parseFocus, MAX_FORECAST_DAY_OFFSET } from '../lib/questionParse.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { questionMatchesIntent, WEATHER_CUES } from '../lib/intentGuard.js';
+import { firstUsableValue } from '../lib/entityExtract.js';
 
 const router = Router();
 
@@ -191,7 +192,7 @@ function forecastConfidence(lastDayOffset) {
 
 async function handleWeatherForecast(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
-  const rawLocation = params?.location ?? params?.query ?? params?.q ?? params?.question;
+  const rawLocation = firstUsableValue(params?.location, params?.query, params?.q, params?.question);
 
   if (!rawLocation) {
     return respondUnusableInput(

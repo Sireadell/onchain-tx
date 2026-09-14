@@ -15,7 +15,7 @@ import { evaluateTransaction } from '../lib/txStatus.js';
 import { DEFAULT_CHAIN, resolveChainLoose, resolveRpcChainLoose, rpcChainNames } from '../lib/chains.js';
 import { lookupMethodSignature } from '../lib/fourByte.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
-import { extractTxHash, freeTextParam } from '../lib/entityExtract.js';
+import { extractTxHash, freeTextParam, firstUsableValue } from '../lib/entityExtract.js';
 import { amountToDecimalString } from '../lib/formatAmount.js';
 import { safeBigIntFromWei } from '../lib/safeBigInt.js';
 
@@ -26,7 +26,7 @@ const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 export async function handleCheckTx(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
   const question = freeTextParam(params);
-  const rawTxHash = params?.tx_hash ?? question;
+  const rawTxHash = firstUsableValue(params?.tx_hash, question);
   // Exact match first; if that fails, try pulling a hash out of whatever
   // was sent (a full question, a hash with surrounding punctuation) rather
   // than rejecting outright. See entityExtract.js.
@@ -35,7 +35,7 @@ export async function handleCheckTx(req, res) {
   // else DEFAULT_CHAIN, preserving pre-multi-chain behavior for existing
   // callers. An explicit but unrecognized chain is a validation error, not
   // a silent fallback.
-  const chainParam = params?.chain ?? resolveChainLoose(question ?? '')?.key ?? DEFAULT_CHAIN;
+  const chainParam = firstUsableValue(params?.chain, resolveChainLoose(question ?? '')?.key, DEFAULT_CHAIN);
 
   if (!txHash) {
     const problem = rawTxHash

@@ -17,7 +17,7 @@ import { Router } from 'express';
 import { getGasPrice, getBlockNumber, withRpcBudget, RpcBudgetExceededError, ApiKeyMissingError } from '../lib/ankrRpc.js';
 import { getCoinPrice } from '../lib/defiLlamaApi.js';
 import { DEFAULT_CHAIN, resolveChainLoose, resolveRpcChainLoose, rpcChainNames } from '../lib/chains.js';
-import { freeTextParam } from '../lib/entityExtract.js';
+import { freeTextParam, firstUsableValue } from '../lib/entityExtract.js';
 import { freeTextMatchesIntent, GAS_CUES } from '../lib/intentGuard.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 import { safeBigIntFromHex } from '../lib/safeBigInt.js';
@@ -39,7 +39,7 @@ async function handleGasPrice(req, res) {
       'This request does not appear to ask about blockchain gas or transaction fees. Name a supported chain and ask for its gas price or standard transfer cost.',
     );
   }
-  const chainParam = params?.chain ?? resolveChainLoose(question ?? '')?.key ?? DEFAULT_CHAIN;
+  const chainParam = firstUsableValue(params?.chain, resolveChainLoose(question ?? '')?.key, DEFAULT_CHAIN);
 
   const knownChain = resolveChainLoose(chainParam);
   const chain = resolveRpcChainLoose(chainParam);

@@ -4,7 +4,7 @@
 
 import { Router } from 'express';
 import { geolocateIp, IpLookupError } from '../lib/ipGeolocate.js';
-import { extractIp } from '../lib/entityExtract.js';
+import { extractIp, firstUsableValue } from '../lib/entityExtract.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 
 const router = Router();
@@ -45,7 +45,7 @@ export function reservedSummary(result) {
 
 export async function handleIpGeolocation(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
-  const rawIp = params?.ip ?? params?.query ?? params?.q ?? params?.question ?? params?.address;
+  const rawIp = firstUsableValue(params?.ip, params?.query, params?.q, params?.question, params?.address);
   const ip = extractIp(rawIp);
 
   if (!rawIp) {

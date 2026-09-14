@@ -13,6 +13,7 @@
 import { Router } from 'express';
 import { searchWeb, hasWebSearchProvider, WebSearchError } from '../lib/webSearch.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
+import { firstUsableValue } from '../lib/entityExtract.js';
 
 const router = Router();
 
@@ -42,7 +43,7 @@ function cleanQuery(raw) {
 
 async function handleWebSearch(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
-  const rawQuery = params?.query ?? params?.q ?? params?.question ?? params?.search ?? params?.topic;
+  const rawQuery = firstUsableValue(params?.query, params?.q, params?.question, params?.search, params?.topic);
 
   if (!rawQuery || !String(rawQuery).trim()) {
     return respondUnusableInput(
@@ -66,7 +67,7 @@ async function handleWebSearch(req, res) {
   const explicitMax = params?.max_results != null ? Number(params.max_results) : null;
   const maxResults = Number.isFinite(explicitMax) && explicitMax > 0 ? Math.min(explicitMax, 20) : 5;
   const searchQuery = cleanQuery(rawQuery);
-  const topic = params?.topic_mode ?? inferTopic(String(rawQuery));
+  const topic = firstUsableValue(params?.topic_mode, inferTopic(String(rawQuery)));
 
   let result;
   try {

@@ -7,7 +7,7 @@ import { Router } from 'express';
 import { getStockQuote, getHistoricalStockQuote, TickerNotFoundError } from '../lib/stockPriceApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { respondUnusableInput } from '../lib/unusableInput.js';
-import { extractTicker, freeTextParam, looksLikeSentence } from '../lib/entityExtract.js';
+import { extractTicker, freeTextParam, looksLikeSentence, firstUsableValue } from '../lib/entityExtract.js';
 import { stockTextMatchesIntent } from '../lib/intentGuard.js';
 import { historicalDateParam } from '../lib/asOfDate.js';
 import { formatUsdPrice } from '../lib/formatUsdPrice.js';
@@ -32,8 +32,12 @@ async function handleStockPrice(req, res) {
   // as a symbol and never found. Prose here is reduced to a symbol the
   // same way a free-text question is.
   const suppliedTicker = looksLikeSentence(params?.ticker) ? null : params?.ticker;
-  const tickerText = suppliedTicker ? null : (params?.ticker ?? question);
-  const ticker = suppliedTicker ?? (tickerText ? extractTicker(tickerText) : null);
+  const tickerText = suppliedTicker ? null : firstUsableValue(params?.ticker, question);
+  // suppliedTicker itself can be an empty string (ticker="" sent by the
+  // engine), which firstUsableValue correctly treats as unusable and skips,
+  // falling through to tickerText the same way it would for a ticker that
+  // was never sent at all.
+  const ticker = firstUsableValue(suppliedTicker, tickerText ? extractTicker(tickerText) : null);
 
   if (!ticker) {
     return respondUnusableInput(

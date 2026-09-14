@@ -6,7 +6,7 @@ import { Router } from 'express';
 import { checkSslCertificate, SslConnectionError } from '../lib/sslCheck.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
-import { extractHostname } from '../lib/entityExtract.js';
+import { extractHostname, firstUsableValue } from '../lib/entityExtract.js';
 
 const router = Router();
 
@@ -18,7 +18,7 @@ const DOMAIN_RE = /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
 async function handleSslVerification(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
-  const rawDomain = params?.domain ?? params?.host ?? params?.url ?? params?.query ?? params?.q ?? params?.question;
+  const rawDomain = firstUsableValue(params?.domain, params?.host, params?.url, params?.query, params?.q, params?.question);
   // Exact bare hostname first; if that fails, pull a hostname out of a
   // full URL, a "host:port" pair, or a whole question naming the domain,
   // rather than rejecting outright. Live-checked 2026-08-29: a competing

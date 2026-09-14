@@ -30,7 +30,7 @@ import { getCoinPrice, getHistoricalCoinPrice, CoinNotFoundError } from '../lib/
 import { getCoinPaprikaPrice } from '../lib/coinPaprikaApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
-import { extractSubject, freeTextParam, coinAliasParam } from '../lib/entityExtract.js';
+import { extractSubject, freeTextParam, coinAliasParam, firstUsableValue } from '../lib/entityExtract.js';
 import { resolveChainLoose } from '../lib/chains.js';
 import { describeAddressMiss } from '../lib/addressContext.js';
 import { historicalDateParam } from '../lib/asOfDate.js';
@@ -173,13 +173,20 @@ async function handleCryptoPrice(req, res) {
   // ticker, not a caller asking two ways at once. An explicit coin_id in
   // that position still gets the two-modes refusal below, unchanged.
   const alias = (!priceChain && !token) ? coinAliasParam(params) : undefined;
-  let coinId = params?.coin_id
-    ?? alias
-    ?? (!priceChain && !token && question ? extractSubject(question) : undefined);
+  // Live-checked 2026-09-13: coin_id="" (the engine's empty-string form for
+  // a parameter it could not fill) used to stop this chain cold, the same
+  // as every other route's `??` chain, because "" is not null or undefined.
+  // firstUsableValue treats it as absent and keeps going to alias and then
+  // the free-text question, exactly as an omitted coin_id already did.
+  let coinId = firstUsableValue(
+    params?.coin_id,
+    alias,
+    !priceChain && !token && question ? extractSubject(question) : undefined,
+  );
   // "one ether" means one unit of Ethereum, not Harmony's ONE token.
   // CoinPaprika's search otherwise sees the leading word "one" and returns
   // ONE, producing a plausible-looking but completely wrong price.
-  const coinText = question ?? params?.coin_id ?? alias;
+  const coinText = firstUsableValue(question, params?.coin_id, alias);
   if (coinText && /\b(?:one\s+)?(?:ether|eth)\b/i.test(coinText)) coinId = 'ethereum';
 
   // A chain named on its own, with no contract address to pair it with, is a

@@ -26,7 +26,7 @@ import {
 } from '../lib/defiLlamaApi.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { respondUnusableInput } from '../lib/unusableInput.js';
-import { extractSubject, freeTextParam, looksLikeSentence } from '../lib/entityExtract.js';
+import { extractSubject, freeTextParam, looksLikeSentence, firstUsableValue } from '../lib/entityExtract.js';
 import { resolveChainLoose } from '../lib/chains.js';
 import { describeAddressMiss, ADDRESS_RE } from '../lib/addressContext.js';
 
@@ -63,7 +63,7 @@ async function handleTvl(req, res) {
   // reached the answer text and the canonical string, so a caller sending
   // " Base " got the right number reported under a ragged name.
   const rawProtocol = typeof params?.protocol === 'string' ? params.protocol.trim() : params?.protocol;
-  const suppliedChain = params?.tvl_chain ?? params?.chain;
+  const suppliedChain = firstUsableValue(params?.tvl_chain, params?.chain);
   const rawTvlChain = typeof suppliedChain === 'string' ? suppliedChain.trim() : suppliedChain;
   // Free-text fallback. "How much TVL does Curve have on Ethereum?" arrives
   // as a question rather than protocol=curve&tvl_chain=Ethereum, and this
@@ -85,7 +85,15 @@ async function handleTvl(req, res) {
     : null;
   const subject = question ? extractTvlProtocol(question) : null;
   const split = subject ? subject.match(/^(.*?)\s+\bon\s+(.+)$/i) : null;
-  const protocol = usableProtocol ?? (split ? split[1].trim() : subject ?? undefined);
+  // firstUsableValue rather than `??`: when the engine sends protocol as an
+  // empty string, `rawProtocol` trims to "" and `??` keeps it, because an
+  // empty string is neither null nor undefined. The free-text subject read
+  // out of the question below was then thrown away and the route answered
+  // invalid_input to a question that names its protocol plainly. Caught
+  // 2026-09-14 verifying the empty-parameter fix: protocol= with
+  // query="What is the TVL of Uniswap?" refused, while omitting protocol
+  // entirely answered correctly.
+  const protocol = firstUsableValue(usableProtocol, split ? split[1].trim() : subject);
   const tvlChain = rawTvlChain ?? (split ? split[2].trim() : undefined);
 
   if (!protocol && !tvlChain) {

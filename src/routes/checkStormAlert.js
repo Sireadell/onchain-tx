@@ -13,6 +13,7 @@ import { fetchStormRisk, withQuestionFallback, WeatherLookupError, WeatherUpstre
 import { parseWhen } from '../lib/questionParse.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { freeTextMatchesIntent, questionMatchesIntent, STORM_CUES } from '../lib/intentGuard.js';
+import { firstUsableValue } from '../lib/entityExtract.js';
 
 const router = Router();
 
@@ -61,7 +62,7 @@ const FORCE_TEXT = {
 
 async function handleStormAlert(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
-  const rawLocation = params?.location ?? params?.query ?? params?.q ?? params?.question;
+  const rawLocation = firstUsableValue(params?.location, params?.query, params?.q, params?.question);
 
   if (!rawLocation) {
     return respondUnusableInput(
