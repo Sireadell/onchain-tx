@@ -9,6 +9,7 @@ import {
   extractSubject,
   extractTicker,
   looksLikeSentence,
+  firstUsableValue,
 } from './entityExtract.js';
 
 const HASH = '0x' + '1'.repeat(64);
@@ -82,6 +83,39 @@ test('freeTextParam reads whichever free-text field the caller used', () => {
   assert.equal(freeTextParam({ question: '   ' }), null);
   assert.equal(freeTextParam({ tx_hash: '0xabc' }), null);
   assert.equal(freeTextParam(null), null);
+});
+
+// firstUsableValue, added 2026-09-13. Verified live that a `??` chain such
+// as `params?.ip ?? params?.query` reads an empty string the Telegraph
+// engine sends for a parameter it could not fill as if it were a real
+// answer, because `??` only falls through on null or undefined, not on "".
+// This is the drop-in replacement every route's `??` chain now uses.
+test('firstUsableValue skips an empty string and returns the next candidate', () => {
+  assert.equal(firstUsableValue('', 'real value'), 'real value');
+});
+
+test('firstUsableValue skips a whitespace-only string', () => {
+  assert.equal(firstUsableValue('   ', 'real value'), 'real value');
+});
+
+test('firstUsableValue returns a real value immediately without looking further', () => {
+  assert.equal(firstUsableValue('8.8.8.8', 'unused fallback'), '8.8.8.8');
+});
+
+test('firstUsableValue skips null and undefined the same way ?? does', () => {
+  assert.equal(firstUsableValue(null, undefined, 'real value'), 'real value');
+});
+
+test('firstUsableValue treats a defined non-string value as usable, even a falsy one', () => {
+  assert.equal(firstUsableValue(undefined, 0), 0);
+  assert.equal(firstUsableValue(null, false), false);
+  const obj = { key: 'chain' };
+  assert.equal(firstUsableValue(undefined, obj), obj);
+});
+
+test('firstUsableValue returns undefined when nothing usable was passed', () => {
+  assert.equal(firstUsableValue(undefined, null, '', '   '), undefined);
+  assert.equal(firstUsableValue(), undefined);
 });
 
 test('extractSubject reduces a question to the thing being asked about', () => {

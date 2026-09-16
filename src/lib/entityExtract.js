@@ -125,6 +125,41 @@ export function freeTextParam(params) {
   return null;
 }
 
+// Every route in this miner picks its structured parameter with a chain of
+// `??` fallbacks, e.g. `params?.ip ?? params?.query ?? params?.question`.
+// `??` only moves to the next option when the left side is null or
+// undefined. It does not move on when the left side is an empty string,
+// because an empty string is neither. Verified live on 2026-09-13:
+// `GET /ip-geolocate?ip=&query=Where is the IP address 8.8.8.8 located?`
+// answered "I cannot geolocate an IP because none was supplied", while the
+// same question with `ip` left off entirely answered correctly. Every `??`
+// chain here read that empty string as if it were a real answer and stopped
+// looking.
+//
+// What sends the empty string is not settled. A competing miner documents
+// the Telegraph engine filling a declared parameter with an empty string
+// when it cannot work out a value, and has an autopsy of one scored request
+// lost that way, but that is their measurement and we have not reproduced
+// it against our own traffic. The refusals we HAVE measured on our own
+// endpoints have a different cause: the question itself arrives with no
+// subject in it. So treat this as a landmine that is cheap to defuse rather
+// than a fire that is known to be burning. Either way an empty string is
+// never useful information, so falling through costs nothing. This is the
+// fallback `??` should have been: it treats an empty (or whitespace-only)
+// string the same way `??` treats null and undefined, and skips straight
+// to the next candidate, while a genuinely present value of any type
+// (a non-empty string, a number, an object) is still returned as-is.
+export function firstUsableValue(...values) {
+  for (const value of values) {
+    if (typeof value === 'string') {
+      if (value.trim()) return value;
+    } else if (value !== null && value !== undefined) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 // Question framing that sits in front of the thing actually being asked
 // about: "what is the price of X", "how much is X worth", "what's the TVL
 // of X". Everything up to and including the preposition is dropped, which

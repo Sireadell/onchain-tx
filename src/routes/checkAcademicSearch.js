@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { searchPapers, AcademicSearchError } from '../lib/academicSearch.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { freeTextMatchesIntent, ACADEMIC_CUES } from '../lib/intentGuard.js';
+import { firstUsableValue } from '../lib/entityExtract.js';
 
 const router = Router();
 
@@ -54,7 +55,7 @@ function requestedResultCount(text) {
 
 async function handleAcademicSearch(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
-  const rawTopic = params?.topic ?? params?.query ?? params?.q ?? params?.question ?? params?.search;
+  const rawTopic = firstUsableValue(params?.topic, params?.query, params?.q, params?.question, params?.search);
   const explicitLimit = params?.limit != null ? Number(params.limit) : null;
   const limit = Number.isFinite(explicitLimit) && explicitLimit > 0
     ? Math.min(explicitLimit, 25)

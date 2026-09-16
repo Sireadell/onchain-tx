@@ -23,7 +23,7 @@ import {
 import { getTokenInfo, TokenNotFoundError } from '../lib/blockscoutApi.js';
 import { DEFAULT_CHAIN, resolveChainLoose, resolveRpcChainLoose, rpcChainNames } from '../lib/chains.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
-import { extractAddress, freeTextParam } from '../lib/entityExtract.js';
+import { extractAddress, freeTextParam, firstUsableValue } from '../lib/entityExtract.js';
 import { amountToDecimalString, amountToRoundedString } from '../lib/formatAmount.js';
 import { safeBigIntFromHex } from '../lib/safeBigInt.js';
 
@@ -147,8 +147,8 @@ export async function handleWalletBalance(req, res) {
   // The engine often sends the caller's question rather than a bare
   // address. Fall back to it so the extractor below has something to read.
   const question = freeTextParam(params);
-  const rawAddress = params?.address ?? question;
-  const chainParam = params?.chain ?? resolveChainLoose(question ?? '')?.key ?? DEFAULT_CHAIN;
+  const rawAddress = firstUsableValue(params?.address, question);
+  const chainParam = firstUsableValue(params?.chain, resolveChainLoose(question ?? '')?.key, DEFAULT_CHAIN);
   const rawToken = params?.token;
 
   // Exact match first; if that fails, pull an address out of whatever was
