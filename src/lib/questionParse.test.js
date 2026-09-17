@@ -137,7 +137,7 @@ test('an impossible date is refused instead of rolling into the next month', () 
 });
 
 test('parseWhen prefers a named date over the vaguer phrases', () => {
-  assert.equal(parseWhen('what is the forecast for September 13').date, '2026-09-13');
+  assert.equal(parseWhen('what is the forecast for September 13', NOW).date, '2026-09-13');
 });
 
 // "Lagos Nigeria" with no comma resolved to the country centroid, and the

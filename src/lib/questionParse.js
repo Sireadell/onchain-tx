@@ -389,7 +389,7 @@ export function locationCandidates(text) {
 // What day or window the question asks about, as an offset in days from
 // today plus a length. Returns null when the question names no time, so
 // callers can keep their own default rather than being forced to one.
-export function parseWhen(text) {
+export function parseWhen(text, now = new Date()) {
   if (typeof text !== 'string') return null;
   const t = text.toLowerCase();
 
@@ -409,7 +409,7 @@ export function parseWhen(text) {
 
   // A named calendar date is the most specific thing a question can carry,
   // so it is read before the vaguer "tomorrow"/"this week" phrases below.
-  const calendar = parseCalendarDate(text);
+  const calendar = parseCalendarDate(text, now);
   if (calendar) return calendar;
 
   if (/\btomorrow\b/.test(t)) return { label: 'tomorrow', startDay: 1, days: 1, hours: 48 };

@@ -4,7 +4,10 @@ services:
     runtime: node
     plan: free
     buildCommand: npm ci
-    startCommand: node --use-system-ca src/index.js
+    # --max-http-header-size: the router sends the whole question as a GET query
+    # string. Node's 16 KB default answers HTTP 431 before Express runs, which
+    # forfeits the question. Real traffic peaks near 3 KB today; 64 KB is headroom.
+    startCommand: node --use-system-ca --max-http-header-size=65536 src/index.js
     healthCheckPath: /health
     envVars:
       - key: PORT
@@ -22,4 +25,6 @@ services:
       - key: PERPLEXITY_API_KEY
         sync: false
       - key: TAVILY_API_KEY
+        sync: false
+      - key: NVD_API_KEY
         sync: false

@@ -37,7 +37,7 @@ description: >
   repeated provider calls, and freshness timestamps identify when the data
   was fetched.
 
-  It covers fourteen canonical intents. WEATHER_FORECAST: what will the
+  It covers thirty canonical intents. WEATHER_FORECAST: what will the
   weather do at a named place on the day or over the window asked about,
   answering the aspect emphasised (rain, wind, snow, freeze, temperature)
   rather than reciting a range. STORM_ALERT: how disruptive will the
@@ -57,7 +57,31 @@ description: >
   citation counts and DOIs. WEB_SEARCH: an open question of any kind,
   answered from a live web search with the sources named, for the questions
   that have no single authoritative feed behind them. FRAUD_DETECTION: how
-  likely is a given address or scheme to be fraudulent.
+  likely is a given address or scheme to be fraudulent. CONTENT_EXTRACTION:
+  given a URL, fetch the live page and return its title and readable text.
+  TEXT_CLASSIFICATION: given text, return the single best category it
+  belongs to, from a caller-supplied label set or freely chosen.
+  TEXT_GENERATION: write text to a prompt or instruction. LANGUAGE_GENERATION:
+  transform existing text into another language, tone or style.
+  RESEARCH_SYNTHESIS: answer a research question by combining several live
+  web sources into one written synthesis, wider and more source-dense than
+  WEB_SEARCH. CROSS_CHAIN_STATE_VERIFY: given an address, check its native
+  balance and contract status on every supported chain at once, so a caller
+  can verify where it is actually active. EVENT_OUTCOME_RESOLUTION: given a
+  question about whether something happened, resolve it to a stated
+  yes/no/winner outcome from a live web search, leading with the verdict.
+  WEATHER_CHECK: what the current weather conditions are at a place right
+  now, as a single live reading rather than a forecast. LANGUAGE_TRANSLATION:
+  translate given text into a named target language. CHAT_COMPLETION: a
+  direct conversational reply to a message. NEWS_SEARCH: answers an
+  open question from a live news-focused web search, sources named.
+  NEWS_HEADLINES: lists current headlines on a named topic. FACT_CHECK:
+  checks a claim against live sources and returns a true/false/unverified
+  verdict. SENTIMENT_ANALYSIS: classifies text as Positive, Negative,
+  Neutral or Mixed with a reason. CONTENT_MODERATION: judges whether text
+  is safe or flagged against common platform policies, with a reason.
+  CVE_LOOKUP: given a CVE id or keyword, returns matching vulnerability
+  records from the National Vulnerability Database, with severity.
 
   Blockscout-backed reads cover five EVM chains (Ethereum, Base, Arbitrum,
   Optimism, Polygon). RPC-backed reads currently cover Ethereum, Base,
@@ -308,6 +332,194 @@ endpoints:
       Params: query (required, the whole question), max_results (optional,
       1-20, default 5), topic_mode (optional, one of general, news,
       finance, overriding what the question implies).
+  - path: /content-extract
+    external_path: /content-extract
+    method: GET
+    intents: [CONTENT_EXTRACTION]
+    description: >
+      CONTENT_EXTRACTION. Answers "what does this page say", "extract the
+      text from this URL", "summarize the content at this link". Fetches a
+      live URL at request time and returns its title and readable text,
+      stripped of scripts, navigation, and markup. Params: url (required, a
+      full http or https URL, a bare host such as github.com/torvalds, or a
+      whole question containing one; also accepted as link or question). If
+      the value is a passage of text with no URL, the dates, quantities,
+      named entities and events are extracted from the text itself.
+  - path: /text-classify
+    external_path: /text-classify
+    method: GET
+    intents: [TEXT_CLASSIFICATION]
+    description: >
+      TEXT_CLASSIFICATION. Answers "what category is this text", "is this
+      email spam or not", "classify this review as positive or negative".
+      Takes a piece of text and returns the single best category it
+      belongs to, with a brief reason. Params: text (required; also accepted
+      as content or input), labels (optional, also accepted as categories or
+      classes; comma-separated candidate categories the answer must pick
+      from; if omitted, the category is chosen freely).
+  - path: /text-generate
+    external_path: /text-generate
+    method: GET
+    intents: [TEXT_GENERATION]
+    description: >
+      TEXT_GENERATION. Answers "write a short bio for a software
+      engineer", "draft a product description for a water bottle". Takes an
+      instruction or prompt and writes the requested text directly, with no
+      preamble. Params: prompt (required).
+  - path: /language-generate
+    external_path: /language-generate
+    method: GET
+    intents: [LANGUAGE_GENERATION]
+    description: >
+      LANGUAGE_GENERATION. Answers "translate this into French", "rewrite
+      this in a formal tone", "paraphrase this sentence". Takes existing
+      text and transforms it into another language, tone, or style. Params:
+      text (required), target (optional, the target language/tone/style;
+      also read from the instruction inside text when omitted).
+  - path: /research-synthesis
+    external_path: /research-synthesis
+    method: GET
+    intents: [RESEARCH_SYNTHESIS]
+    description: >
+      RESEARCH_SYNTHESIS. Answers broader research questions such as "what
+      are the main approaches to carbon capture" or "summarize the current
+      state of quantum error correction". Combines multiple live web
+      sources into one written synthesis, wider and more source-dense than
+      WEB_SEARCH. Params: query (required; also q, question, topic, text),
+      max_sources (optional, 1-20, default 10; also max_results, limit).
+  - path: /cross-chain-state
+    external_path: /cross-chain-state
+    method: GET
+    intents: [CROSS_CHAIN_STATE_VERIFY]
+    description: >
+      CROSS_CHAIN_STATE_VERIFY. Answers "which chains is this address
+      active on", "does this wallet exist on Base and Arbitrum", "is this a
+      contract on any chain". Checks the same address's native balance and
+      contract status on every supported chain at once. Params: address
+      (required, 0x-prefixed, 40 hex characters), chains (optional,
+      comma-separated list restricting which chains are checked; defaults
+      to every RPC-enabled chain). Chains named in the question ("on Base
+      and Arbitrum") restrict the check when chains is omitted; chains this
+      miner cannot read (Solana, Bitcoin, Optimism) are named as unchecked
+      in the answer.
+  - path: /event-outcome
+    external_path: /event-outcome
+    method: GET
+    intents: [EVENT_OUTCOME_RESOLUTION]
+    description: >
+      EVENT_OUTCOME_RESOLUTION. Answers "did the merger go through", "who
+      won the election", "was the proposal approved". Resolves a question
+      about whether something happened to a stated outcome from a live web
+      search, leading with the verdict (yes/no/winner) before the
+      supporting facts. Params: query (required; also q, question, event,
+      market). Answer leads with "Yes,", "No,", the winner's name, or "Not
+      yet resolved," for events that have not happened; the outcome field
+      carries yes/no/unresolved.
+  - path: /weather-check
+    external_path: /weather-check
+    method: GET
+    intents: [WEATHER_CHECK]
+    description: >
+      WEATHER_CHECK. Answers "what's the weather like in Tokyo right now",
+      "current temperature in London", "is it raining in Cape Town at the
+      moment". Returns a single live current-conditions reading at a named
+      place: temperature, apparent temperature, humidity, wind speed and
+      direction, precipitation, cloud cover, and plain-words condition, read
+      live at request time rather than forecast. Params: location (required,
+      a place name, "lat,lon" pair, or a whole question naming the place;
+      also accepted as city, place, q, query or question, or as lat/lon or
+      latitude/longitude).
+  - path: /language-translate
+    external_path: /language-translate
+    method: GET
+    intents: [LANGUAGE_TRANSLATION]
+    description: >
+      LANGUAGE_TRANSLATION. Answers "translate 'good morning' into Japanese",
+      "how do you say thank you in French". Takes text and a target language
+      and returns the translation only, with no explanation. Params: text
+      (required; a whole instruction such as "Translate 'good morning' into
+      Spanish" is accepted and the language is read from it), target
+      (optional when the text names the language; also accepted as
+      target_language, to, language or langpair such as "en|de").
+  - path: /chat-complete
+    external_path: /chat-complete
+    method: GET
+    intents: [CHAT_COMPLETION]
+    description: >
+      CHAT_COMPLETION. Answers a message directly and conversationally, the
+      way a chat assistant would, with no preamble. A "will X happen"
+      question is answered with a verdict word (Likely, Unlikely, Uncertain)
+      followed by the reason. Params: message (required; also accepted as
+      prompt, text, question, query, or an OpenAI-style messages array whose
+      last user turn is answered).
+  - path: /news-search
+    external_path: /news-search
+    method: GET
+    intents: [NEWS_SEARCH]
+    description: >
+      NEWS_SEARCH. Answers "what's the latest on the trade talks", "has the
+      company announced results yet" from a live news-focused web search at
+      request time, with sources named. Params: query (required; also q,
+      question, topic, text, search, keywords, subject, category),
+      max_results (optional, 1-20, default 5; also max, limit), recent_days
+      (optional, default 7), country and language (optional hints).
+  - path: /news-headlines
+    external_path: /news-headlines
+    method: GET
+    intents: [NEWS_HEADLINES]
+    description: >
+      NEWS_HEADLINES. Answers "what are today's headlines on the election",
+      "top news about the central bank". Returns a short list of current
+      headlines on a named topic, each with its source URL. Params: topic
+      (required; also query, q, question, category, subject, keywords; a
+      whole question such as "What are the top news headlines about X
+      today?" is accepted), max_results (optional, 1-10, default 6; also
+      max, limit, count). Returns headlines as [{title, source, published,
+      url}].
+  - path: /fact-check
+    external_path: /fact-check
+    method: GET
+    intents: [FACT_CHECK]
+    description: >
+      FACT_CHECK. Answers "is it true that X", "fact check this claim: ...".
+      Checks a stated claim against live web sources and returns a
+      True/False/Unverified verdict with the reasoning and sources behind it.
+      Params: claim (required; also statement, text, query, q, question).
+      Returns verdict (True, False, Mostly True, Mostly False, Misleading,
+      Unverified) and the graded answer leads with that verdict word.
+  - path: /sentiment-analyze
+    external_path: /sentiment-analyze
+    method: GET
+    intents: [SENTIMENT_ANALYSIS]
+    description: >
+      SENTIMENT_ANALYSIS. Answers "is this review positive or negative",
+      "what's the sentiment of this message". Classifies text as exactly one
+      of Positive, Negative, Neutral or Mixed, with a short reason. Also
+      answers "what is the general sentiment toward X" for a named company,
+      token or event. Params: text (required; also accepted as content,
+      review, message or comment).
+  - path: /content-moderate
+    external_path: /content-moderate
+    method: GET
+    intents: [CONTENT_MODERATION]
+    description: >
+      CONTENT_MODERATION. Answers "does this text violate policy", "is this
+      message safe to post". Judges text as Safe or Flagged against common
+      platform policies (hate speech, harassment, threats, illegal activity),
+      with a short reason naming the concern. Params: text (required; also
+      accepted as content, message, comment or post).
+  - path: /cve-lookup
+    external_path: /cve-lookup
+    method: GET
+    intents: [CVE_LOOKUP]
+    description: >
+      CVE_LOOKUP. Answers "what is CVE-2021-44228", "known vulnerabilities in
+      log4j". Takes a CVE id or a keyword and returns matching vulnerability
+      records from the National Vulnerability Database, with description,
+      severity score, and references. Params: cve (required, a CVE id such
+      as "CVE-2021-44228", a sentence containing one, or a product keyword
+      such as "log4j"; also accepted as cve_id, id, vulnerability, query or
+      question).
   - path: /fraud-query
     external_path: /fraud-query
     method: POST
@@ -450,7 +662,8 @@ input_schema:
       description: >
         Research topic to search for on /academic-search. A whole question
         is accepted, and a date range stated in it ("since 2020") is
-        applied.
+        applied. On /news-headlines, the topic to list current headlines
+        on.
     from_year:
       type: integer
       description: Earliest publication year on /academic-search. Read from the question when omitted.
@@ -488,6 +701,73 @@ input_schema:
       type: string
       pattern: "^0x[0-9a-fA-F]{40}$"
       description: Ethereum address assessed by /assess-wallet.
+    url:
+      type: string
+      description: >
+        Full http or https URL to fetch on /content-extract. A whole
+        question containing one is also accepted.
+    text:
+      type: string
+      description: >
+        Text to classify on /text-classify, or to transform on
+        /language-generate.
+    labels:
+      type: string
+      description: >
+        Comma-separated candidate categories on /text-classify. When
+        supplied, the answer must pick exactly one of these.
+    prompt:
+      type: string
+      description: Instruction to write to on /text-generate.
+    target:
+      type: string
+      description: >
+        Target language, tone, or style on /language-generate. Also read
+        from an instruction inside `text` when omitted.
+    max_sources:
+      type: integer
+      minimum: 1
+      maximum: 20
+      description: How many web sources to draw on for /research-synthesis. Defaults to 10.
+    chains:
+      type: string
+      description: >
+        Comma-separated list of chains to check on /cross-chain-state.
+        Defaults to every RPC-enabled chain when omitted.
+    message:
+      type: string
+      description: >
+        Message to reply to on /chat-complete. Also accepted as an alias of
+        text on /sentiment-analyze and /content-moderate.
+    messages:
+      type: string
+      description: >
+        /chat-complete alternative to message: an OpenAI-style JSON array of
+        {role, content} turns. The last user turn is answered.
+    target_language:
+      type: string
+      description: Alias of target on /language-translate. Also accepted as to, language, or langpair ("en|de").
+    content:
+      type: string
+      description: Alias of text on /text-classify, /sentiment-analyze and /content-moderate.
+    review:
+      type: string
+      description: Alias of text on /sentiment-analyze.
+    categories:
+      type: string
+      description: Alias of labels on /text-classify.
+    claim:
+      type: string
+      description: Claim to fact-check on /fact-check.
+    cve:
+      type: string
+      description: >
+        CVE id (e.g. "CVE-2021-44228"), a question containing one, or a
+        product keyword to search on /cve-lookup. Also read from cve_id, id,
+        vulnerability, query and question.
+    cve_id:
+      type: string
+      description: Alias for cve on /cve-lookup.
 output_schema:
   type: object
   properties:
@@ -652,15 +932,19 @@ output_schema:
       description: /crypto-price only. Current CoinPaprika market capitalization when available.
     source_count:
       type: integer
-      description: /crypto-price only. Number of independent price feeds that answered.
+      description: >
+        On /crypto-price, the number of independent price feeds that
+        answered. On /research-synthesis, how many web sources the
+        synthesis drew on.
     sources:
       type: array
       items:
         type: object
       description: >
         On /crypto-price, the independent price feeds that answered. On
-        /web-search, the pages the answer drew on, each carrying title, url,
-        snippet and the provider's relevance score, in relevance order.
+        /web-search, /news-search and /fact-check, the pages the answer drew
+        on, each carrying title, url, snippet and the provider's relevance
+        score, in relevance order.
     price_source:
       type: string
       enum: [coinpaprika, defillama, twelve_data, yahoo_finance]
@@ -801,7 +1085,10 @@ output_schema:
       description: /storm-alert only. Strongest sustained wind in the window.
     wind_direction:
       type: [string, "null"]
-      description: /storm-alert only. Prevailing wind direction at the peak, as a compass word.
+      description: >
+        On /storm-alert, the prevailing wind direction at the peak, as a
+        compass word. On /weather-check, the compass direction the wind is
+        blowing from right now.
     beaufort_force:
       type: integer
       minimum: 0
@@ -893,7 +1180,9 @@ output_schema:
       description: /web-search only. Which search index answered, whether passed as topic_mode or read from the question.
     result_count:
       type: integer
-      description: /web-search only. How many web sources the answer drew on.
+      description: >
+        /web-search, /event-outcome, /news-search, /news-headlines and
+        /cve-lookup. How many web sources or CVE records the answer drew on.
     provider:
       type: string
       description: /web-search only. Which search service supplied the answer.
@@ -942,6 +1231,108 @@ output_schema:
     analysis_tier:
       type: string
       enum: [fast, deep]
+    title:
+      type: [string, "null"]
+      description: /content-extract only. Page title, or null if none was found.
+    truncated:
+      type: boolean
+      description: /content-extract only. True when the extracted text was cut off at the length cap.
+    full_length:
+      type: integer
+      description: /content-extract only. Character length of the full extracted text before truncation.
+    labels:
+      type: [array, "null"]
+      items:
+        type: string
+      description: /text-classify only. The candidate categories supplied, or null when the category was chosen freely.
+    chains_checked:
+      type: array
+      items:
+        type: string
+      description: /cross-chain-state only. Which chains were actually queried.
+    results:
+      type: array
+      items:
+        type: object
+      description: /cross-chain-state only. Per-chain balance, contract status, and reachability.
+    temperature_c:
+      type: number
+      description: /weather-check only. Current air temperature, Celsius.
+    apparent_temperature_c:
+      type: number
+      description: /weather-check only. Feels-like temperature, Celsius.
+    humidity_pct:
+      type: number
+      description: /weather-check only. Relative humidity percentage.
+    wind_speed_kmh:
+      type: number
+      description: /weather-check only. Current wind speed.
+    precipitation_mm:
+      type: number
+      description: /weather-check only. Current precipitation rate.
+    cloud_cover_pct:
+      type: [number, "null"]
+      description: /weather-check only. Cloud cover percentage, when reported.
+    observed_at:
+      type: string
+      description: /weather-check only. Timestamp of the underlying reading, distinct from checked_at.
+    target:
+      type: string
+      description: /language-translate only. Target language the text was translated into.
+    message:
+      type: string
+      description: /chat-complete only. Echoes the message that was replied to.
+    source_note:
+      type: string
+      description: >
+        /news-search, /fact-check, /research-synthesis and /event-outcome.
+        Plain-language note on how many sources were used and which ones,
+        kept separate from summary.
+    headlines:
+      type: array
+      items:
+        type: object
+      description: /news-headlines only. Each entry carries title, source, published and url.
+    window:
+      type: string
+      description: /news-headlines only. The time window the headlines were drawn from.
+    outcome:
+      type: [string, "null"]
+      description: /event-outcome only. yes, no or unresolved.
+    claim:
+      type: string
+      description: /fact-check only. Echoes the claim that was checked.
+    verdict:
+      type: [string, "null"]
+      description: >
+        On /fact-check, the True/False/Unverified verdict extracted from the
+        answer. On /chat-complete, Likely/Unlikely/Uncertain for a "will X
+        happen" question, null otherwise.
+    sentiment:
+      type: [string, "null"]
+      description: /sentiment-analyze only. Positive/Negative/Neutral/Mixed.
+    translation:
+      type: string
+      description: /language-translate only. The translated text alone.
+    classification:
+      type: string
+      description: /text-classify only. The chosen label alone.
+    degraded:
+      type: string
+      description: >
+        /chat-complete only, present only when the primary model failed and a
+        fallback answered. Names the cause.
+    flagged:
+      type: [boolean, "null"]
+      description: /content-moderate only. Whether the text was judged to violate policy.
+    cves:
+      type: array
+      items:
+        type: object
+      description: >
+        /cve-lookup only. Matching CVE records, each carrying id,
+        description, severity, published, last_modified, status and
+        references.
 
 semantics:
   # label_field is the ONE field the engine grades. It was `status`, which
@@ -974,6 +1365,22 @@ semantics:
     - ACADEMIC_SEARCH
     - WEB_SEARCH
     - FRAUD_DETECTION
+    - CONTENT_EXTRACTION
+    - TEXT_CLASSIFICATION
+    - TEXT_GENERATION
+    - LANGUAGE_GENERATION
+    - RESEARCH_SYNTHESIS
+    - CROSS_CHAIN_STATE_VERIFY
+    - EVENT_OUTCOME_RESOLUTION
+    - WEATHER_CHECK
+    - LANGUAGE_TRANSLATION
+    - CHAT_COMPLETION
+    - NEWS_SEARCH
+    - NEWS_HEADLINES
+    - FACT_CHECK
+    - SENTIMENT_ANALYSIS
+    - CONTENT_MODERATION
+    - CVE_LOOKUP
 
 docs:
   repository: https://github.com/Sireadell/onchain-tx
