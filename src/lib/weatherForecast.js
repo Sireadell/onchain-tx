@@ -3,10 +3,10 @@
 // the place name to coordinates, then pull the daily forecast for those
 // coordinates.
 
-import { locationCandidates, parseCoordinates } from './questionParse.js';
+import { locationCandidates, parseCoordinates, splitTrailingRegion, expandCountryAbbreviation } from './questionParse.js';
 import {
   METNO_URL, METNO_USER_AGENT, METNO_SOURCE, METNO_NAME,
-  offsetSecondsForTimezone, toOpenMeteoDaily, toOpenMeteoHourly,
+  offsetSecondsForTimezone, toOpenMeteoDaily, toOpenMeteoHourly, wmoFromSymbol,
 } from './metnoFallback.js';
 import { fetchOwmDaily, fetchOwmHourly, isOwmConfigured } from './owmFallback.js';
 
@@ -16,6 +16,9 @@ const OWM_SOURCE = 'https://openweathermap.org';
 const GEOCODE_URL = 'https://geocoding-api.open-meteo.com/v1/search';
 const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
 const CALL_TIMEOUT_MS = Number(process.env.WEATHER_TIMEOUT_MS) || 4_000;
+// MET Norway's wind is m/s; the current-conditions fallback converts it to
+// the km/h the rest of this file (and every response field) reports in.
+const MS_TO_KMH_LOCAL = 3.6;
 
 // The caller's input could not be resolved to an answer: no place found in
 // the text, or no place by that name exists. This is the caller's problem,
@@ -111,6 +114,13 @@ const FORECAST_CACHE_TTL_MS = Number(process.env.WEATHER_FORECAST_CACHE_TTL_MS) 
 const forecastCache = new TtlCache();
 const stormCache = new TtlCache();
 
+// Current conditions move faster than a daily forecast, so this is cached
+// far more briefly than FORECAST_CACHE_TTL_MS, long enough to absorb a
+// burst of repeat questions about the same place, short enough that
+// "current" stays honest.
+const CURRENT_CACHE_TTL_MS = Number(process.env.WEATHER_CURRENT_CACHE_TTL_MS) || 5 * 60_000;
+const currentCache = new TtlCache();
+
 // Test-only: forces a real network attempt on the next call for a place
 // this process has already cached, regardless of test execution order.
 // Without this, a test asserting on upstream-failure behavior can be
@@ -120,6 +130,7 @@ export function __clearWeatherCachesForTesting() {
   geocodeCache.store.clear();
   forecastCache.store.clear();
   stormCache.store.clear();
+  currentCache.store.clear();
 }
 
 // Rounded to ~1km — enough to treat "London" and a "lat,lon" a few streets
@@ -553,4 +564,391 @@ export async function fetchStormRisk(input, hours = 48) {
   // negligible next to the multi-hour drift the midnight-start bug had.
   stormCache.set(cacheKey, result, FORECAST_CACHE_TTL_MS);
   return result;
+}
+
+// WEATHER_CHECK: conditions right now, not a forecast. Open-Meteo's
+// `current` block first; MET Norway's first timeseries entry (already the
+// present moment on that API) when Open-Meteo is unavailable, reshaped by
+// hand rather than through toOpenMeteoHourly/Daily since those aggregate
+// across many hours and this needs exactly one.
+//
+// Takes either text (resolved through resolveLocation, like the forecast
+// paths) or an already resolved { name, latitude, longitude } from
+// resolveCurrentLocation below, which ranks geocoder results instead of
+// taking the first one.
+export async function fetchCurrentConditions(input) {
+  const location = input && typeof input === 'object' && Number.isFinite(input.latitude)
+    ? input
+    : await resolveLocation(input);
+  const cacheKey = `${roundCoord(location.latitude)},${roundCoord(location.longitude)}`;
+  const cached = currentCache.get(cacheKey);
+  if (cached) return { ...cached, name: location.name };
+
+  const params = new URLSearchParams({
+    latitude: location.latitude,
+    longitude: location.longitude,
+    current: 'temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weathercode,wind_speed_10m,wind_direction_10m,cloud_cover',
+    timezone: 'auto',
+  });
+
+  let current;
+  let source;
+  let degraded;
+  let attribution;
+  let bodyTimezone = null;
+  let bodyUtcOffset = 0;
+  try {
+    const body = await fetchJson(`${FORECAST_URL}?${params}`, 'current conditions');
+    current = body.current;
+    bodyTimezone = body.timezone ?? null;
+    bodyUtcOffset = Number(body.utc_offset_seconds) || 0;
+    source = 'Open-Meteo';
+  } catch (err) {
+    if (!(err instanceof WeatherUpstreamError)) throw err;
+    const lat = Number(location.latitude).toFixed(4);
+    const lon = Number(location.longitude).toFixed(4);
+    const metBody = await fetchJson(
+      `${METNO_URL}?lat=${lat}&lon=${lon}`,
+      'fallback current conditions',
+      1,
+      { 'User-Agent': METNO_USER_AGENT, Accept: 'application/json' },
+    );
+    const first = metBody?.properties?.timeseries?.[0];
+    if (!first) throw new WeatherLookupError(`no current conditions returned for '${input}'`);
+    const details = first.data.instant?.details ?? {};
+    const symbol = first.data.next_1_hours?.summary?.symbol_code
+      ?? first.data.next_6_hours?.summary?.symbol_code
+      ?? null;
+    current = {
+      time: first.time,
+      temperature_2m: details.air_temperature ?? null,
+      relative_humidity_2m: details.relative_humidity ?? null,
+      apparent_temperature: null,
+      precipitation: first.data.next_1_hours?.details?.precipitation_amount ?? null,
+      weathercode: wmoFromSymbol(symbol),
+      wind_speed_10m: Number.isFinite(details.wind_speed) ? details.wind_speed * MS_TO_KMH_LOCAL : null,
+      wind_direction_10m: details.wind_from_direction ?? null,
+      cloud_cover: details.cloud_area_fraction ?? null,
+    };
+    source = METNO_NAME;
+    degraded = true;
+    attribution = METNO_SOURCE;
+  }
+
+  if (!Number.isFinite(current?.temperature_2m)) {
+    throw new WeatherLookupError(`no current temperature reading available for '${input}'`);
+  }
+
+  const result = {
+    ...location,
+    observed_at: current.time,
+    observed_at_utc: toUtcIso(current.time, degraded ? 0 : bodyUtcOffset),
+    timezone: degraded ? (location.timezone ?? 'UTC') : (bodyTimezone ?? location.timezone ?? null),
+    temperature_c: current.temperature_2m,
+    apparent_temperature_c: current.apparent_temperature ?? null,
+    condition: describeWeatherCode(current.weathercode),
+    code: current.weathercode,
+    humidity_pct: current.relative_humidity_2m ?? null,
+    precipitation_mm: current.precipitation ?? null,
+    wind_speed_kmh: current.wind_speed_10m,
+    wind_direction: compassDirection(current.wind_direction_10m),
+    cloud_cover_pct: current.cloud_cover ?? null,
+    source,
+    ...(degraded ? { degraded: true, attribution } : {}),
+    fetchedAt: new Date().toISOString(),
+  };
+  currentCache.set(cacheKey, result, CURRENT_CACHE_TTL_MS);
+  return result;
+}
+
+// Open-Meteo's `current.time` is local wall-clock time with no offset
+// ("2026-09-17T06:15"); MET Norway's is UTC with a Z. Both become a UTC
+// ISO string so the answer can state when the reading was taken without
+// the reader having to know which provider served it.
+function toUtcIso(time, utcOffsetSeconds) {
+  if (!time) return null;
+  if (/[zZ]$|[+-]\d{2}:\d{2}$/.test(time)) {
+    const parsed = new Date(time);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().replace(/\.\d{3}Z$/, 'Z');
+  }
+  const asUtc = new Date(`${time}Z`);
+  if (Number.isNaN(asUtc.getTime())) return null;
+  return new Date(asUtc.getTime() - (utcOffsetSeconds || 0) * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+// ---- WEATHER_CHECK place resolution ----
+//
+// resolveLocation above asks the geocoder for one result and takes it,
+// which is right for the forecast intents' traffic (mostly coordinates and
+// capital cities) and wrong for what WEATHER_CHECK actually receives.
+// Replayed 2026-09-16 against the real routed questions: "alaska" became
+// Akaska, South Dakota (population 43); "Houston, Texas storm watch?"
+// became Colfax, West Virginia; "for wind, flooding or storms" became
+// Windhoek, Namibia; "China" became the country's geometric centre on the
+// Tibetan plateau at 9.9C. The geocoder ranks by fuzzy string similarity,
+// not by whether the place is the one anyone would mean.
+//
+// This asks for ten results and picks the one that matches the name
+// exactly, sits in the region the caller named ("Houston, Texas"), and is
+// the biggest such place. Countries and US states, which the geocoder
+// either centres or misses, go to their capital or largest city first.
+// None of it touches resolveLocation, so the forecast and storm intents
+// keep answering exactly as before.
+
+const GEOCODE_RESULT_COUNT = 10;
+
+// A country or state on its own is answered at its capital or largest
+// city, the place a person asking "what's the weather in X" means. The
+// geocoder returns a country's centroid (China: 9.9C in the mountains)
+// and, for US states, nothing at all ("Texas" matched Colfax, WV).
+const REGION_REPRESENTATIVE = {
+  // Countries: capital, or the largest city where the capital is small.
+  china: 'Beijing', india: 'New Delhi', 'united states': 'New York', usa: 'New York', us: 'New York',
+  america: 'New York', 'united kingdom': 'London', uk: 'London', britain: 'London', england: 'London',
+  scotland: 'Edinburgh', wales: 'Cardiff', ireland: 'Dublin', france: 'Paris', germany: 'Berlin',
+  spain: 'Madrid', italy: 'Rome', portugal: 'Lisbon', netherlands: 'Amsterdam', holland: 'Amsterdam',
+  belgium: 'Brussels', switzerland: 'Zurich', austria: 'Vienna', poland: 'Warsaw', sweden: 'Stockholm',
+  norway: 'Oslo', denmark: 'Copenhagen', finland: 'Helsinki', iceland: 'Reykjavik', greece: 'Athens',
+  turkey: 'Istanbul', russia: 'Moscow', ukraine: 'Kyiv', romania: 'Bucharest', hungary: 'Budapest',
+  'czech republic': 'Prague', czechia: 'Prague', japan: 'Tokyo', 'south korea': 'Seoul', korea: 'Seoul',
+  'north korea': 'Pyongyang', taiwan: 'Taipei', 'hong kong': 'Hong Kong', singapore: 'Singapore',
+  malaysia: 'Kuala Lumpur', indonesia: 'Jakarta', thailand: 'Bangkok', vietnam: 'Hanoi',
+  philippines: 'Manila', cambodia: 'Phnom Penh', myanmar: 'Yangon', pakistan: 'Karachi',
+  bangladesh: 'Dhaka', 'sri lanka': 'Colombo', nepal: 'Kathmandu', afghanistan: 'Kabul', iran: 'Tehran',
+  iraq: 'Baghdad', 'saudi arabia': 'Riyadh', uae: 'Dubai', 'united arab emirates': 'Dubai', qatar: 'Doha',
+  kuwait: 'Kuwait City', oman: 'Muscat', bahrain: 'Manama', israel: 'Tel Aviv', jordan: 'Amman',
+  lebanon: 'Beirut', egypt: 'Cairo', nigeria: 'Lagos', ghana: 'Accra', kenya: 'Nairobi',
+  ethiopia: 'Addis Ababa', tanzania: 'Dar es Salaam', uganda: 'Kampala', 'south africa': 'Johannesburg',
+  morocco: 'Casablanca', algeria: 'Algiers', tunisia: 'Tunis', senegal: 'Dakar', cameroon: 'Douala',
+  'ivory coast': 'Abidjan', zimbabwe: 'Harare', zambia: 'Lusaka', angola: 'Luanda', mozambique: 'Maputo',
+  canada: 'Toronto', mexico: 'Mexico City', brazil: 'Sao Paulo', argentina: 'Buenos Aires', chile: 'Santiago',
+  colombia: 'Bogota', peru: 'Lima', venezuela: 'Caracas', ecuador: 'Quito', bolivia: 'La Paz',
+  uruguay: 'Montevideo', cuba: 'Havana', jamaica: 'Kingston', australia: 'Sydney', 'new zealand': 'Auckland',
+  kazakhstan: 'Almaty', uzbekistan: 'Tashkent',
+  // Regions and provinces that arrive on their own in live traffic.
+  punjab: 'Lahore', maharashtra: 'Mumbai', karnataka: 'Bengaluru', 'tamil nadu': 'Chennai',
+  gujarat: 'Ahmedabad', kerala: 'Kochi', bavaria: 'Munich', catalonia: 'Barcelona',
+  andalusia: 'Seville', tuscany: 'Florence', sicily: 'Palermo', ontario: 'Toronto', quebec: 'Montreal',
+  'british columbia': 'Vancouver', alberta: 'Calgary', queensland: 'Brisbane', victoria: 'Melbourne',
+  'new south wales': 'Sydney', 'western australia': 'Perth', siberia: 'Novosibirsk',
+  // US states: largest city.
+  alabama: 'Birmingham', alaska: 'Anchorage', arizona: 'Phoenix', arkansas: 'Little Rock',
+  california: 'Los Angeles', colorado: 'Denver', connecticut: 'Bridgeport', delaware: 'Wilmington',
+  florida: 'Miami', georgia: 'Atlanta', hawaii: 'Honolulu', idaho: 'Boise', illinois: 'Chicago',
+  indiana: 'Indianapolis', iowa: 'Des Moines', kansas: 'Wichita', kentucky: 'Louisville',
+  louisiana: 'New Orleans', maine: 'Portland', maryland: 'Baltimore', massachusetts: 'Boston',
+  michigan: 'Detroit', minnesota: 'Minneapolis', mississippi: 'Jackson', missouri: 'Kansas City',
+  montana: 'Billings', nebraska: 'Omaha', nevada: 'Las Vegas', 'new hampshire': 'Manchester',
+  'new jersey': 'Newark', 'new mexico': 'Albuquerque', 'new york state': 'New York',
+  'north carolina': 'Charlotte', 'north dakota': 'Fargo', ohio: 'Columbus', oklahoma: 'Oklahoma City',
+  oregon: 'Portland', pennsylvania: 'Philadelphia', 'rhode island': 'Providence',
+  'south carolina': 'Charleston', 'south dakota': 'Sioux Falls', tennessee: 'Nashville', texas: 'Houston',
+  utah: 'Salt Lake City', vermont: 'Burlington', virginia: 'Virginia Beach', 'washington state': 'Seattle',
+  'west virginia': 'Charleston', wisconsin: 'Milwaukee', wyoming: 'Cheyenne',
+};
+
+// Words that describe the question rather than the place, trailing or
+// leading a place name in real traffic: "Houston, Texas storm watch",
+// "temperature forecast for Cape Town right now".
+const PLACE_NOISE_RE = /\b(?:weather|temperature|temperatures|temp|forecast|conditions?|climate|storm|storms|watch|warning|warnings|alert|alerts|advisory|advisories|emergency|severe|active|official|current|currently|right\s+now|now|today|tonight|at\s+the\s+moment|at\s+present|this\s+(?:morning|afternoon|evening|week|weekend)|area|region|city|please|any|kind\s+of|like|is|it|in|at|of|for|the|a|an|and|or|has|have|there|under|covering|near|around|over|across|report|check|tell|me|give|what's|whats|what|how's|hows|how)\b/gi;
+
+// Capitalised words the run scan must not read as a place: sentence
+// openers and the pronoun "I".
+const NOT_A_PLACE_RE = /^(?:I|A|An|The|Is|Are|Was|Were|Do|Does|Did|Can|Could|Would|Will|Should|What|Whats|Which|Who|Where|When|Why|How|Give|Tell|Show|Find|Check|Rather|Please|Right|Now|Today|Current|Currently|Weather|Temperature|Temp|Forecast|Storm|Severe|Active|Official|Any|Kind|Of|In|At|For|On|And|Or|Yes|No|IP|Location|Report)$/i;
+
+function cleanPlace(text) {
+  return String(text ?? '')
+    .replace(/[?!.;:"“”]+/g, ' ')
+    .replace(PLACE_NOISE_RE, ' ')
+    // A contraction's tail left behind by the strip above ("how's" -> "'s").
+    .replace(/(^|\s)['\u2019]s(?=\s|$)/g, ' ')
+    .replace(/\s*,\s*/g, ', ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[,\s]+|[,\s]+$/g, '')
+    .trim();
+}
+
+// Splits "Houston, Texas" or "Lagos Nigeria" into the place and the region
+// that narrows it. The region is a hint for ranking, never geocoded alone.
+function splitPlaceAndHint(text) {
+  const expanded = expandCountryAbbreviation(text) ?? text;
+  const comma = expanded.indexOf(',');
+  if (comma > 0) {
+    const name = expanded.slice(0, comma).trim();
+    const hint = expanded.slice(comma + 1).replace(/,.*$/, '').trim();
+    if (name.length >= 2) return { name, hint: hint || null };
+  }
+  const [pair] = splitTrailingRegion(expanded);
+  if (pair) return splitPlaceAndHint(pair);
+  return { name: expanded.trim(), hint: null };
+}
+
+const WORD = String.raw`[A-Za-z][\w'’.-]*`;
+const CAP_WORD = String.raw`[A-Z][\w'’.-]*`;
+
+// Candidate places for a WEATHER_CHECK value, most specific first.
+// Exported for tests.
+export function currentPlaceCandidates(input) {
+  const raw = String(input ?? '').trim();
+  if (!raw) return [];
+  const out = [];
+  const seen = new Set();
+  const push = (text) => {
+    const cleaned = cleanPlace(text);
+    if (cleaned.length < 2 || cleaned.length > 80) return;
+    const { name, hint } = splitPlaceAndHint(cleaned);
+    if (!name || name.length < 2 || /^\d+$/.test(name)) return;
+    const key = `${name.toLowerCase()}|${(hint ?? '').toLowerCase()}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ name, hint });
+  };
+
+  const noPunct = raw.replace(/[?!.;:"“”]+$/, '');
+  const looksLikeSentence = /[?]/.test(raw)
+    || noPunct.split(/\s+/).length > 4
+    || /^(?:what|whats|what's|how|hows|how's|is|are|tell|give|show|will|can|could|does|do|rather)\b/i.test(raw);
+
+  // "City, Region" pairs anywhere in the text lead: they are the least
+  // ambiguous thing a question can contain.
+  const pairRe = new RegExp(String.raw`(${CAP_WORD}(?:\s+${CAP_WORD}){0,3}),\s*(${CAP_WORD}(?:\s+${CAP_WORD}){0,2})`, 'g');
+  for (const match of noPunct.matchAll(pairRe)) push(`${match[1]}, ${match[2]}`);
+
+  if (!looksLikeSentence) push(noPunct);
+
+  // "in Tokyo", "for Darwin, Australia", "covering Miami" up to the next
+  // clause. Lowercase names are kept ("in alaska"), and the phrase is
+  // pushed whole; splitPlaceAndHint separates a trailing region.
+  const prepRe = new RegExp(String.raw`\b(?:in|at|for|near|around|covering|over|across|of)\s+(${WORD}(?:[\s,]+${WORD}){0,4})`, 'gi');
+  for (const match of noPunct.matchAll(prepRe)) {
+    const phrase = match[1].replace(/\b(?:has|have|is|are|under|right|now|today|at|the|this|with|and|or)\b[\s\S]*$/i, '').trim();
+    if (phrase) push(phrase);
+  }
+
+  // Capitalised runs, skipping the sentence opener and stop words.
+  const capRe = new RegExp(String.raw`\b(${CAP_WORD}(?:\s+(?:of|de|del|la|le|el|van|der|den)\s+${CAP_WORD}|\s+${CAP_WORD})*)`, 'g');
+  for (const match of noPunct.matchAll(capRe)) {
+    const run = match[1].split(/\s+/).filter((w) => !NOT_A_PLACE_RE.test(w)).join(' ');
+    if (run) push(run);
+  }
+
+  if (looksLikeSentence) push(noPunct);
+  return out;
+}
+
+const GEOCODE_LIST_PREFIX = 'list:';
+
+async function geocodeMany(name) {
+  const cacheKey = `${GEOCODE_LIST_PREFIX}${name.trim().toLowerCase()}`;
+  const cached = geocodeCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+  const url = `${GEOCODE_URL}?name=${encodeURIComponent(name)}&count=${GEOCODE_RESULT_COUNT}&format=json`;
+  const body = await fetchJson(url, 'geocoding');
+  const results = Array.isArray(body?.results) ? body.results : [];
+  geocodeCache.set(cacheKey, results, GEOCODE_CACHE_TTL_MS);
+  return results;
+}
+
+function normalizeName(text) {
+  return String(text ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9 ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function hintMatches(hit, hint) {
+  if (!hint) return true;
+  const wanted = normalizeName(expandCountryAbbreviation(hint) ?? hint);
+  if (!wanted) return true;
+  const fields = [hit.admin1, hit.admin2, hit.admin3, hit.country, hit.country_code].map(normalizeName);
+  return fields.some((f) => f && (f === wanted || f.includes(wanted) || (wanted.includes(f) && f.length > 3)));
+}
+
+// Picks the geocoder result a person means by `name`: exact name matches
+// beat fuzzy ones, the caller's region hint beats no hint, a capital or
+// big city beats a hamlet. Returns null when nothing is an exact or
+// prefix match, so a fuzzy hit like Akaska for "alaska" is never taken.
+export function rankGeocodeResults(results, name, hint) {
+  const wanted = normalizeName(name);
+  const scored = [];
+  for (const hit of results ?? []) {
+    const hitName = normalizeName(hit.name);
+    const exact = hitName === wanted;
+    // A near-miss of at most two characters covers spelling variants
+    // ("Sao Paulo" for "São Paulo"), not a different place that happens
+    // to start the same way (Punjabpura for "Punjab", Windhoek for "wind").
+    const prefix = !exact
+      && (hitName.startsWith(wanted) || wanted.startsWith(hitName))
+      && Math.min(hitName.length, wanted.length) >= 4
+      && Math.abs(hitName.length - wanted.length) <= 2;
+    if (!exact && !prefix) continue;
+    if (hint && !hintMatches(hit, hint)) continue;
+    const population = Number(hit.population) || 0;
+    let score = exact ? 1000 : 300;
+    if (hit.feature_code === 'PPLC') score += 200;
+    else if (/^PPLA/.test(hit.feature_code ?? '')) score += 100;
+    else if (hit.feature_code === 'PCLI') score += 50;
+    score += Math.log10(population + 1) * 40;
+    scored.push({ hit, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0]?.hit ?? null;
+}
+
+function labelFor(hit) {
+  const parts = [];
+  for (const part of [hit.name, hit.admin1, hit.country]) {
+    if (part && !parts.some((p) => p.toLowerCase() === String(part).toLowerCase())) parts.push(part);
+  }
+  return parts.join(', ');
+}
+
+// Resolves a WEATHER_CHECK value to { name, latitude, longitude, timezone },
+// or throws WeatherLookupError when no candidate names a real place. A
+// geocoder outage surfaces as WeatherUpstreamError only when every
+// candidate hit it.
+export async function resolveCurrentLocation(input) {
+  const coords = parseCoordinates(input);
+  if (coords) {
+    return { name: `${coords.latitude}, ${coords.longitude}`, latitude: coords.latitude, longitude: coords.longitude };
+  }
+
+  const candidates = currentPlaceCandidates(input);
+  if (candidates.length === 0) throw new WeatherLookupError(`no place name found in '${input}'`);
+
+  let lastUpstream = null;
+  for (const candidate of candidates.slice(0, 6)) {
+    const representative = REGION_REPRESENTATIVE[candidate.name.toLowerCase()];
+    const attempts = representative
+      ? [{ name: representative, hint: candidate.name, regionAsked: candidate.name }, candidate]
+      : [candidate];
+    for (const attempt of attempts) {
+      let results;
+      try {
+        results = await geocodeMany(attempt.name);
+      } catch (err) {
+        if (!(err instanceof WeatherUpstreamError)) throw err;
+        lastUpstream = err;
+        continue;
+      }
+      // A representative city is looked up with its region as the hint,
+      // and again without it, because "Texas" is a hint the geocoder can
+      // confirm (admin1) while "China" as a hint reads as the country.
+      const hit = rankGeocodeResults(results, attempt.name, attempt.hint)
+        ?? (attempt.regionAsked ? rankGeocodeResults(results, attempt.name, null) : null);
+      if (!hit) continue;
+      return {
+        name: labelFor(hit),
+        latitude: hit.latitude,
+        longitude: hit.longitude,
+        timezone: hit.timezone ?? null,
+        ...(attempt.regionAsked ? { region_asked: attempt.regionAsked } : {}),
+      };
+    }
+  }
+  if (lastUpstream) throw lastUpstream;
+  throw new WeatherLookupError(`no location found matching '${input}'`);
 }

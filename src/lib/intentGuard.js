@@ -34,7 +34,7 @@ export function freeTextMatchesIntent(input, cuePattern) {
 const DEGREE_CUE = String.raw`\d\s*(?:°|deg\b|degrees\b)`;
 
 export const WEATHER_CUES = new RegExp(
-  String.raw`(?:\b(?:weather|forecast|rain|rainfall|wind|winds|snow|storm|storms|freeze|frost|temperature|temperatures|hot|cold|warm|umbrella|precipitation|gust|gusts|thunder|hurricane|cyclone|typhoon|hail|sunny|cloudy|flood|flooding|heatwave|heat\s+wave|humidity|celsius|fahrenheit)\b|${DEGREE_CUE})`,
+  String.raw`(?:\b(?:weather|forecast|rain|rainfall|wind|winds|snow|storm|storms|freeze|frost|temp|temps|temperature|temperatures|hot|cold|warm|umbrella|precipitation|gust|gusts|thunder|hurricane|cyclone|typhoon|hail|sunny|cloudy|flood|flooding|heatwave|heat\s+wave|humidity|celsius|fahrenheit)\b|${DEGREE_CUE})`,
   'i',
 );
 

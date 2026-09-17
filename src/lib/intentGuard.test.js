@@ -59,6 +59,13 @@ test('the plural of temperature is a cue, not just the singular', () => {
   assert.equal(questionMatchesIntent('Will the temperature rise?', WEATHER_CUES), true);
 });
 
+// "what's the temp of india" was a real routed WEATHER_CHECK question refused
+// as not about weather (2026-09-17 replay). The abbreviation is a cue too.
+test('the temp abbreviation is a weather cue', () => {
+  assert.equal(questionMatchesIntent("what's the temp of india", WEATHER_CUES), true);
+  assert.equal(questionMatchesIntent('how are temps in Oslo today?', WEATHER_CUES), true);
+});
+
 test('a degree reading is a weather cue even with no weather word present', () => {
   assert.equal(questionMatchesIntent('Will Dubai hit 45°C this week?', WEATHER_CUES), true);
   assert.equal(questionMatchesIntent('Will Dubai hit 45 degrees this week?', WEATHER_CUES), true);
