@@ -4,8 +4,7 @@
 // express-rate-limit), so this is a hand-rolled regex strip in the same
 // minimal-dependency style as the rest of this codebase, not a DOM parser.
 
-import dns from 'node:dns/promises';
-import net from 'node:net';
+import { parsePublicUrl as parsePublicUrlGuarded, assertResolvesPublic as assertResolvesPublicGuarded } from './ssrfGuard.js';
 
 const FETCH_TIMEOUT_MS = Number(process.env.CONTENT_EXTRACT_TIMEOUT_MS) || 10_000;
 const MAX_HTML_BYTES = 3_000_000;
@@ -27,62 +26,14 @@ export class ContentExtractError extends Error {}
 // hosts, including Render) and read back whatever is there through what
 // looks like a page-extraction answer. Checked at the hostname level, then
 // again on what the hostname resolves to, and again on every redirect hop,
-// before any byte of the response is read.
-const BLOCKED_HOSTNAME_RE = /^(localhost|.*\.localhost|.*\.local|.*\.internal|.*\.home|.*\.lan|metadata\.google\.internal|0\.0\.0\.0)$/i;
-
-function isPrivateIp(ip) {
-  const family = net.isIP(ip);
-  if (family === 4) {
-    const [a, b] = ip.split('.').map(Number);
-    return a === 0 || a === 10 || a === 127
-      || (a === 169 && b === 254)
-      || (a === 172 && b >= 16 && b <= 31)
-      || (a === 192 && b === 168)
-      || (a === 100 && b >= 64 && b <= 127)
-      || a >= 224;
-  }
-  if (family === 6) {
-    const lower = ip.toLowerCase();
-    if (lower === '::1' || lower === '::') return true;
-    if (/^::ffff:(\d+\.\d+\.\d+\.\d+)$/.test(lower)) return isPrivateIp(lower.replace(/^::ffff:/, ''));
-    return /^(fc|fd|fe[89ab])/.test(lower);
-  }
-  return false;
-}
-
+// before any byte of the response is read. The actual address rules live in
+// lib/ssrfGuard.js, shared with checkUrlScan.js.
 function parsePublicUrl(rawUrl) {
-  let parsed;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    throw new ContentExtractError('not a valid URL');
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new ContentExtractError('only http and https URLs are supported');
-  }
-  const host = parsed.hostname.replace(/^\[|\]$/g, '');
-  if (!host || BLOCKED_HOSTNAME_RE.test(host) || isPrivateIp(host)) {
-    throw new ContentExtractError('this URL points at a private or internal address, which cannot be fetched');
-  }
-  return parsed;
+  return parsePublicUrlGuarded(rawUrl, ContentExtractError, 'fetched');
 }
 
-// A public-looking hostname that resolves to a private address is the same
-// hole with one extra step. The lookup result is advisory (the fetch does
-// its own resolution), which still closes the obvious case.
 async function assertResolvesPublic(parsed) {
-  const host = parsed.hostname.replace(/^\[|\]$/g, '');
-  if (net.isIP(host)) return;
-  let records;
-  try {
-    records = await dns.lookup(host, { all: true });
-  } catch {
-    throw new ContentExtractError('the host could not be found (DNS lookup failed)');
-  }
-  if (!records.length) throw new ContentExtractError('the host could not be found (DNS lookup failed)');
-  if (records.some((r) => isPrivateIp(r.address))) {
-    throw new ContentExtractError('this URL points at a private or internal address, which cannot be fetched');
-  }
+  return assertResolvesPublicGuarded(parsed, ContentExtractError, 'fetched');
 }
 
 function extractTitle(html) {
