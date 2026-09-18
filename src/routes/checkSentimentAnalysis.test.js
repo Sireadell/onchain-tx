@@ -29,7 +29,7 @@ function stubPerplexity(t, content) {
     if (!String(url).startsWith('https://api.perplexity.ai')) return original(url, init);
     calls.push({ url: String(url), body: JSON.parse(init.body) });
     return new Response(JSON.stringify({
-      choices: [{ message: { role: 'assistant', content } }],
+      output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: content }] }],
       usage: { cost: { total_cost: 0.001 } },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   };
@@ -84,9 +84,9 @@ test('sentiment-analyze: a question about a subject keeps the search on, supplie
   const base = startServer(t);
   await fetch(`${base}/sentiment-analyze?text=${encodeURIComponent('What is the general sentiment toward token XYZ?')}`);
   await fetch(`${base}/sentiment-analyze?text=${encodeURIComponent('Analyze the sentiment of this review: "it broke on day two"')}`);
-  assert.equal(calls[0].body.disable_search, undefined);
-  assert.equal(calls[1].body.disable_search, true);
-  assert.match(calls[1].body.messages[1].content, /^<<<TEXT>>>\n/);
+  assert.deepEqual(calls[0].body.tools, [{ type: 'web_search' }]);
+  assert.equal(calls[1].body.tools, undefined);
+  assert.match(calls[1].body.input[0].content, /^<<<TEXT>>>\n/);
 });
 
 test('sentiment-analyze: competitor param names are accepted', async (t) => {

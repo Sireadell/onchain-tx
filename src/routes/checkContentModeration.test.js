@@ -29,7 +29,7 @@ function stubPerplexity(t, content) {
     if (!String(url).startsWith('https://api.perplexity.ai')) return original(url, init);
     calls.push({ url: String(url), body: JSON.parse(init.body) });
     return new Response(JSON.stringify({
-      choices: [{ message: { role: 'assistant', content } }],
+      output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: content }] }],
       usage: { cost: { total_cost: 0.001 } },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   };
@@ -92,8 +92,8 @@ test('content-moderate: competitor param names are accepted and the text is fram
     assert.equal(body.status, 'ok', qs);
     assert.equal(body.flagged, false, qs);
   }
-  assert.equal(calls[0].body.messages[1].content, '<<<TEXT>>>\nhave a nice day\n<<<END>>>');
-  assert.equal(calls[0].body.disable_search, true);
+  assert.equal(calls[0].body.input[0].content, '<<<TEXT>>>\nhave a nice day\n<<<END>>>');
+  assert.equal(calls[0].body.tools, undefined);
 });
 
 test('content-moderate: a huge text is capped and a provider failure is a real 502', async (t) => {
@@ -106,7 +106,7 @@ test('content-moderate: a huge text is capped and a provider failure is a real 5
     body: JSON.stringify({ text: 'x'.repeat(20000) }),
   });
   assert.equal(res.status, 200);
-  assert.ok(calls[0].body.messages[1].content.length < 12100);
+  assert.ok(calls[0].body.input[0].content.length < 12100);
 
   const original = globalThis.fetch;
   globalThis.fetch = async (url, init) => {

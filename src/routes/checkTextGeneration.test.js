@@ -30,7 +30,7 @@ function stubPerplexity(t, content) {
   globalThis.fetch = async (url, init) => {
     if (!String(url).startsWith(PPLX)) return original(url, init);
     calls.push({ url: String(url), body: JSON.parse(init.body), headers: init.headers });
-    return new Response(JSON.stringify({ choices: [{ message: { role: 'assistant', content } }] }), {
+    return new Response(JSON.stringify({ output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: content }] }] }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
@@ -72,7 +72,7 @@ test('text-generate: sends the prompt to the model verbatim', async (t) => {
   const calls = stubPerplexity(t, 'ok');
   const base = startServer(t);
   await fetch(`${base}/text-generate?prompt=${encodeURIComponent('write a short bio')}`);
-  assert.equal(calls[0].body.messages[1].content, 'write a short bio');
+  assert.equal(calls[0].body.input[0].content, 'write a short bio');
 });
 
 test('text-generate: writes from the caller notes with the search off', async (t) => {
@@ -80,7 +80,7 @@ test('text-generate: writes from the caller notes with the search off', async (t
   const calls = stubPerplexity(t, 'A briefing.');
   const base = startServer(t);
   await fetch(`${base}/text-generate?prompt=${encodeURIComponent('Summarise these notes')}`);
-  assert.equal(calls[0].body.disable_search, true);
+  assert.equal(calls[0].body.tools, undefined);
 });
 
 test('text-generate: competitor param names are accepted', async (t) => {
@@ -99,12 +99,12 @@ test('text-generate: a real 3k-char notes prompt goes through whole, a 20k one i
   const base = startServer(t);
   const notes = `Summarise these notes in about 150 words.\n\nNotes:\n${'- NASA did a thing (NASA, 2026-09-10)\n'.repeat(80)}`;
   await fetch(`${base}/text-generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: notes }) });
-  assert.equal(calls[0].body.messages[1].content, notes);
+  assert.equal(calls[0].body.input[0].content, notes);
 
   const res = await fetch(`${base}/text-generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: 'z'.repeat(20000) }) });
   const body = await res.json();
   assert.equal(res.status, 200);
-  assert.equal(calls[1].body.messages[1].content.length, 12000);
+  assert.equal(calls[1].body.input[0].content.length, 12000);
   assert.match(body.summary, /only the first part was used/);
 });
 

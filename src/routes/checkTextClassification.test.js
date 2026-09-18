@@ -30,7 +30,7 @@ function stubPerplexity(t, content) {
   globalThis.fetch = async (url, init) => {
     if (!String(url).startsWith(PPLX)) return original(url, init);
     calls.push({ url: String(url), body: JSON.parse(init.body), headers: init.headers });
-    return new Response(JSON.stringify({ choices: [{ message: { role: 'assistant', content } }] }), {
+    return new Response(JSON.stringify({ output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: content }] }] }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
@@ -72,7 +72,7 @@ test('text-classify: labels are passed through to the model and echoed back', as
   const calls = stubPerplexity(t, 'positive');
   const base = startServer(t);
   await fetch(`${base}/text-classify?text=great+product&labels=positive,negative,neutral`);
-  assert.match(calls[0].body.messages[0].content, /positive, negative, neutral/);
+  assert.match(calls[0].body.instructions, /positive, negative, neutral/);
 });
 
 test('text-classify: the label leads the answer and a "Category:" prefix is dropped', async (t) => {
@@ -83,8 +83,8 @@ test('text-classify: the label leads the answer and a "Category:" prefix is drop
   assert.equal(body.summary, 'Billing. The customer was charged twice.');
   assert.equal(body.classification, 'Billing');
   assert.equal(body.confidence, 0.9);
-  assert.equal(calls[0].body.disable_search, true);
-  assert.equal(calls[0].body.messages[1].content, '<<<TEXT>>>\ncharged twice\n<<<END>>>');
+  assert.equal(calls[0].body.tools, undefined);
+  assert.equal(calls[0].body.input[0].content, '<<<TEXT>>>\ncharged twice\n<<<END>>>');
 });
 
 test('text-classify: competitor param names are accepted', async (t) => {
@@ -108,6 +108,6 @@ test('text-classify: a huge text is capped and the answer says so', async (t) =>
   });
   const body = await res.json();
   assert.equal(res.status, 200);
-  assert.ok(calls[0].body.messages[1].content.length < 12100);
+  assert.ok(calls[0].body.input[0].content.length < 12100);
   assert.match(body.summary, /Only the first 12000 characters/);
 });

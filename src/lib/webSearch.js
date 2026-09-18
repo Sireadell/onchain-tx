@@ -6,16 +6,19 @@
 // Two providers, tried in order, the same shape as the weather chain in
 // weatherForecast.js.
 //
-// 1. Perplexity. Contract verified 2026-08-31 by calling it with the real
-//    key rather than reading docs: POST https://api.perplexity.ai/chat/
-//    completions, bearer auth, model `sonar`, and the answer at
-//    choices[0].message.content with a top-level `search_results` array
-//    carrying title/url/snippet. Measured cost was $0.00507 a question,
-//    almost all of it a flat $0.005 request charge rather than tokens, so
-//    question length barely moves the bill.
-//    Note for anyone re-checking this: https://api.perplexity.ai/v1/agent
-//    also exists but rejects a `messages` body outright (400, unknown
-//    field). chat/completions is the working endpoint, not a deprecated one.
+// 1. Perplexity. Migrated 2026-09-18 from the old Sonar chat/completions
+//    contract (verified 2026-08-31) to the Agent API (v1/agent): Sonar
+//    chat/completions started rejecting this deployment's account with
+//    insufficient_quota, and Perplexity is retiring it entirely on
+//    2026-09-27 regardless. Verified live against the real key: POST
+//    https://api.perplexity.ai/v1/agent, bearer auth, model
+//    `perplexity/sonar`, `tools: [{type: 'web_search'}]` to turn search on
+//    (opt-in on this API, unlike Sonar's always-on default), the answer at
+//    the last `output` item whose type is `message`
+//    (`content.find(c => c.type === 'output_text').text`), and the sources
+//    at the `output` item whose type is `search_results`, its own `results`
+//    array carrying title/url/snippet, same fields as before under a new
+//    path. Cost lands at the same `usage.cost.total_cost` path as before.
 //
 // 2. Tavily. Contract verified against docs.tavily.com. Free tier is 1,000
 //    credits a month with no card, and cost is driven by search_depth alone
@@ -25,7 +28,7 @@
 //    WEB_SEARCH, so its upstream can match that miner's evidence but not
 //    beat it on data, only on wording.
 
-const PERPLEXITY_URL = 'https://api.perplexity.ai/chat/completions';
+const PERPLEXITY_URL = 'https://api.perplexity.ai/v1/agent';
 const TAVILY_URL = 'https://api.tavily.com/search';
 
 // Telegraph cancels a question at 30 seconds and books it as a miss, so the
@@ -119,19 +122,30 @@ async function callPerplexity(query, options) {
       key: process.env.PERPLEXITY_API_KEY,
       signal: controller.signal,
       body: {
-        model: process.env.PERPLEXITY_MODEL || 'sonar',
-        messages: [
-          { role: 'system', content: ANSWER_STYLE },
-          { role: 'user', content: query },
-        ],
+        model: process.env.PERPLEXITY_MODEL || 'perplexity/sonar',
+        instructions: ANSWER_STYLE,
+        input: [{ type: 'message', role: 'user', content: query }],
         // The answer wanted here is a few sentences. Left unbounded the
         // model writes several paragraphs, which costs more and reads
         // further from the ground-truth sentence it is scored against.
-        max_tokens: 400,
+        max_output_tokens: 400,
+        // This service exists to search, so the tool is always on, unlike
+        // llmComplete.js's opt-in disableSearch (that file backs pure text
+        // transformations that should not search at all). tool_choice
+        // 'required' forces an actual search every call rather than
+        // leaving it to the model's own judgment (the default 'auto'):
+        // verified live 2026-09-18 that a simple question ("capital of
+        // France") skipped searching under 'auto' and came back with an
+        // empty results array, which starves any route that always wants
+        // a citation list to grade against.
+        tools: [{ type: 'web_search' }],
+        tool_choice: 'required',
       },
     });
 
     if (!res.ok) {
+      const errBody = await res.json().catch(() => null);
+      if (errBody?.error?.type === 'insufficient_quota') throw new WebSearchError('the perplexity key has no credit left');
       if (res.status === 401) throw new WebSearchError('perplexity rejected our key');
       if (res.status === 402) throw new WebSearchError('the perplexity key has no credit left');
       if (res.status === 429) throw new WebSearchError('perplexity is rate limiting us');
@@ -139,8 +153,12 @@ async function callPerplexity(query, options) {
     }
 
     const body = await res.json();
-    const raw = body?.choices?.[0]?.message?.content;
-    const results = (body?.search_results ?? []).map((r) => ({
+    const outputs = Array.isArray(body?.output) ? body.output : [];
+    const messageItem = [...outputs].reverse().find((o) => o?.type === 'message');
+    const textPart = messageItem?.content?.find?.((c) => c?.type === 'output_text');
+    const raw = textPart?.text;
+    const searchItem = outputs.find((o) => o?.type === 'search_results');
+    const results = (searchItem?.results ?? []).map((r) => ({
       title: r.title ?? null,
       url: r.url ?? null,
       snippet: typeof r.snippet === 'string' ? r.snippet : '',

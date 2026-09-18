@@ -102,14 +102,14 @@ function perplexityStub({ answer = 'Russia has not declared total war.', delayMs
   const calls = [];
   const handler = async (url, init) => {
     const body = JSON.parse(init.body);
-    calls.push({ body, prompt: body.messages.find((m) => m.role === 'user')?.content });
+    calls.push({ body, prompt: body.input.find((m) => m.role === 'user')?.content });
     if (hang) {
       await delay(600_000, init.signal);
     } else {
       await delay(delayMs, init.signal);
     }
     return jsonResponse({
-      choices: [{ message: { content: answer } }],
+      output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: answer }] }],
       search_results: [{ title: 'Reuters', url: 'https://reuters.com/x', snippet: 's' }],
       usage: { cost: { total_cost: 0.005 } },
     });

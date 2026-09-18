@@ -54,7 +54,7 @@ function stubFetch(t, { content, homepageHtml, homepageStatus = 200 } = {}) {
     const str = String(url);
     if (str.startsWith(PPLX)) {
       calls.push({ url: str, body: JSON.parse(init.body) });
-      return new Response(JSON.stringify({ choices: [{ message: { role: 'assistant', content } }] }), {
+      return new Response(JSON.stringify({ output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: content }] }] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -120,7 +120,7 @@ test('telegraph-knowledge: a protocol question fetches and uses the homepage as 
   const homepageCall = calls.find((c) => c.homepage);
   assert.ok(homepageCall, 'homepage was not fetched');
   const pplxCall = calls.find((c) => c.body);
-  assert.match(pplxCall.body.messages[0].content, /peer-to-peer ranking protocol/);
+  assert.match(pplxCall.body.instructions, /peer-to-peer ranking protocol/);
 });
 
 test('telegraph-knowledge: a protocol question still answers from the fallback context when the homepage is unreachable', async (t) => {
@@ -165,7 +165,7 @@ test('telegraph-knowledge: a 12,000+ character question is capped, answered, and
   const body = await res.json();
   assert.equal(res.status, 200);
   const pplxCall = calls.find((c) => c.body);
-  assert.ok(pplxCall.body.messages[1].content.length <= 3000);
+  assert.ok(pplxCall.body.input[0].content.length <= 3000);
   assert.match(body.summary, /longer than 3000 characters/);
 });
 
@@ -178,8 +178,8 @@ test('telegraph-knowledge: an injection attempt is sent as ordinary user content
   const body = await res.json();
   assert.equal(res.status, 200);
   const pplxCall = calls.find((c) => c.body);
-  assert.equal(pplxCall.body.messages[1].content, malicious);
-  assert.match(pplxCall.body.messages[0].content, /refuse briefly/);
+  assert.equal(pplxCall.body.input[0].content, malicious);
+  assert.match(pplxCall.body.instructions, /refuse briefly/);
   assert.ok(!/api[_-]?key/i.test(body.summary));
 });
 

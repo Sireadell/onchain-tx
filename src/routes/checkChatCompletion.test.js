@@ -29,7 +29,7 @@ function stubPerplexity(t, content, { status = 200, cost = 0.002 } = {}) {
     if (!String(url).startsWith('https://api.perplexity.ai')) return original(url, init);
     calls.push({ url: String(url), body: JSON.parse(init.body) });
     return new Response(JSON.stringify({
-      choices: [{ message: { role: 'assistant', content } }],
+      output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: content }] }],
       usage: { cost: { total_cost: cost } },
     }), { status, headers: { 'Content-Type': 'application/json' } });
   };
@@ -89,7 +89,7 @@ test('chat-complete: accepts the OpenAI-style messages array the router sends', 
   const body = await res.json();
   assert.equal(body.status, 'ok');
   assert.equal(body.message, 'hi');
-  assert.equal(calls[0].body.messages[1].content, 'hi');
+  assert.equal(calls[0].body.input[0].content, 'hi');
 });
 
 test('chat-complete: a prediction question is asked for a verdict and the verdict is echoed', async (t) => {
@@ -99,7 +99,7 @@ test('chat-complete: a prediction question is asked for a verdict and the verdic
   const body = await (await fetch(`${base}/chat-complete?message=${encodeURIComponent('Will XYZ-123 complete Phase 3?')}`)).json();
   assert.equal(body.verdict, 'Unlikely');
   assert.equal(body.summary, 'Unlikely, no Phase 3 trial has been registered for it.');
-  assert.match(calls[0].body.messages[0].content, /Likely, Unlikely, or Uncertain/);
+  assert.match(calls[0].body.instructions, /Likely, Unlikely, or Uncertain/);
 });
 
 test('chat-complete: an ordinary question is not asked for a verdict', async (t) => {
@@ -108,7 +108,7 @@ test('chat-complete: an ordinary question is not asked for a verdict', async (t)
   const base = startServer(t);
   const body = await (await fetch(`${base}/chat-complete?message=${encodeURIComponent('How many days in a week?')}`)).json();
   assert.equal(body.verdict, null);
-  assert.doesNotMatch(calls[0].body.messages[0].content, /Likely, Unlikely, or Uncertain/);
+  assert.doesNotMatch(calls[0].body.instructions, /Likely, Unlikely, or Uncertain/);
 });
 
 test('chat-complete: with the provider down, a prediction question still gets an honest 200', async (t) => {
@@ -137,7 +137,7 @@ test('chat-complete: a rate limit is retried once before giving up', async (t) =
     if (!String(url).startsWith('https://api.perplexity.ai')) return original(url, init);
     calls += 1;
     if (calls === 1) return new Response('{}', { status: 429 });
-    return new Response(JSON.stringify({ choices: [{ message: { content: 'Hello.' } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'Hello.' }] }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   };
   t.after(() => { globalThis.fetch = original; });
   const base = startServer(t);
@@ -157,7 +157,7 @@ test('chat-complete: a huge message is capped before it reaches the provider', a
   });
   const body = await res.json();
   assert.equal(res.status, 200);
-  assert.equal(calls[0].body.messages[1].content.length, 12000);
+  assert.equal(calls[0].body.input[0].content.length, 12000);
   assert.match(body.summary, /only the first part was answered/);
 });
 

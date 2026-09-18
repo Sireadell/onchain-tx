@@ -30,7 +30,7 @@ function stubPerplexity(t, content) {
   globalThis.fetch = async (url, init) => {
     if (!String(url).startsWith(PPLX)) return original(url, init);
     calls.push({ url: String(url), body: JSON.parse(init.body), headers: init.headers });
-    return new Response(JSON.stringify({ choices: [{ message: { role: 'assistant', content } }] }), {
+    return new Response(JSON.stringify({ output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: content }] }] }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
@@ -72,7 +72,7 @@ test('language-generate: the target is included in the model instruction', async
   const calls = stubPerplexity(t, 'ok');
   const base = startServer(t);
   await fetch(`${base}/language-generate?text=hello&target=formal`);
-  assert.match(calls[0].body.messages[0].content, /formal/);
+  assert.match(calls[0].body.instructions, /formal/);
 });
 
 test('language-generate: competitor param names are accepted and the search is off', async (t) => {
@@ -83,7 +83,7 @@ test('language-generate: competitor param names are accepted and the search is o
     const body = await (await fetch(`${base}/language-generate?${qs}`)).json();
     assert.equal(body.status, 'ok', qs);
   }
-  assert.equal(calls[0].body.disable_search, true);
+  assert.equal(calls[0].body.tools, undefined);
 });
 
 
@@ -98,6 +98,6 @@ test('language-generate: a huge text is capped and the answer says so', async (t
   });
   const body = await res.json();
   assert.equal(res.status, 200);
-  assert.equal(calls[0].body.messages[1].content.length, 12000);
+  assert.equal(calls[0].body.input[0].content.length, 12000);
   assert.match(body.summary, /only the first part was transformed/);
 });

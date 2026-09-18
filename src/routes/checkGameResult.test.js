@@ -56,7 +56,7 @@ function stubPerplexity(t, { status = 200, content = 'The Knicks won 100-95.' } 
   globalThis.fetch = async (url, init) => {
     const str = String(url);
     if (str.startsWith('https://api.perplexity.ai')) {
-      return new Response(JSON.stringify({ choices: [{ message: { content } }], search_results: [] }), { status, headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: content }] }], search_results: [] }), { status, headers: { 'Content-Type': 'application/json' } });
     }
     return original(url, init);
   };

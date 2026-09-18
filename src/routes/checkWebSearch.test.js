@@ -204,16 +204,23 @@ test('web-search: an exhausted provider key reports a real failure', async (t) =
   assert.match((await res.json()).error, /no credit left/);
 });
 
-// Shape verified live against the real API 2026-08-31, not copied from docs.
+// Shape verified live against the real Agent API 2026-09-18, not copied
+// from docs (migrated from the old Sonar chat/completions shape, verified
+// live 2026-08-31, after Perplexity retired it for this account).
 const PERPLEXITY_OK = {
-  choices: [{
-    message: {
-      role: 'assistant',
-      content: 'Mercury boils at about **356.7 °C**, which is 629.9 K.[2][4]',
+  output: [
+    {
+      type: 'search_results',
+      results: [
+        { title: 'Mercury (element) - Wikipedia', url: 'https://en.wikipedia.org/wiki/Mercury_(element)', snippet: 'Boiling point 629.88 K.' },
+      ],
     },
-  }],
-  search_results: [
-    { title: 'Mercury (element) - Wikipedia', url: 'https://en.wikipedia.org/wiki/Mercury_(element)', snippet: 'Boiling point 629.88 K.' },
+    {
+      type: 'message',
+      role: 'assistant',
+      status: 'completed',
+      content: [{ type: 'output_text', text: 'Mercury boils at about **356.7 °C**, which is 629.9 K.[2][4]' }],
+    },
   ],
   usage: { cost: { total_cost: 0.00507 } },
 };
@@ -268,10 +275,10 @@ test('web-search: perplexity is asked for plain prose, which is what the engine 
   const base = startServer(t);
   await fetch(`${base}/web-search?query=test`);
 
-  assert.equal(calls[0].url, 'https://api.perplexity.ai/chat/completions');
-  assert.equal(calls[0].body.model, 'sonar');
-  assert.match(calls[0].body.messages[0].content, /no markdown/i);
-  assert.equal(calls[0].body.messages[1].content, 'test');
+  assert.equal(calls[0].url, 'https://api.perplexity.ai/v1/agent');
+  assert.equal(calls[0].body.model, 'perplexity/sonar');
+  assert.match(calls[0].body.instructions, /no markdown/i);
+  assert.equal(calls[0].body.input[0].content, 'test');
 });
 
 test('web-search: perplexity leads and tavily is not called when it answers', async (t) => {
@@ -317,7 +324,11 @@ test('web-search: both providers failing is a real failure, not a fake answer', 
 
 test('web-search: a perplexity answer with no sources is still returned', async (t) => {
   withKeys(t, { perplexity: 'pplx-test-key' });
-  stubUpstream(t, { [PPLX]: () => ({ body: { ...PERPLEXITY_OK, search_results: [] } }) });
+  const noSources = {
+    ...PERPLEXITY_OK,
+    output: PERPLEXITY_OK.output.map((item) => (item.type === 'search_results' ? { ...item, results: [] } : item)),
+  };
+  stubUpstream(t, { [PPLX]: () => ({ body: noSources }) });
   const base = startServer(t);
   const body = await (await fetch(`${base}/web-search?query=test`)).json();
 

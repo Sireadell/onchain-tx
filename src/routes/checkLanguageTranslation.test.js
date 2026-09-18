@@ -30,7 +30,7 @@ function stubPerplexity(t, content) {
     if (!String(url).startsWith('https://api.perplexity.ai')) return original(url, init);
     calls.push({ url: String(url), body: JSON.parse(init.body) });
     return new Response(JSON.stringify({
-      choices: [{ message: { role: 'assistant', content } }],
+      output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: content }] }],
       usage: { cost: { total_cost: 0.001 } },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   };
@@ -65,11 +65,11 @@ test('language-translate: translates text into the target language', async (t) =
   assert.equal(body.status, 'ok');
   assert.equal(body.summary, 'Hola');
   assert.equal(body.target, 'Spanish');
-  assert.match(calls[0].body.messages[0].content, /Spanish/);
+  assert.match(calls[0].body.instructions, /Spanish/);
   // The caller's text travels inside the data markers the guard names, and
   // the search is off: a translation has nothing to look up.
-  assert.equal(calls[0].body.messages[1].content, '<<<TEXT>>>\nhello\n<<<END>>>');
-  assert.equal(calls[0].body.disable_search, true);
+  assert.equal(calls[0].body.input[0].content, '<<<TEXT>>>\nhello\n<<<END>>>');
+  assert.equal(calls[0].body.tools, undefined);
 });
 
 test('language-translate: reads the target language out of the whole instruction', async (t) => {
@@ -83,8 +83,8 @@ test('language-translate: reads the target language out of the whole instruction
   assert.equal(body.target, 'German');
   assert.equal(body.text, 'hello');
   assert.equal(body.summary, 'Hallo');
-  assert.match(calls[0].body.messages[0].content, /into German/);
-  assert.equal(calls[0].body.messages[1].content, '<<<TEXT>>>\nhello\n<<<END>>>');
+  assert.match(calls[0].body.instructions, /into German/);
+  assert.equal(calls[0].body.input[0].content, '<<<TEXT>>>\nhello\n<<<END>>>');
 });
 
 test('language-translate: the router shapes seen in real traffic all yield a target', () => {
@@ -122,7 +122,7 @@ test('language-translate: an explicit target beats the one named in the text', a
   const base = startServer(t);
   const body = await (await fetch(`${base}/language-translate?text=${encodeURIComponent('Translate "hello" into German.')}&target=Spanish`)).json();
   assert.equal(body.target, 'Spanish');
-  assert.match(calls[0].body.messages[0].content, /into Spanish/);
+  assert.match(calls[0].body.instructions, /into Spanish/);
 });
 
 test('language-translate: a quoted reply is unquoted and a huge text is capped', async (t) => {
@@ -138,7 +138,7 @@ test('language-translate: a quoted reply is unquoted and a huge text is capped',
   assert.equal(res.status, 200);
   assert.equal(body.translation, 'Bonjour');
   assert.match(body.summary, /^Bonjour \(The text was longer than 12000 characters/);
-  assert.ok(calls[0].body.messages[1].content.length < 12100);
+  assert.ok(calls[0].body.input[0].content.length < 12100);
 });
 
 test('language-translate: a provider failure is a real 502', async (t) => {

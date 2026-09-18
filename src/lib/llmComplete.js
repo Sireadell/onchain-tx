@@ -18,17 +18,18 @@
 // about. The model is only ever told what shape of output to return, and
 // each caller supplies its own task-specific instruction.
 //
-// sonar is a search model: by default every call runs a live web search
-// first and the reply leans on what it found. That is right for a chat
-// question and wrong for a translation, a sentiment label or a briefing
-// written from the caller's own notes, where the search only adds latency,
-// citation markers, and the occasional "according to the sources provided".
-// Verified live 2026-09-17: the request body accepts `disable_search: true`,
-// the reply then carries zero search_results, and the cost is unchanged
-// (the flat $0.005 request charge dominates either way). Routes opt in per
-// call via the `disableSearch` option.
+// sonar is a search model. On the old Sonar chat/completions API, every
+// call ran a live web search first unless `disable_search: true` was set.
+// Migrated 2026-09-18 to Perplexity's Agent API (v1/agent): Sonar chat
+// completions started rejecting this deployment's account with
+// insufficient_quota, and Perplexity is retiring Sonar chat/completions
+// entirely on 2026-09-27 regardless. The Agent API inverts the default:
+// web search is now opt-in via a `tools: [{type: 'web_search'}]` entry,
+// not opt-out. `disableSearch` keeps its existing meaning at the call
+// site (true = do not search); this file is the only place that had to
+// change to keep that promise on the new API shape.
 
-const PERPLEXITY_URL = 'https://api.perplexity.ai/chat/completions';
+const PERPLEXITY_URL = 'https://api.perplexity.ai/v1/agent';
 
 // Same generosity as webSearch.js's TOTAL_BUDGET_MS: Telegraph cancels a
 // question at 30s, so this leaves margin for network and a cold start.
@@ -134,19 +135,22 @@ async function attempt(systemPrompt, userContent, { budgetMs, maxTokens, disable
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: process.env.PERPLEXITY_MODEL || 'sonar',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userContent },
-        ],
-        max_tokens: maxTokens,
-        ...(disableSearch ? { disable_search: true } : {}),
+        model: process.env.PERPLEXITY_MODEL || 'perplexity/sonar',
+        instructions: systemPrompt,
+        input: [{ type: 'message', role: 'user', content: userContent }],
+        max_output_tokens: maxTokens,
+        // Opt-in, the inverse of the old Sonar default: omitting the tool
+        // entirely is how a call declines to search on the Agent API.
+        ...(disableSearch ? {} : { tools: [{ type: 'web_search' }] }),
         ...(Number.isFinite(temperature) ? { temperature } : {}),
       }),
     });
 
     if (!res.ok) {
       const status = res.status;
+      const errBody = await res.json().catch(() => null);
+      const errType = errBody?.error?.type;
+      if (errType === 'insufficient_quota') throw new LlmCompleteError('the perplexity key has no credit left', { status });
       if (status === 401) throw new LlmCompleteError('perplexity rejected our key', { status });
       if (status === 402) throw new LlmCompleteError('the perplexity key has no credit left', { status });
       if (status === 429) throw new LlmCompleteError('perplexity is rate limiting us', { status, retryable: true });
@@ -154,7 +158,15 @@ async function attempt(systemPrompt, userContent, { budgetMs, maxTokens, disable
     }
 
     const body = await res.json();
-    const raw = body?.choices?.[0]?.message?.content;
+    // The output array can carry a search_results item ahead of the actual
+    // reply when the web_search tool ran, so take the last message item,
+    // not output[0]. Its content is itself an array (an output_text part
+    // plus, in principle, others), so find the text part rather than
+    // assuming index 0.
+    const outputs = Array.isArray(body?.output) ? body.output : [];
+    const messageItem = [...outputs].reverse().find((o) => o?.type === 'message');
+    const textPart = messageItem?.content?.find?.((c) => c?.type === 'output_text');
+    const raw = textPart?.text;
     if (typeof raw !== 'string' || !raw.trim()) return null;
     return {
       text: stripMarkup(raw),

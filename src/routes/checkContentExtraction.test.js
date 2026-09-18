@@ -225,7 +225,7 @@ test('content-extract: the LLM extraction of a passage is read as text, not as a
   const original = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     if (!String(url).startsWith('https://api.perplexity.ai')) return original(url, init);
-    return new Response(JSON.stringify({ choices: [{ message: { content: 'The passage is about graviton corrections. Dates: none. Quantities: none. Named entities: de Sitter.' } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    return new Response(JSON.stringify({ output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'The passage is about graviton corrections. Dates: none. Quantities: none. Named entities: de Sitter.' }] }] }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
   t.after(() => { globalThis.fetch = original; });
   const base = startServer(t);
