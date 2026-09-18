@@ -3,55 +3,50 @@ import { ethers } from 'ethers';
 
 const DIAMOND = '0x5a2324aA18613FAD4e44bDF0d6c73Ec1f6D87ff8';
 const RPC = 'https://sepolia.base.org';
-// VERIFIED 2026-09-17 against the live explorer AND a staticCall, not just
-// the explorer status field, which the previous version of this constant
-// (395) learned the hard way: it had gone stale to "deregistered" while
-// this file still called it "the current live slot". 403 is the current
-// live slot: active, owned by this wallet, 14 intents (added WEB_SEARCH on
-// 2026-08-31), yaml_hash 20b0711e..., confirmed via
-// explorer.telegraphprotocol.com/api/miners/403. Every id this script has
-// carried before (246, 261, 267, 313, 341, 378, 395) is dead. This constant
-// is stale by definition after every run and MUST be re-verified before the
-// next one: scan forward from this id for a slug: txlens row with
-// activation_status: active, then confirm with a staticCall.
-const OLD_REGISTRATION_ID = 403;
+// VERIFIED 2026-09-18 against the live explorer AND a staticCall, not just
+// the explorer status field, which a previous version of this constant
+// (395, then 403) learned the hard way each had gone stale to
+// "deregistered" while this file still called it "the current live slot".
+// 2747 is the current live slot: active, owned by this wallet, 30 intents,
+// yaml_hash 7945f1cd..., confirmed via
+// explorer.telegraphprotocol.com/api/miners/2747. Every id this script has
+// carried before (246, 261, 267, 313, 341, 378, 395, 403) is dead. This
+// constant is stale by definition after every run and MUST be re-verified
+// before the next one: scan forward from this id for a slug: txlens row
+// with activation_status: active, then confirm with a staticCall.
+const OLD_REGISTRATION_ID = 2747;
 
-// This update adds sixteen intents (content-extract, text-classify,
-// text-generate, language-generate, research-synthesis, cross-chain-state,
-// event-outcome, weather-check, language-translate, chat-complete,
-// news-search, news-headlines, fact-check, sentiment-analyze,
-// content-moderate, cve-lookup), bringing the total to thirty. Same rule as
-// every prior update: updateMiner mints a NEW registration and retires the
-// old one, so a YAML the off-chain validator rejects leaves the miner with
-// nothing active. That is not theoretical: 341 was rejected on a duplicate
-// answer key and TxLens had no active registration until 378 was created.
+// This update adds sixteen more intents (telegraph-knowledge,
+// text-summarize, chatbot-conversation, semantic-similarity,
+// grammar-spell-check, ai-text-detect, research-query, threat-intelligence,
+// package-status, url-scan, currency-exchange, sanctions-screening,
+// vulnerability-triage, sports-score, game-result, route-eta), bringing the
+// total to forty-six. Same rule as every prior update: updateMiner mints a
+// NEW registration and retires the old one, so a YAML the off-chain
+// validator rejects leaves the miner with nothing active. That is not
+// theoretical: 341 was rejected on a duplicate answer key and TxLens had no
+// active registration until 378 was created.
 //
 // What was checked before touching the chain:
 //   - Every schema failure seen in other miners' real rejections was checked
-//     against this YAML: limitations is an array, not a string (what
-//     rejected arcadian-defi-risk #401); no endpoint carries a params key at
-//     all, so the accepted_fields object/array mismatch that rejected
-//     legwork #391 and qarinah #397 cannot apply; there is no on_chain
-//     block, so the missing-description failure that rejected onchain-intel
-//     #393 cannot apply.
+//     against this YAML: limitations is an array, not a string; no endpoint
+//     carries a params key at all; there is no on_chain block.
 //   - Parsed with a strict loader that raises on duplicate keys, against the
 //     EXACT bytes downloaded from YAML_URL, not the local working copy,
 //     which git checks out with CRLF line endings on Windows and therefore
-//     hashes differently from what GitHub actually serves. Clean. 341 was
-//     rejected with an EMPTY error list, which is what a duplicate key
-//     produces, so a clean parse of the served bytes is the specific check
-//     that case needs.
+//     hashes differently from what GitHub actually serves. Clean, and the
+//     git blob hash matches the downloaded hash exactly.
 //   - Top-level key set is identical to the currently-accepted YAML, and
 //     every one of the sixteen new endpoints carries exactly the same five
 //     keys (path, external_path, method, intents, description) as every
 //     existing endpoint entry.
-//   - All thirty intents (fourteen existing, sixteen new) are canonical
+//   - All forty-six intents (thirty existing, sixteen new) are canonical
 //     on-chain, confirmed live via getCanonicalIntents (134 total).
 //   - Every one of the sixteen new endpoints answers on the live Render
 //     deployment, checked individually below, same as every prior update.
-const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/06abdd4a40456c3d185d692d6df8c2231a3a5b98/miner.yaml';
-const YAML_HASH = '0x7945f1cdaa0f19ad800a8c75441b4f0b3db22f0a26a90459ccdbc3935e7b3f18';
-const PREVIOUS_YAML_HASH = '20b0711eaa720e3f21602a5ab8686bda5c1d97c2e9019af65c776f89f073b56e';
+const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/463f0a2227d06aa9a408f833e9a5d350eb6fb3c2/miner.yaml';
+const YAML_HASH = '0x261ebd64bb2ba672ae7db551a5b99c3b30e16ef53a3175432ed54cbd95ddf183';
+const PREVIOUS_YAML_HASH = '7945f1cdaa0f19ad800a8c75441b4f0b3db22f0a26a90459ccdbc3935e7b3f18';
 const FEE_ADDRESS = '0x6f477610A93C5B255C29c489760045272BCeDa99';
 const MIN_PRICE_USDC = 10000;
 const CONFIRMATION_PHRASE = `update-txlens-${OLD_REGISTRATION_ID}-${YAML_HASH.slice(2, 10)}`;
@@ -86,6 +81,22 @@ const SUPPORTED_INTENTS = [
   'SENTIMENT_ANALYSIS',
   'CONTENT_MODERATION',
   'CVE_LOOKUP',
+  'TELEGRAPH_KNOWLEDGE',
+  'TEXT_SUMMARIZATION',
+  'CHATBOT_CONVERSATION',
+  'SEMANTIC_SIMILARITY',
+  'GRAMMAR_SPELL_CHECK',
+  'AI_TEXT_DETECTION',
+  'RESEARCH_QUERY',
+  'THREAT_INTELLIGENCE',
+  'PACKAGE_STATUS',
+  'URL_SCAN',
+  'CURRENCY_EXCHANGE',
+  'SANCTIONS_SCREENING_MATCH',
+  'VULNERABILITY_TRIAGE',
+  'SPORTS_SCORE',
+  'GAME_RESULT',
+  'ROUTE_ETA',
 ];
 
 const abi = [
@@ -211,28 +222,30 @@ const webSearchOk = await checkWithRetry(
 );
 if (!webSearchOk) fail('web-search did not answer, and a prior update exists specifically to claim WEB_SEARCH on-chain.');
 
-// The sixteen intents this update exists to add. Each must actually answer
-// on the live deployment before the chain is told we support it, or every
+// The thirty pre-existing intents (checked in the prior update's run) plus
+// the sixteen this update exists to add. Each must actually answer on the
+// live deployment before the chain is told we support it, or every
 // question routed to that intent scores zero from the moment this
-// transaction confirms.
+// transaction confirms. Field names below were read live off the actual
+// deployment response bodies on 2026-09-18, not assumed.
 console.log('8/12 exercising the sixteen new intents on the live deployment');
 const newChecks = [
-  ['CONTENT_EXTRACTION', `${BASE}/content-extract?url=${encodeURIComponent('https://example.com')}`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
-  ['TEXT_CLASSIFICATION', `${BASE}/text-classify?text=${encodeURIComponent('I love this product')}`, (b) => b.status === 'ok' && typeof b.classification === 'string' && b.classification.trim()],
-  ['TEXT_GENERATION', `${BASE}/text-generate?prompt=${encodeURIComponent('write one short sentence about the ocean')}`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
-  ['LANGUAGE_GENERATION', `${BASE}/language-generate?text=${encodeURIComponent('hey whats up')}&target=formal`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
-  ['RESEARCH_SYNTHESIS', `${BASE}/research-synthesis?query=${encodeURIComponent('main approaches to carbon capture')}`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
-  ['CROSS_CHAIN_STATE_VERIFY', `${BASE}/cross-chain-state?address=0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045&chains=eth,base`, (b) => b.status === 'ok' && Array.isArray(b.results)],
-  ['EVENT_OUTCOME_RESOLUTION', `${BASE}/event-outcome?query=${encodeURIComponent('did the merger go through')}`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
-  ['WEATHER_CHECK', `${BASE}/weather-check?location=Tokyo`, (b) => b.status === 'ok' && typeof b.temperature_c === 'number'],
-  ['LANGUAGE_TRANSLATION', `${BASE}/language-translate?text=hello&target=Spanish`, (b) => b.status === 'ok' && typeof b.translation === 'string' && b.translation.trim()],
-  ['CHAT_COMPLETION', `${BASE}/chat-complete?message=${encodeURIComponent('hi there')}`, (b) => b.status === 'ok' && typeof b.answer === 'string' && b.answer.trim()],
-  ['NEWS_SEARCH', `${BASE}/news-search?query=bitcoin`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
-  ['NEWS_HEADLINES', `${BASE}/news-headlines?topic=technology`, (b) => b.status === 'ok' && Array.isArray(b.headlines) && b.headlines.length > 0],
-  ['FACT_CHECK', `${BASE}/fact-check?claim=${encodeURIComponent('the Eiffel Tower is in Berlin')}`, (b) => b.status === 'ok' && typeof b.verdict === 'string'],
-  ['SENTIMENT_ANALYSIS', `${BASE}/sentiment-analyze?text=${encodeURIComponent('I love this so much')}`, (b) => b.status === 'ok' && typeof b.sentiment === 'string'],
-  ['CONTENT_MODERATION', `${BASE}/content-moderate?text=${encodeURIComponent('have a nice day')}`, (b) => b.status === 'ok' && typeof b.flagged === 'boolean'],
-  ['CVE_LOOKUP', `${BASE}/cve-lookup?cve=CVE-2021-44228`, (b) => b.status === 'ok' && typeof b.cve_id === 'string' && typeof b.severity === 'string'],
+  ['TELEGRAPH_KNOWLEDGE', `${BASE}/telegraph-knowledge?question=${encodeURIComponent('what is 2 plus 2')}`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
+  ['TEXT_SUMMARIZATION', `${BASE}/text-summarize?text=${encodeURIComponent('The company reported a 12 percent increase in revenue this quarter.')}`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
+  ['CHATBOT_CONVERSATION', `${BASE}/chatbot-conversation?message=${encodeURIComponent('hi there')}`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
+  ['SEMANTIC_SIMILARITY', `${BASE}/semantic-similarity?text1=hello&text2=hi`, (b) => b.status === 'ok' && typeof b.similarity === 'number'],
+  ['GRAMMAR_SPELL_CHECK', `${BASE}/grammar-spell-check?text=${encodeURIComponent('i dont has no money')}`, (b) => b.status === 'ok' && typeof b.corrected_text === 'string' && b.corrected_text.trim()],
+  ['AI_TEXT_DETECTION', `${BASE}/ai-text-detect?text=${encodeURIComponent('This is a plain sentence.')}`, (b) => b.status === 'ok' && typeof b.ai_generated_likelihood === 'number'],
+  ['RESEARCH_QUERY', `${BASE}/research-query?query=${encodeURIComponent('what is photosynthesis')}`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
+  ['THREAT_INTELLIGENCE', `${BASE}/threat-intelligence?indicator=8.8.8.8`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
+  ['PACKAGE_STATUS', `${BASE}/package-status?tracking_number=1Z999AA10123456784`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
+  ['URL_SCAN', `${BASE}/url-scan?url=${encodeURIComponent('https://example.com')}`, (b) => b.status === 'ok' && typeof b.verdict === 'string'],
+  ['CURRENCY_EXCHANGE', `${BASE}/currency-exchange?from=USD&to=EUR`, (b) => b.status === 'ok' && typeof b.rate === 'number'],
+  ['SANCTIONS_SCREENING_MATCH', `${BASE}/sanctions-screening?name=${encodeURIComponent('John Smith')}`, (b) => b.status === 'ok' && typeof b.matched === 'boolean'],
+  ['VULNERABILITY_TRIAGE', `${BASE}/vulnerability-triage?cve=CVE-2021-44228`, (b) => b.status === 'ok' && typeof b.triage_tier === 'string'],
+  ['SPORTS_SCORE', `${BASE}/sports-score?team=${encodeURIComponent('Lakers')}`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
+  ['GAME_RESULT', `${BASE}/game-result?team=${encodeURIComponent('Liverpool')}`, (b) => b.status === 'ok' && typeof b.home_team === 'string'],
+  ['ROUTE_ETA', `${BASE}/route-eta?origin=${encodeURIComponent('Miami')}&destination=${encodeURIComponent('Orlando')}`, (b) => b.status === 'ok' && typeof b.distance_km === 'number'],
 ];
 const failedIntents = [];
 for (const [intent, url, verify] of newChecks) {
