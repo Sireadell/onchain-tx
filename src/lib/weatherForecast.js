@@ -15,6 +15,7 @@ const OWM_SOURCE = 'https://openweathermap.org';
 
 const GEOCODE_URL = 'https://geocoding-api.open-meteo.com/v1/search';
 const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
+const ARCHIVE_URL = 'https://archive-api.open-meteo.com/v1/archive';
 const CALL_TIMEOUT_MS = Number(process.env.WEATHER_TIMEOUT_MS) || 4_000;
 // MET Norway's wind is m/s; the current-conditions fallback converts it to
 // the km/h the rest of this file (and every response field) reports in.
@@ -131,6 +132,7 @@ export function __clearWeatherCachesForTesting() {
   forecastCache.store.clear();
   stormCache.store.clear();
   currentCache.store.clear();
+  historicalCache.store.clear();
 }
 
 // Rounded to ~1km — enough to treat "London" and a "lat,lon" a few streets
@@ -422,6 +424,64 @@ export async function fetchForecast(input, days = 3, startDay = 0, { keepToday =
     fetchedAt: new Date().toISOString(),
   };
   forecastCache.set(cacheKey, result, FORECAST_CACHE_TTL_MS);
+  return result;
+}
+
+// Historical conditions never change once published, so this is cached far
+// longer than a live forecast.
+const HISTORICAL_CACHE_TTL_MS = Number(process.env.WEATHER_HISTORICAL_CACHE_TTL_MS) || 24 * 60 * 60 * 1000;
+const historicalCache = new TtlCache();
+
+// WEATHER_FORECAST_VERIFY: what actually happened at a place on a specific
+// past date, via Open-Meteo's historical archive endpoint. Distinct from
+// fetchForecast (forward-looking) and fetchCurrentConditions (right now):
+// this answers "was the forecast right", checked against what actually
+// occurred, not a prediction. Throws WeatherLookupError for a future or
+// today's date, since the archive has nothing to verify yet for those.
+export async function fetchHistoricalConditions(input, dateStr) {
+  const location = await resolveLocation(input);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr ?? ''))) {
+    throw new WeatherLookupError(`'${dateStr}' is not a date in YYYY-MM-DD form`);
+  }
+  const requested = new Date(`${dateStr}T00:00:00Z`);
+  if (Number.isNaN(requested.getTime())) {
+    throw new WeatherLookupError(`'${dateStr}' is not a real calendar date`);
+  }
+  const todayUtc = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
+  if (requested.getTime() >= todayUtc.getTime()) {
+    throw new WeatherLookupError(`'${dateStr}' is today or in the future; this endpoint verifies past conditions, it does not forecast`);
+  }
+
+  const cacheKey = `${roundCoord(location.latitude)},${roundCoord(location.longitude)}|${dateStr}`;
+  const cached = historicalCache.get(cacheKey);
+  if (cached) return { ...cached, name: location.name };
+
+  const params = new URLSearchParams({
+    latitude: location.latitude,
+    longitude: location.longitude,
+    start_date: dateStr,
+    end_date: dateStr,
+    daily: 'temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode,windspeed_10m_max',
+    timezone: 'auto',
+  });
+  const body = await fetchJson(`${ARCHIVE_URL}?${params}`, 'historical archive');
+  const d = body.daily;
+  if (!d?.time?.length) throw new WeatherLookupError(`no historical data returned for '${input}' on ${dateStr}`);
+
+  const result = {
+    ...location,
+    date: d.time[0],
+    temp_min: d.temperature_2m_min?.[0] ?? null,
+    temp_max: d.temperature_2m_max?.[0] ?? null,
+    precipitation_mm: d.precipitation_sum?.[0] ?? null,
+    condition: d.weathercode?.[0] != null ? describeWeatherCode(d.weathercode[0]) : null,
+    code: d.weathercode?.[0] ?? null,
+    wind_max_kmh: d.windspeed_10m_max?.[0] ?? null,
+    source: 'Open-Meteo (historical archive)',
+    fetchedAt: new Date().toISOString(),
+  };
+  historicalCache.set(cacheKey, result, HISTORICAL_CACHE_TTL_MS);
   return result;
 }
 

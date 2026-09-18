@@ -37,7 +37,7 @@ description: >
   repeated provider calls, and freshness timestamps identify when the data
   was fetched.
 
-  It covers forty-six canonical intents. WEATHER_FORECAST: what will the
+  It covers fifty-seven canonical intents. WEATHER_FORECAST: what will the
   weather do at a named place on the day or over the window asked about,
   answering the aspect emphasised (rain, wind, snow, freeze, temperature)
   rather than reciting a range. STORM_ALERT: how disruptive will the
@@ -102,6 +102,22 @@ description: >
   the winner of a named team's most recently completed match. ROUTE_ETA:
   driving distance and time between two places, with a ferry-only route
   named honestly rather than reported as ordinary driving time.
+  REGULATORY_FILING_MONITOR: real Federal Register filings matching a
+  named company, product, drug, or concern. CREDIT_SCORE_VERIFY: whether a
+  company has a registered Legal Entity Identifier, honestly distinguished
+  from an actual credit score. MACRO_ECONOMIC_INDICATOR: GDP growth,
+  inflation, or unemployment for a named country, from World Bank data.
+  WEATHER_FORECAST_VERIFY: what actually happened at a place on a past
+  date, distinct from a forward-looking forecast. CUSTOMER_TICKET_RESOLUTION:
+  a known fix for a described technical problem, from a live search.
+  RETURN_POLICY_VERIFY: a named retailer's actual return policy, from a
+  live search. TASK_EXECUTION_QUALITY: whether a described result actually
+  satisfies a described task. CARRIER_SERVICEABILITY: whether a named
+  carrier serves a given address or ZIP code. DELIVERY_WINDOW_VERIFY: a
+  caveated estimate of a shipment's delivery window. PAYMENT_METHOD_VERIFY:
+  the card network and issuer identifiable from a card's leading digits,
+  honestly distinguished from full card validation. INVOICE_LEDGER_RECONCILE:
+  an arithmetic reconciliation of described invoice or ledger figures.
 
   Blockscout-backed reads cover five EVM chains (Ethereum, Base, Arbitrum,
   Optimism, Polygon). RPC-backed reads currently cover Ethereum, Base,
@@ -691,6 +707,122 @@ endpoints:
       driving time. Params: origin, destination (required, place names or
       "lat,lon"), mode (optional, driving only; other modes are refused
       honestly).
+  - path: /regulatory-filing-monitor
+    external_path: /regulatory-filing-monitor
+    method: GET
+    intents: [REGULATORY_FILING_MONITOR]
+    description: >
+      REGULATORY_FILING_MONITOR. Answers "will the FDA fine this company",
+      "has this drug had a warning filed against it". Searches the US
+      Federal Register for real, published filings and notices matching a
+      named company, product, drug, device, or industry concern, reporting
+      what has actually been filed rather than predicting future action.
+      Params: company (required, also accepted as product, drug, device,
+      or concern).
+  - path: /credit-score-verify
+    external_path: /credit-score-verify
+    method: GET
+    intents: [CREDIT_SCORE_VERIFY]
+    description: >
+      CREDIT_SCORE_VERIFY. Answers "is this a registered business",
+      "verify this company's legal entity status". Checks a company name
+      against the GLEIF Legal Entity Identifier registry: whether it has a
+      registered LEI, its legal name, jurisdiction, and status. States
+      plainly that LEI registration is not itself a credit score. Params:
+      company (required).
+  - path: /macro-economic-indicator
+    external_path: /macro-economic-indicator
+    method: GET
+    intents: [MACRO_ECONOMIC_INDICATOR]
+    description: >
+      MACRO_ECONOMIC_INDICATOR. Answers "what is Japan's inflation rate",
+      "how fast is the US economy growing". Reads GDP growth, inflation, or
+      unemployment for a named country from World Bank data. Params:
+      country (required, name or ISO code), economic_indicator (required,
+      also accepted as indicator; GDP growth, inflation, or unemployment).
+  - path: /weather-forecast-verify
+    external_path: /weather-forecast-verify
+    method: GET
+    intents: [WEATHER_FORECAST_VERIFY]
+    description: >
+      WEATHER_FORECAST_VERIFY. Answers "what was the actual weather in
+      London on August 1st". Reports what actually happened at a named
+      place on a past date, from Open-Meteo's historical archive, distinct
+      from WEATHER_FORECAST's forward-looking forecast; a date that is
+      today or in the future is refused honestly. Params: location
+      (required), date (required, YYYY-MM-DD, must be in the past).
+  - path: /customer-ticket-resolution
+    external_path: /customer-ticket-resolution
+    method: GET
+    intents: [CUSTOMER_TICKET_RESOLUTION]
+    description: >
+      CUSTOMER_TICKET_RESOLUTION. Answers "how do I fix this error", given a
+      described technical problem. Searches live web sources for a known
+      fix or resolution and reports it, sources named, or says honestly
+      that none was found. Params: ticket (required, also accepted as
+      description, issue, problem, error, or error_message).
+  - path: /return-policy-verify
+    external_path: /return-policy-verify
+    method: GET
+    intents: [RETURN_POLICY_VERIFY]
+    description: >
+      RETURN_POLICY_VERIFY. Answers "what is Costco's return policy". Given
+      a retailer name, finds and reports that retailer's actual return
+      policy (window, conditions) from a live search, sources named. Params:
+      retailer (required, also accepted as store, merchant, or brand),
+      product (optional purchase context).
+  - path: /task-execution-quality
+    external_path: /task-execution-quality
+    method: GET
+    intents: [TASK_EXECUTION_QUALITY]
+    description: >
+      TASK_EXECUTION_QUALITY. Given a task description and a produced
+      result, judges whether the result actually satisfies the task
+      (satisfies, partially_satisfies, or fails), with a reason. Params:
+      task (required, also accepted as task_description or instructions),
+      result (required, also accepted as output or response).
+  - path: /carrier-serviceability
+    external_path: /carrier-serviceability
+    method: GET
+    intents: [CARRIER_SERVICEABILITY]
+    description: >
+      CARRIER_SERVICEABILITY. Answers "does UPS deliver to this ZIP code".
+      Given an address or ZIP code and optionally a carrier name, reports
+      whether that carrier serves the area. Params: zip_code (required,
+      also accepted as address), carrier (optional).
+  - path: /delivery-window-verify
+    external_path: /delivery-window-verify
+    method: GET
+    intents: [DELIVERY_WINDOW_VERIFY]
+    description: >
+      DELIVERY_WINDOW_VERIFY. Answers "how long does FedEx ground take from
+      New York to LA". Given an origin, destination, and carrier/service
+      level, estimates a realistic delivery window, honestly caveated as an
+      estimate, not a guarantee. Params: origin, destination (optional,
+      also accepted together as route), carrier (optional), service
+      (optional, e.g. ground, express, overnight).
+  - path: /payment-method-verify
+    external_path: /payment-method-verify
+    method: GET
+    intents: [PAYMENT_METHOD_VERIFY]
+    description: >
+      PAYMENT_METHOD_VERIFY. Answers "what card network is this BIN",
+      "is this a Visa or Mastercard number". Identifies the card network
+      and, where possible, issuing bank and country from a card's leading
+      digits (the BIN), a public and static lookup; states plainly that
+      full card validity cannot be confirmed without processor access.
+      Params: card_number (required, also accepted as payment_method for a
+      network or app name).
+  - path: /invoice-ledger-reconcile
+    external_path: /invoice-ledger-reconcile
+    method: GET
+    intents: [INVOICE_LEDGER_RECONCILE]
+    description: >
+      INVOICE_LEDGER_RECONCILE. Given two described figures or a described
+      invoice/ledger discrepancy, reconciles what can be reconciled from
+      arithmetic and the stated facts alone; states plainly this is not a
+      lookup against any real ledger system. Params: description (required,
+      also accepted as invoice, ledger, or discrepancy).
   - path: /fraud-query
     external_path: /fraud-query
     method: POST
@@ -795,7 +927,8 @@ input_schema:
     location:
       type: string
       description: >
-        Place to forecast for, on /weather-forecast and /storm-alert. A
+        Place to forecast for, on /weather-forecast and /storm-alert, or to
+        verify actual past conditions for, on /weather-forecast-verify. A
         place name ("London"), a "lat,lon" pair ("51.5,-0.13"), or the
         whole question ("Will it rain in London tomorrow?"), in which case
         the day or window and the aspect asked about are read from it too.
@@ -996,18 +1129,97 @@ input_schema:
       type: string
       description: >
         Starting place name or "lat,lon" on /route-eta. Also accepted as
-        from, start, or source.
+        from, start, or source. On /delivery-window-verify, the shipment's
+        origin place (optional; a whole route description in `route` is
+        also accepted).
     destination:
       type: string
       description: >
         Ending place name or "lat,lon" on /route-eta. Also accepted as to,
-        end, or target.
+        end, or target. On /delivery-window-verify, the shipment's
+        destination place (optional; a whole route description in `route`
+        is also accepted).
     mode:
       type: string
       description: >
         Travel mode on /route-eta. Only driving is reliably available on the
         public routing server this endpoint uses; other modes are refused
         honestly. Also accepted as profile or travel_mode.
+    company:
+      type: string
+      description: >
+        Company, product, drug, device, or industry concern to search
+        Federal Register filings for on /regulatory-filing-monitor, or a
+        company name to verify against the GLEIF legal-entity registry on
+        /credit-score-verify.
+    economic_indicator:
+      type: string
+      description: >
+        GDP growth, inflation, or unemployment on /macro-economic-indicator.
+        Also accepted as indicator. Used with country.
+    date:
+      type: string
+      description: >
+        A past date (YYYY-MM-DD) to verify actual weather conditions for on
+        /weather-forecast-verify. A date that is today or in the future is
+        refused; use /weather-forecast for that instead.
+    ticket:
+      type: string
+      description: >
+        The described error or technical problem on
+        /customer-ticket-resolution. Also accepted as description, issue,
+        problem, error, or error_message.
+    retailer:
+      type: string
+      description: >
+        The retailer or store name on /return-policy-verify. Also accepted
+        as store, merchant, or brand.
+    task:
+      type: string
+      description: >
+        The original task description on /task-execution-quality. Also
+        accepted as task_description or instructions. Used with result.
+    result:
+      type: string
+      description: >
+        The produced result to assess against task on
+        /task-execution-quality. Also accepted as output or response.
+    zip_code:
+      type: string
+      description: >
+        Address or ZIP code on /carrier-serviceability. Also accepted as
+        address.
+    carrier:
+      type: string
+      description: >
+        Carrier name (e.g. UPS, FedEx, USPS, DHL) on /carrier-serviceability
+        and /delivery-window-verify. Optional on both.
+    route:
+      type: string
+      description: >
+        Free-text route description on /delivery-window-verify, when origin
+        and destination are not given separately.
+    service:
+      type: string
+      description: >
+        Service level (e.g. ground, express, overnight) on
+        /delivery-window-verify. Optional.
+    card_number:
+      type: string
+      description: >
+        Full or partial card number, or its leading 6-8 digits (the BIN), on
+        /payment-method-verify.
+    payment_method:
+      type: string
+      description: >
+        Card network name or payment app name on /payment-method-verify.
+        Alternative to card_number.
+    description:
+      type: string
+      description: >
+        Free-text description of the figures and any claimed discrepancy on
+        /invoice-ledger-reconcile. Also accepted as invoice, ledger, or
+        discrepancy.
 output_schema:
   type: object
   properties:
@@ -1281,13 +1493,22 @@ output_schema:
       description: /weather-forecast only. The aspect the answer leads with, as understood from the request.
     condition:
       type: string
-      description: /weather-forecast only. Expected condition in plain words, from the WMO weather code.
+      description: >
+        On /weather-forecast, the expected condition in plain words, from
+        the WMO weather code. On /weather-forecast-verify, the recorded
+        condition for the verified past date.
     temp_min_c:
       type: number
-      description: /weather-forecast only. Lowest temperature across the window, Celsius.
+      description: >
+        On /weather-forecast, the lowest temperature across the forecast
+        window. On /weather-forecast-verify, the recorded low for the
+        verified past date. Celsius.
     temp_max_c:
       type: number
-      description: /weather-forecast only. Highest temperature across the window, Celsius.
+      description: >
+        On /weather-forecast, the highest temperature across the forecast
+        window. On /weather-forecast-verify, the recorded high for the
+        verified past date. Celsius.
     precipitation_total_mm:
       type: number
       description: /weather-forecast only. Total precipitation across the window.
@@ -1350,7 +1571,10 @@ output_schema:
         On /vulnerability-triage, the recommended remediation urgency.
     country:
       type: string
-      description: /ip-geolocate only.
+      description: >
+        On /ip-geolocate, the country the address resolves to. On
+        /macro-economic-indicator, the country the value applies to,
+        echoed back from the resolved country name.
     country_code:
       type: string
       description: /ip-geolocate only. ISO 3166-1 alpha-2.
@@ -1392,7 +1616,10 @@ output_schema:
       description: /ip-geolocate only. Address belongs to a hosting or datacenter network rather than a residential connection.
     total_matches:
       type: integer
-      description: /academic-search only. How many peer-reviewed articles matched, of which `papers` is the returned page.
+      description: >
+        On /academic-search, how many peer-reviewed articles matched, of
+        which `papers` is the returned page. On /regulatory-filing-monitor,
+        how many Federal Register documents matched.
     papers:
       type: array
       items:
@@ -1436,12 +1663,21 @@ output_schema:
       description: Sentinel fraud verdict, also returned as status for TxLens compatibility.
     reason:
       type: string
-      description: Complete fraud answer or wallet-risk explanation.
+      description: >
+        Complete fraud answer or wallet-risk explanation. On
+        /task-execution-quality, why the result was judged to satisfy or
+        fail the task.
     assessment_status:
       type: string
       enum: [ASSESSED, LIMITED, INCONCLUSIVE]
     source:
-      type: object
+      type: [object, string]
+      description: >
+        On several routes (/currency-exchange, /cve-lookup,
+        /regulatory-filing-monitor, /credit-score-verify,
+        /macro-economic-indicator, /weather-forecast-verify), a plain string
+        naming the data provider. On the fraud/wallet-risk routes, an object
+        with structured detail.
     wallet:
       type: string
     risk_score:
@@ -1478,7 +1714,10 @@ output_schema:
       description: /content-extract only. Page title, or null if none was found.
     truncated:
       type: boolean
-      description: /content-extract only. True when the extracted text was cut off at the length cap.
+      description: >
+        On /content-extract, true when the extracted text was cut off at
+        the length cap. On /invoice-ledger-reconcile, true when the
+        supplied description was cut off at the length cap.
     full_length:
       type: integer
       description: /content-extract only. Character length of the full extracted text before truncation.
@@ -1550,6 +1789,7 @@ output_schema:
         On /fact-check, the True/False/Unverified verdict extracted from the
         answer. On /chat-complete, Likely/Unlikely/Uncertain for a "will X
         happen" question, null otherwise. On /url-scan, Safe/Suspicious/Unknown.
+        On /task-execution-quality, satisfies/partially_satisfies/fails.
     sentiment:
       type: [string, "null"]
       description: /sentiment-analyze only. Positive/Negative/Neutral/Mixed.
@@ -1616,7 +1856,10 @@ output_schema:
       description: /package-status only. Whether an authoritative tracking status was found.
     carrier:
       type: [string, "null"]
-      description: /package-status only. Detected shipping carrier, when named in the input.
+      description: >
+        On /package-status, detected shipping carrier, when named in the
+        input. On /carrier-serviceability and /delivery-window-verify,
+        the carrier name checked, echoed or resolved from the input.
     reachable:
       type: boolean
       description: /url-scan only. Whether the URL responded to a live fetch.
@@ -1636,7 +1879,9 @@ output_schema:
       type: array
       items:
         type: object
-      description: /sanctions-screening only. Matching OFAC SDN records.
+      description: >
+        On /sanctions-screening, matching OFAC SDN records. On
+        /credit-score-verify, matching GLEIF legal-entity records.
     triage_tier:
       type: string
       enum: [URGENT, CRITICAL, HIGH, MEDIUM, LOW, UNKNOWN]
@@ -1668,6 +1913,69 @@ output_schema:
       description: >
         /route-eta only. When includes_ferry is true, the ferry leg's
         duration, distance and named crossing; null otherwise.
+    documents:
+      type: array
+      items:
+        type: object
+      description: /regulatory-filing-monitor only. Matching Federal Register documents, each carrying title, date, and URL.
+    lei_registered:
+      type: [boolean, "null"]
+      description: /credit-score-verify only. Whether the company has a registered Legal Entity Identifier.
+    credit_score_available:
+      type: boolean
+      description: >
+        /credit-score-verify only. Always false. States plainly that a GLEIF
+        registration is not a credit score.
+    economic_indicator:
+      type: string
+      description: /macro-economic-indicator only. Which indicator was read (GDP growth, inflation, or unemployment).
+    year:
+      type: string
+      description: /macro-economic-indicator only. The most recent year data was available for.
+    value:
+      type: [number, "null"]
+      description: /macro-economic-indicator only. The indicator's value.
+    date:
+      type: string
+      description: /weather-forecast-verify only. The verified past date, echoed back.
+    resolved:
+      type: boolean
+      description: /customer-ticket-resolution only. Whether a real fix or resolution was found.
+    retailer:
+      type: string
+      description: /return-policy-verify only. The retailer name, echoed or resolved from the question.
+    verified:
+      type: boolean
+      description: /return-policy-verify only. Whether an actual policy was found and confirmed live.
+    is_estimate:
+      type: boolean
+      description: /delivery-window-verify only. Always true. States plainly that the window is an estimate, not a guarantee.
+    area:
+      type: string
+      description: /carrier-serviceability only. The address or ZIP code checked, echoed back.
+    payment_app:
+      type: [string, "null"]
+      description: /payment-method-verify only. Named payment app, when one was identified instead of a card network.
+    issuing_bank:
+      type: [string, "null"]
+      description: /payment-method-verify only. Issuing bank, when identifiable from the BIN.
+    issuing_country:
+      type: [string, "null"]
+      description: /payment-method-verify only. Issuing country, when identifiable from the BIN.
+    can_verify_live_status:
+      type: boolean
+      description: >
+        /payment-method-verify only. Always false. States plainly that live
+        card validity cannot be confirmed without processor access.
+    verified_against_live_ledger:
+      type: boolean
+      description: >
+        /invoice-ledger-reconcile only. Always false. States plainly that
+        this is an arithmetic check over the supplied text, not a lookup
+        against a real ledger system.
+    network:
+      type: [string, "null"]
+      description: /payment-method-verify only. Card network identified from the BIN (e.g. Visa, Mastercard), when recognizable.
 
 semantics:
   # label_field is the ONE field the engine grades. It was `status`, which
@@ -1732,6 +2040,17 @@ semantics:
     - SPORTS_SCORE
     - GAME_RESULT
     - ROUTE_ETA
+    - REGULATORY_FILING_MONITOR
+    - CREDIT_SCORE_VERIFY
+    - MACRO_ECONOMIC_INDICATOR
+    - WEATHER_FORECAST_VERIFY
+    - CUSTOMER_TICKET_RESOLUTION
+    - RETURN_POLICY_VERIFY
+    - TASK_EXECUTION_QUALITY
+    - CARRIER_SERVICEABILITY
+    - DELIVERY_WINDOW_VERIFY
+    - PAYMENT_METHOD_VERIFY
+    - INVOICE_LEDGER_RECONCILE
 
 docs:
   repository: https://github.com/Sireadell/onchain-tx
