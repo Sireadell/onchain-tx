@@ -37,7 +37,7 @@ description: >
   repeated provider calls, and freshness timestamps identify when the data
   was fetched.
 
-  It covers thirty canonical intents. WEATHER_FORECAST: what will the
+  It covers forty-six canonical intents. WEATHER_FORECAST: what will the
   weather do at a named place on the day or over the window asked about,
   answering the aspect emphasised (rain, wind, snow, freeze, temperature)
   rather than reciting a range. STORM_ALERT: how disruptive will the
@@ -82,6 +82,26 @@ description: >
   is safe or flagged against common platform policies, with a reason.
   CVE_LOOKUP: given a CVE id or keyword, returns matching vulnerability
   records from the National Vulnerability Database, with severity.
+  TELEGRAPH_KNOWLEDGE: general-knowledge questions and questions about
+  Telegraph Protocol itself. TEXT_SUMMARIZATION: summarizes supplied text to
+  a given length or style. CHATBOT_CONVERSATION: a conversational reply,
+  optionally using supplied message history as context. SEMANTIC_SIMILARITY:
+  a 0-1 similarity score for two supplied texts. GRAMMAR_SPELL_CHECK:
+  corrected text plus the fixes made. AI_TEXT_DETECTION: an approximate
+  self-assessment of how likely text is AI-generated, honestly labeled as an
+  estimate. RESEARCH_QUERY: an open research question answered in one
+  well-sourced paragraph from live web sources. THREAT_INTELLIGENCE: whether
+  an IP, domain, hash, CVE or threat actor is a known threat.
+  PACKAGE_STATUS: a shipment's current status from live web search.
+  URL_SCAN: a Safe/Suspicious/Unknown verdict on a URL from reachability,
+  TLS validity and reputation checks. CURRENCY_EXCHANGE: live currency
+  conversion at the ECB reference rate. SANCTIONS_SCREENING_MATCH: whether a
+  name matches the US Treasury OFAC sanctions list. VULNERABILITY_TRIAGE:
+  the same CVE data as CVE_LOOKUP framed as a remediation-urgency decision.
+  SPORTS_SCORE: a named team's most recent or in-progress score. GAME_RESULT:
+  the winner of a named team's most recently completed match. ROUTE_ETA:
+  driving distance and time between two places, with a ferry-only route
+  named honestly rather than reported as ordinary driving time.
 
   Blockscout-backed reads cover five EVM chains (Ethereum, Base, Arbitrum,
   Optimism, Polygon). RPC-backed reads currently cover Ethereum, Base,
@@ -520,6 +540,157 @@ endpoints:
       as "CVE-2021-44228", a sentence containing one, or a product keyword
       such as "log4j"; also accepted as cve_id, id, vulnerability, query or
       question).
+  - path: /telegraph-knowledge
+    external_path: /telegraph-knowledge
+    method: GET
+    intents: [TELEGRAPH_KNOWLEDGE]
+    description: >
+      TELEGRAPH_KNOWLEDGE. Answers general-knowledge questions and questions
+      about Telegraph Protocol itself, grounded against telegraphprotocol.com
+      for protocol-specific questions rather than guessing about a protocol
+      the model was not trained on. Params: question (required, also
+      accepted as query, q, text, input).
+  - path: /text-summarize
+    external_path: /text-summarize
+    method: GET
+    intents: [TEXT_SUMMARIZATION]
+    description: >
+      TEXT_SUMMARIZATION. Summarizes supplied text to a given length or
+      style, or a sensible default when none is named. Params: text
+      (required), length (optional, e.g. "50 words" or "one sentence").
+  - path: /chatbot-conversation
+    external_path: /chatbot-conversation
+    method: GET
+    intents: [CHATBOT_CONVERSATION]
+    description: >
+      CHATBOT_CONVERSATION. Replies to a chat message, using a supplied
+      messages/history array as context when given. Params: message
+      (required), messages (optional, a JSON array of {role, content} turns,
+      also accepted as history).
+  - path: /semantic-similarity
+    external_path: /semantic-similarity
+    method: GET
+    intents: [SEMANTIC_SIMILARITY]
+    description: >
+      SEMANTIC_SIMILARITY. Returns a 0-1 semantic similarity score and a
+      short reason for two supplied texts. Params: text1, text2 (required,
+      also accepted as a and b).
+  - path: /grammar-spell-check
+    external_path: /grammar-spell-check
+    method: GET
+    intents: [GRAMMAR_SPELL_CHECK]
+    description: >
+      GRAMMAR_SPELL_CHECK. Returns corrected text plus a count and list of
+      the grammar and spelling fixes made. Params: text (required).
+  - path: /ai-text-detect
+    external_path: /ai-text-detect
+    method: GET
+    intents: [AI_TEXT_DETECTION]
+    description: >
+      AI_TEXT_DETECTION. Returns an approximate self-assessment of how
+      likely supplied text is AI-generated, with named cues and an honest
+      disclaimer that this is a language-model estimate, not a certified
+      detector. Params: text (required).
+  - path: /research-query
+    external_path: /research-query
+    method: GET
+    intents: [RESEARCH_QUERY]
+    description: >
+      RESEARCH_QUERY. Answers an open research question from live web
+      sources in one well-sourced paragraph. Params: query (required, also
+      accepted as q, question, topic, text, research, search, prompt,
+      subject), max_results (optional, 1-20, default 6).
+  - path: /threat-intelligence
+    external_path: /threat-intelligence
+    method: GET
+    intents: [THREAT_INTELLIGENCE]
+    description: >
+      THREAT_INTELLIGENCE. Given an IP, domain, file hash, CVE id, or threat
+      actor/malware family name, reports whether it is a known threat:
+      malicious/clean verdict and pulse count from AlienVault OTX for
+      IPs/domains/hashes, exploitation status and CVSS severity from
+      CIRCL/NVD for CVE ids, or a web-search-sourced profile for actor and
+      malware-family names. Params: indicator (required, also accepted as
+      ioc, ip, domain, hash, cve, actor, query, q, question, text, input).
+  - path: /package-status
+    external_path: /package-status
+    method: GET
+    intents: [PACKAGE_STATUS]
+    description: >
+      PACKAGE_STATUS. Given a shipment tracking number, reports its current
+      status via live web search, since no free universal carrier API
+      exists; answers honestly when no authoritative status can be found
+      rather than guessing. Params: tracking_number (required, also accepted
+      as tracking, tracking_id, number, package_id, query, q, question,
+      text, input).
+  - path: /url-scan
+    external_path: /url-scan
+    method: GET
+    intents: [URL_SCAN]
+    description: >
+      URL_SCAN. Given a URL, returns a Safe/Suspicious/Unknown verdict
+      combining live reachability and redirect-chain checking, TLS
+      certificate validity, and a web-search reputation check for
+      phishing/malware/scam reports. Params: url (required, also accepted as
+      link, website, target, query, q, question, text, input).
+  - path: /currency-exchange
+    external_path: /currency-exchange
+    method: GET
+    intents: [CURRENCY_EXCHANGE]
+    description: >
+      CURRENCY_EXCHANGE. Answers "how much is 100 dollars in euros",
+      "convert 50 GBP to JPY", using live ECB reference rates. Params: from,
+      to (currency codes or names such as "dollars", "euros"), amount
+      (optional, default 1).
+  - path: /sanctions-screening
+    external_path: /sanctions-screening
+    method: GET
+    intents: [SANCTIONS_SCREENING_MATCH]
+    description: >
+      SANCTIONS_SCREENING_MATCH. Answers "is John Doe sanctioned", "check
+      this company against the OFAC list". Screens a name against the US
+      Treasury OFAC Specially Designated Nationals list with fuzzy matching.
+      Params: name (required, a person or entity name).
+  - path: /vulnerability-triage
+    external_path: /vulnerability-triage
+    method: GET
+    intents: [VULNERABILITY_TRIAGE]
+    description: >
+      VULNERABILITY_TRIAGE. Answers "how urgent is CVE-2021-44228", "should
+      I patch log4j now". Same CIRCL/NVD CVE data as CVE_LOOKUP, framed as a
+      triage decision: severity tier, CISA Known Exploited Vulnerabilities
+      status, and a recommended remediation urgency. Params: cve (required,
+      a CVE id or product keyword).
+  - path: /sports-score
+    external_path: /sports-score
+    method: GET
+    intents: [SPORTS_SCORE]
+    description: >
+      SPORTS_SCORE. Answers "what is the score of the Lakers game". Most
+      recent or in-progress score for a named team, via TheSportsDB, with a
+      live web-search fallback for teams outside its coverage. Params: team
+      (required, a club or franchise name).
+  - path: /game-result
+    external_path: /game-result
+    method: GET
+    intents: [GAME_RESULT]
+    description: >
+      GAME_RESULT. Answers "who won the Knicks game". Winner of a named
+      team's most recently completed match, via TheSportsDB, with a live
+      web-search fallback for teams outside its coverage. Params: team
+      (required, a club or franchise name).
+  - path: /route-eta
+    external_path: /route-eta
+    method: GET
+    intents: [ROUTE_ETA]
+    description: >
+      ROUTE_ETA. Answers "how long to drive from London to Paris", "what is
+      the distance between Miami and Orlando". Driving distance and
+      estimated travel time via OSRM, with a route that can only be
+      completed by ferry named honestly rather than reported as an ordinary
+      driving time. Params: origin, destination (required, place names or
+      "lat,lon"), mode (optional, driving only; other modes are refused
+      honestly).
   - path: /fraud-query
     external_path: /fraud-query
     method: POST
@@ -678,18 +849,20 @@ input_schema:
     query:
       type: string
       description: >
-        The whole question to answer on /web-search, where it is the primary
-        parameter rather than an alias. Also the general factual fraud
-        question for /fraud-query, and a fallback alias for the main
-        parameter on /ssl-check, /weather-forecast, /storm-alert,
-        /ip-geolocate and /academic-search, so a caller that forwards the
-        raw question under a generic name is still answered rather than
-        refused.
+        The whole question to answer on /web-search and /research-query,
+        where it is the primary parameter rather than an alias. Also the
+        general factual fraud question for /fraud-query, and a fallback
+        alias for the main parameter on /ssl-check, /weather-forecast,
+        /storm-alert, /ip-geolocate, /academic-search, /threat-intelligence,
+        /package-status and /url-scan, so a caller that forwards the raw
+        question under a generic name is still answered rather than refused.
     max_results:
       type: integer
       minimum: 1
       maximum: 20
-      description: How many web sources to draw on for /web-search. Defaults to 5.
+      description: >
+        How many web sources to draw on for /web-search (default 5) or
+        /research-query (default 6).
     topic_mode:
       type: string
       enum: [general, news, finance]
@@ -704,13 +877,15 @@ input_schema:
     url:
       type: string
       description: >
-        Full http or https URL to fetch on /content-extract. A whole
-        question containing one is also accepted.
+        Full http or https URL to fetch on /content-extract, or to assess
+        for safety on /url-scan. A whole question containing one is also
+        accepted; also accepted as link, website or target on /url-scan.
     text:
       type: string
       description: >
-        Text to classify on /text-classify, or to transform on
-        /language-generate.
+        Text to classify on /text-classify, to transform on
+        /language-generate, to summarize on /text-summarize, or to check on
+        /grammar-spell-check and /ai-text-detect.
     labels:
       type: string
       description: >
@@ -737,13 +912,15 @@ input_schema:
     message:
       type: string
       description: >
-        Message to reply to on /chat-complete. Also accepted as an alias of
-        text on /sentiment-analyze and /content-moderate.
+        Message to reply to on /chat-complete or /chatbot-conversation. Also
+        accepted as an alias of text on /sentiment-analyze and
+        /content-moderate.
     messages:
       type: string
       description: >
-        /chat-complete alternative to message: an OpenAI-style JSON array of
-        {role, content} turns. The last user turn is answered.
+        /chat-complete and /chatbot-conversation alternative to message: an
+        OpenAI-style JSON array of {role, content} turns. The last user turn
+        is answered. Also accepted as history on /chatbot-conversation.
     target_language:
       type: string
       description: Alias of target on /language-translate. Also accepted as to, language, or langpair ("en|de").
@@ -763,11 +940,74 @@ input_schema:
       type: string
       description: >
         CVE id (e.g. "CVE-2021-44228"), a question containing one, or a
-        product keyword to search on /cve-lookup. Also read from cve_id, id,
-        vulnerability, query and question.
+        product keyword to search on /cve-lookup or /vulnerability-triage.
+        Also read from cve_id, id, vulnerability, query and question.
     cve_id:
       type: string
       description: Alias for cve on /cve-lookup.
+    question:
+      type: string
+      description: >
+        A question to answer on /telegraph-knowledge. Also accepted as
+        query, q, text or input.
+    length:
+      type: string
+      description: >
+        Optional target length or style for /text-summarize, e.g. "50 words"
+        or "one sentence".
+    text1:
+      type: string
+      description: First text to compare on /semantic-similarity. Also accepted as a.
+    text2:
+      type: string
+      description: Second text to compare on /semantic-similarity. Also accepted as b.
+    indicator:
+      type: string
+      description: >
+        IP address, domain, file hash, CVE id, or threat actor/malware
+        family name to check on /threat-intelligence. Also accepted as ioc,
+        ip, domain, hash, cve, or actor.
+    tracking_number:
+      type: string
+      description: >
+        Carrier shipment tracking number on /package-status. Also accepted
+        as tracking, tracking_id, number, or package_id.
+    from:
+      type: string
+      description: >
+        Source currency code or name on /currency-exchange, e.g. "USD" or
+        "dollars". Also accepted as an alias of origin on /route-eta.
+    to:
+      type: string
+      description: >
+        Target currency code or name on /currency-exchange, e.g. "EUR" or
+        "euros". Also accepted as an alias of destination on /route-eta and
+        of target_language on /language-translate.
+    amount:
+      type: number
+      description: Amount to convert on /currency-exchange. Defaults to 1.
+    name:
+      type: string
+      description: Person or entity name to screen on /sanctions-screening.
+    team:
+      type: string
+      description: Club or franchise name on /sports-score or /game-result.
+    origin:
+      type: string
+      description: >
+        Starting place name or "lat,lon" on /route-eta. Also accepted as
+        from, start, or source.
+    destination:
+      type: string
+      description: >
+        Ending place name or "lat,lon" on /route-eta. Also accepted as to,
+        end, or target.
+    mode:
+      type: string
+      description: >
+        Travel mode on /route-eta. Only driving is reliably available on the
+        public routing server this endpoint uses; other modes are refused
+        honestly. Also accepted as profile or travel_mode.
 output_schema:
   type: object
   properties:
@@ -934,8 +1174,8 @@ output_schema:
       type: integer
       description: >
         On /crypto-price, the number of independent price feeds that
-        answered. On /research-synthesis, how many web sources the
-        synthesis drew on.
+        answered. On /research-synthesis and /research-query, how many web
+        sources the answer drew on.
     sources:
       type: array
       items:
@@ -1105,7 +1345,9 @@ output_schema:
       description: /storm-alert only. Forecast hours with a hail-bearing thunderstorm.
     recommended_action:
       type: string
-      description: /storm-alert only. The operational response the risk grade calls for.
+      description: >
+        On /storm-alert, the operational response the risk grade calls for.
+        On /vulnerability-triage, the recommended remediation urgency.
     country:
       type: string
       description: /ip-geolocate only.
@@ -1307,7 +1549,7 @@ output_schema:
       description: >
         On /fact-check, the True/False/Unverified verdict extracted from the
         answer. On /chat-complete, Likely/Unlikely/Uncertain for a "will X
-        happen" question, null otherwise.
+        happen" question, null otherwise. On /url-scan, Safe/Suspicious/Unknown.
     sentiment:
       type: [string, "null"]
       description: /sentiment-analyze only. Positive/Negative/Neutral/Mixed.
@@ -1333,6 +1575,99 @@ output_schema:
         /cve-lookup only. Matching CVE records, each carrying id,
         description, severity, published, last_modified, status and
         references.
+    knowledge_topic:
+      type: string
+      enum: [telegraph-protocol, general]
+      description: /telegraph-knowledge only. Whether the question was about Telegraph Protocol itself or general knowledge.
+    similarity:
+      type: number
+      description: /semantic-similarity only. 0-1 semantic similarity score for the two supplied texts.
+    corrected_text:
+      type: string
+      description: /grammar-spell-check only. The corrected text.
+    fix_count:
+      type: integer
+      description: /grammar-spell-check only. Number of grammar or spelling fixes made.
+    fixes:
+      type: array
+      items:
+        type: string
+      description: /grammar-spell-check only. Short description of each fix made.
+    ai_generated_likelihood:
+      type: number
+      description: /ai-text-detect only. Approximate 0-1 likelihood the supplied text is AI-generated, a language-model self-assessment, not a certified detector result.
+    disclaimer:
+      type: string
+      description: /ai-text-detect only. States plainly that the likelihood is an approximation, not a certified detection.
+    has_history:
+      type: boolean
+      description: /chatbot-conversation only. Whether a messages/history array was supplied.
+    malicious:
+      type: [boolean, "null"]
+      description: /threat-intelligence only. Whether the indicator is a known threat.
+    pulse_count:
+      type: integer
+      description: /threat-intelligence only. Number of AlienVault OTX threat pulses referencing this indicator.
+    known_exploited:
+      type: boolean
+      description: On /threat-intelligence and /vulnerability-triage, whether the CVE is in CISA's Known Exploited Vulnerabilities catalog.
+    found:
+      type: boolean
+      description: /package-status only. Whether an authoritative tracking status was found.
+    carrier:
+      type: [string, "null"]
+      description: /package-status only. Detected shipping carrier, when named in the input.
+    reachable:
+      type: boolean
+      description: /url-scan only. Whether the URL responded to a live fetch.
+    reputation_flagged:
+      type: [boolean, "null"]
+      description: /url-scan only. Whether web-search reputation checking found malicious reports.
+    exchange_rate:
+      type: number
+      description: /currency-exchange only. The from-to conversion rate used.
+    converted_amount:
+      type: number
+      description: /currency-exchange only. The converted amount.
+    matched:
+      type: boolean
+      description: /sanctions-screening only. Whether the screened name matched an OFAC SDN entry.
+    matches:
+      type: array
+      items:
+        type: object
+      description: /sanctions-screening only. Matching OFAC SDN records.
+    triage_tier:
+      type: string
+      enum: [URGENT, CRITICAL, HIGH, MEDIUM, LOW, UNKNOWN]
+      description: /vulnerability-triage only. Severity and exploitability tier the CVE was placed in.
+    winner:
+      type: [string, "null"]
+      description: /game-result only. The winning team, or null if the match was a draw or has not concluded.
+    home_score:
+      type: [number, "null"]
+      description: /sports-score and /game-result. The home team's score.
+    away_score:
+      type: [number, "null"]
+      description: /sports-score and /game-result. The away team's score.
+    distance_km:
+      type: number
+      description: /route-eta only. Driving distance in kilometers.
+    duration_minutes:
+      type: number
+      description: /route-eta only. Estimated driving time in minutes.
+    includes_ferry:
+      type: boolean
+      description: >
+        /route-eta only. True when the route can only be completed by
+        crossing water on a ferry the public routing server included as a
+        driving leg, in which case confidence is lower than an ordinary
+        driving route.
+    ferry:
+      type: [object, "null"]
+      description: >
+        /route-eta only. When includes_ferry is true, the ferry leg's
+        duration, distance and named crossing; null otherwise.
 
 semantics:
   # label_field is the ONE field the engine grades. It was `status`, which
@@ -1381,6 +1716,22 @@ semantics:
     - SENTIMENT_ANALYSIS
     - CONTENT_MODERATION
     - CVE_LOOKUP
+    - TELEGRAPH_KNOWLEDGE
+    - TEXT_SUMMARIZATION
+    - CHATBOT_CONVERSATION
+    - SEMANTIC_SIMILARITY
+    - GRAMMAR_SPELL_CHECK
+    - AI_TEXT_DETECTION
+    - RESEARCH_QUERY
+    - THREAT_INTELLIGENCE
+    - PACKAGE_STATUS
+    - URL_SCAN
+    - CURRENCY_EXCHANGE
+    - SANCTIONS_SCREENING_MATCH
+    - VULNERABILITY_TRIAGE
+    - SPORTS_SCORE
+    - GAME_RESULT
+    - ROUTE_ETA
 
 docs:
   repository: https://github.com/Sireadell/onchain-tx

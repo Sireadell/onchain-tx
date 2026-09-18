@@ -1,6 +1,7 @@
 import { buildApp } from './app.js';
 import { getBlockNumber, withRpcBudget } from './lib/ankrRpc.js';
 import { CHAINS } from './lib/chains.js';
+import { prefetchSdnList } from './lib/sanctionsScreening.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 
@@ -43,6 +44,14 @@ if (results.every((r) => !r.ok)) {
   console.error('startup check failed: no configured chain is reachable via Ankr — refusing to start');
   process.exit(1);
 }
+
+// Not awaited: the OFAC feed itself is slow and unreliable (measured live
+// 2026-09-17: the same 5.7 MB file took anywhere from 5s to 41s), so this
+// warms the cache in the background rather than delaying the server coming
+// up and answering /health. Without this, whichever real question happens
+// to be the very first one routed to /sanctions-screening pays that cold
+// cost instead; this just moves the wait to a moment nobody is grading.
+prefetchSdnList();
 
 buildApp().listen(PORT, () => {
   const okChains = results.filter((r) => r.ok).map((r) => r.slug);
