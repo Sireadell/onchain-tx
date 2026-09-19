@@ -32,108 +32,10 @@ slug: txlens
 protocol: generic
 name: TxLens
 description: >
-  TxLens answers on-chain and market questions with a single verifiable
-  number or status sourced from live providers. Short-lived caches reduce
-  repeated provider calls, and freshness timestamps identify when the data
-  was fetched.
-
-  It covers fifty-seven canonical intents. WEATHER_FORECAST: what will the
-  weather do at a named place on the day or over the window asked about,
-  answering the aspect emphasised (rain, wind, snow, freeze, temperature)
-  rather than reciting a range. STORM_ALERT: how disruptive will the
-  weather be at a place over the next 48 hours, graded and scored with the
-  operational response it calls for. ONCHAIN_TX_LOOKUP: given a transaction
-  hash, is it confirmed, reverted, pending or not found, and what did it do.
-  GAS_PRICE: what does a transaction cost right now on a named chain.
-  WALLET_BALANCE_CHECK: what native coin or ERC-20 token does a given
-  address hold. TOKEN_HOLDER_COUNT: how many distinct addresses hold a
-  token. TVL_LOOKUP: how much value is locked in a named DeFi protocol or
-  chain. CRYPTO_PRICE: what is a coin or on-chain token worth in USD.
-  STOCK_PRICE: what is a listed equity trading at. SSL_VERIFICATION: is a
-  domain's TLS certificate valid and when does it expire, from a real live
-  handshake. IP_GEOLOCATION: where is an IPv4 or IPv6 address, on whose
-  network, and is it a proxy, VPN or datacenter address. ACADEMIC_SEARCH:
-  which peer-reviewed papers exist on a topic, with journal, authors,
-  citation counts and DOIs. WEB_SEARCH: an open question of any kind,
-  answered from a live web search with the sources named, for the questions
-  that have no single authoritative feed behind them. FRAUD_DETECTION: how
-  likely is a given address or scheme to be fraudulent. CONTENT_EXTRACTION:
-  given a URL, fetch the live page and return its title and readable text.
-  TEXT_CLASSIFICATION: given text, return the single best category it
-  belongs to, from a caller-supplied label set or freely chosen.
-  TEXT_GENERATION: write text to a prompt or instruction. LANGUAGE_GENERATION:
-  transform existing text into another language, tone or style.
-  RESEARCH_SYNTHESIS: answer a research question by combining several live
-  web sources into one written synthesis, wider and more source-dense than
-  WEB_SEARCH. CROSS_CHAIN_STATE_VERIFY: given an address, check its native
-  balance and contract status on every supported chain at once, so a caller
-  can verify where it is actually active. EVENT_OUTCOME_RESOLUTION: given a
-  question about whether something happened, resolve it to a stated
-  yes/no/winner outcome from a live web search, leading with the verdict.
-  WEATHER_CHECK: what the current weather conditions are at a place right
-  now, as a single live reading rather than a forecast. LANGUAGE_TRANSLATION:
-  translate given text into a named target language. CHAT_COMPLETION: a
-  direct conversational reply to a message. NEWS_SEARCH: answers an
-  open question from a live news-focused web search, sources named.
-  NEWS_HEADLINES: lists current headlines on a named topic. FACT_CHECK:
-  checks a claim against live sources and returns a true/false/unverified
-  verdict. SENTIMENT_ANALYSIS: classifies text as Positive, Negative,
-  Neutral or Mixed with a reason. CONTENT_MODERATION: judges whether text
-  is safe or flagged against common platform policies, with a reason.
-  CVE_LOOKUP: given a CVE id or keyword, returns matching vulnerability
-  records from the National Vulnerability Database, with severity.
-  TELEGRAPH_KNOWLEDGE: general-knowledge questions and questions about
-  Telegraph Protocol itself. TEXT_SUMMARIZATION: summarizes supplied text to
-  a given length or style. CHATBOT_CONVERSATION: a conversational reply,
-  optionally using supplied message history as context. SEMANTIC_SIMILARITY:
-  a 0-1 similarity score for two supplied texts. GRAMMAR_SPELL_CHECK:
-  corrected text plus the fixes made. AI_TEXT_DETECTION: an approximate
-  self-assessment of how likely text is AI-generated, honestly labeled as an
-  estimate. RESEARCH_QUERY: an open research question answered in one
-  well-sourced paragraph from live web sources. THREAT_INTELLIGENCE: whether
-  an IP, domain, hash, CVE or threat actor is a known threat.
-  PACKAGE_STATUS: a shipment's current status from live web search.
-  URL_SCAN: a Safe/Suspicious/Unknown verdict on a URL from reachability,
-  TLS validity and reputation checks. CURRENCY_EXCHANGE: live currency
-  conversion at the ECB reference rate. SANCTIONS_SCREENING_MATCH: whether a
-  name matches the US Treasury OFAC sanctions list. VULNERABILITY_TRIAGE:
-  the same CVE data as CVE_LOOKUP framed as a remediation-urgency decision.
-  SPORTS_SCORE: a named team's most recent or in-progress score. GAME_RESULT:
-  the winner of a named team's most recently completed match. ROUTE_ETA:
-  driving distance and time between two places, with a ferry-only route
-  named honestly rather than reported as ordinary driving time.
-  REGULATORY_FILING_MONITOR: real Federal Register filings matching a
-  named company, product, drug, or concern. CREDIT_SCORE_VERIFY: whether a
-  company has a registered Legal Entity Identifier, honestly distinguished
-  from an actual credit score. MACRO_ECONOMIC_INDICATOR: GDP growth,
-  inflation, or unemployment for a named country, from World Bank data.
-  WEATHER_FORECAST_VERIFY: what actually happened at a place on a past
-  date, distinct from a forward-looking forecast. CUSTOMER_TICKET_RESOLUTION:
-  a known fix for a described technical problem, from a live search.
-  RETURN_POLICY_VERIFY: a named retailer's actual return policy, from a
-  live search. TASK_EXECUTION_QUALITY: whether a described result actually
-  satisfies a described task. CARRIER_SERVICEABILITY: whether a named
-  carrier serves a given address or ZIP code. DELIVERY_WINDOW_VERIFY: a
-  caveated estimate of a shipment's delivery window. PAYMENT_METHOD_VERIFY:
-  the card network and issuer identifiable from a card's leading digits,
-  honestly distinguished from full card validation. INVOICE_LEDGER_RECONCILE:
-  an arithmetic reconciliation of described invoice or ledger figures.
-
-  Blockscout-backed reads cover five EVM chains (Ethereum, Base, Arbitrum,
-  Optimism, Polygon). RPC-backed reads currently cover Ethereum, Base,
-  Arbitrum and Polygon because the current Ankr key does not include
-  Optimism. Each signal comes from a live provider or a bounded short-lived
-  cache, and every answer carries a complete
-  plain-language `summary` that states the verdict and then each thing
-  actually checked, a deterministic `canonical` string for hashing, and a
-  0-1 `confidence` that reflects real certainty rather than a fixed
-  constant: forecast confidence falls with range, and IP geolocation is
-  reported at 0.95 because it is reliable to the country and only
-  approximate to the city.
-
-  Every endpoint accepts the caller's whole question in place of its
-  structured parameter, and answers it, rather than refusing input that
-  is not already reduced to a bare parameter.
+  TxLens provides live, verifiable answers to on-chain and market questions
+  from authoritative sources. Covering 61 intents across blockchain, finance,
+  weather, content, security, and general intelligence domains—each answer
+  includes source attribution and fetch timestamps for transparency.
 base_url: https://telegraph-onchain-tx-lookup-miner.onrender.com
 
 auth:
@@ -857,6 +759,53 @@ endpoints:
       FRAUD_DETECTION for a specific address, identical to the GET form
       above and accepting the address in a JSON body instead of the query
       string. JSON body: { "wallet": "0x..." }.
+  - path: /url-safe
+    external_path: /url-safe
+    method: GET
+    intents: [URL_SAFE]
+    description: >
+      URL_SAFE. Given a URL, checks it against URLhaus, VirusTotal, and
+      reputation services, returning Safe/Suspicious/Unknown with detection count.
+      URLhaus provides free malicious URL database checks. VirusTotal returns
+      multi-engine detection count. Web reputation search provides additional context.
+      Params: url (required, also accepted as link, website, target, query, q,
+      question, text, input).
+  - path: /malware-detection
+    external_path: /malware-detection
+    method: GET
+    intents: [MALWARE_DETECTION]
+    description: >
+      MALWARE_DETECTION. Given a domain, IP address, or file hash, checks it
+      against VirusTotal, AbuseIPDB, and AlienVault OTX reputation databases,
+      returning threat level (None/Low/Medium/High/Critical) and match count.
+      VirusTotal provides multi-engine detections for all indicator types.
+      AbuseIPDB provides IP abuse confidence scoring. OTX provides free threat
+      intelligence pulses. Params: indicator (required, an IP address, domain,
+      or file hash, also accepted as ioc, ip, domain, hash, query, q, question,
+      text, input).
+  - path: /dns-check
+    external_path: /dns-check
+    method: GET
+    intents: [DNS_RECORD_LOOKUP]
+    description: >
+      DNS_RECORD_LOOKUP. Answers "what are the DNS records for example.com",
+      "what DNS entries does this domain have". Takes a hostname and returns
+      A, AAAA, CNAME, MX, TXT, NS, and SOA records queried live at request
+      time using native DNS resolution. Params: hostname (required, a bare
+      domain name like "example.com"; also accepted as domain, host, url, or
+      a whole question naming the domain).
+  - path: /threat-ip-reputation
+    external_path: /threat-ip-reputation
+    method: GET
+    intents: [THREAT_IP_REPUTATION]
+    description: >
+      THREAT_IP_REPUTATION. Answers "is this IP address malicious",
+      "is example.com a known threat domain", "what is the reputation of
+      this IP". Takes an IP address or domain and returns threat assessment
+      from AlienVault OTX and AbuseIPDB free APIs (no key required for OTX;
+      AbuseIPDB key optional and rate-limited). Confidence scales with number
+      of sources that returned data. Params: ip or domain (required; also
+      accepted as indicator, ioc, host, query, q, or question).
 
 # input_schema/output_schema are top-level-only fields, documentation
 # surfaced to callers rather than a per-endpoint validator (confirmed
@@ -2051,6 +2000,10 @@ semantics:
     - DELIVERY_WINDOW_VERIFY
     - PAYMENT_METHOD_VERIFY
     - INVOICE_LEDGER_RECONCILE
+    - URL_SAFE
+    - MALWARE_DETECTION
+    - DNS_RECORD_LOOKUP
+    - THREAT_IP_REPUTATION
 
 docs:
   repository: https://github.com/Sireadell/onchain-tx

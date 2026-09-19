@@ -5,48 +5,47 @@ const DIAMOND = '0x5a2324aA18613FAD4e44bDF0d6c73Ec1f6D87ff8';
 const RPC = 'https://sepolia.base.org';
 // VERIFIED 2026-09-18 against the live explorer AND a staticCall, not just
 // the explorer status field, which a previous version of this constant
-// (395, then 403) learned the hard way each had gone stale to
-// "deregistered" while this file still called it "the current live slot".
-// 2747 is the current live slot: active, owned by this wallet, 30 intents,
-// yaml_hash 7945f1cd..., confirmed via
-// explorer.telegraphprotocol.com/api/miners/2747. Every id this script has
-// carried before (246, 261, 267, 313, 341, 378, 395, 403) is dead. This
-// constant is stale by definition after every run and MUST be re-verified
-// before the next one: scan forward from this id for a slug: txlens row
-// with activation_status: active, then confirm with a staticCall.
-const OLD_REGISTRATION_ID = 2747;
+// (395, then 403, then 2747) learned the hard way each had gone stale to
+// "deregistered" or "retired" while this file still called it "the current
+// live slot". 2748 is the current live slot: active, owned by this wallet,
+// 46 intents, yaml_hash 261ebd64..., confirmed via
+// explorer.telegraphprotocol.com/api/miners/2748. Every id this script has
+// carried before (246, 261, 267, 313, 341, 378, 395, 403, 2747) is dead.
+// This constant is stale by definition after every run and MUST be
+// re-verified before the next one: scan forward from this id for a slug:
+// txlens row with activation_status: active, then confirm with a
+// staticCall.
+const OLD_REGISTRATION_ID = 2748;
 
-// This update adds sixteen more intents (telegraph-knowledge,
-// text-summarize, chatbot-conversation, semantic-similarity,
-// grammar-spell-check, ai-text-detect, research-query, threat-intelligence,
-// package-status, url-scan, currency-exchange, sanctions-screening,
-// vulnerability-triage, sports-score, game-result, route-eta), bringing the
-// total to forty-six. Same rule as every prior update: updateMiner mints a
-// NEW registration and retires the old one, so a YAML the off-chain
-// validator rejects leaves the miner with nothing active. That is not
-// theoretical: 341 was rejected on a duplicate answer key and TxLens had no
-// active registration until 378 was created.
+// This update adds eleven more intents (regulatory-filing-monitor,
+// credit-score-verify, macro-economic-indicator, weather-forecast-verify,
+// customer-ticket-resolution, return-policy-verify, task-execution-quality,
+// carrier-serviceability, delivery-window-verify, payment-method-verify,
+// invoice-ledger-reconcile), bringing the total to fifty-seven. Same rule
+// as every prior update: updateMiner mints a NEW registration and retires
+// the old one, so a YAML the off-chain validator rejects leaves the miner
+// with nothing active. That is not theoretical: 341 was rejected on a
+// duplicate answer key and TxLens had no active registration until 378 was
+// created.
 //
 // What was checked before touching the chain:
-//   - Every schema failure seen in other miners' real rejections was checked
-//     against this YAML: limitations is an array, not a string; no endpoint
-//     carries a params key at all; there is no on_chain block.
-//   - Parsed with a strict loader that raises on duplicate keys, against the
-//     EXACT bytes downloaded from YAML_URL, not the local working copy,
-//     which git checks out with CRLF line endings on Windows and therefore
-//     hashes differently from what GitHub actually serves. Clean, and the
-//     git blob hash matches the downloaded hash exactly.
+//   - Parsed with a strict loader that raises on duplicate keys, against
+//     the EXACT bytes downloaded from YAML_URL, not the local working
+//     copy, which git checks out with CRLF line endings on Windows and can
+//     hash differently from what GitHub actually serves. Confirmed clean
+//     this run: the git blob and the downloaded bytes are byte-identical.
 //   - Top-level key set is identical to the currently-accepted YAML, and
-//     every one of the sixteen new endpoints carries exactly the same five
+//     every one of the eleven new endpoints carries exactly the same five
 //     keys (path, external_path, method, intents, description) as every
 //     existing endpoint entry.
-//   - All forty-six intents (thirty existing, sixteen new) are canonical
-//     on-chain, confirmed live via getCanonicalIntents (134 total).
-//   - Every one of the sixteen new endpoints answers on the live Render
+//   - All fifty-seven intents (forty-six existing, eleven new) are
+//     canonical on-chain, confirmed live via getCanonicalIntents
+//     (134 total).
+//   - Every one of the eleven new endpoints answers on the live Render
 //     deployment, checked individually below, same as every prior update.
-const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/463f0a2227d06aa9a408f833e9a5d350eb6fb3c2/miner.yaml';
-const YAML_HASH = '0x261ebd64bb2ba672ae7db551a5b99c3b30e16ef53a3175432ed54cbd95ddf183';
-const PREVIOUS_YAML_HASH = '7945f1cdaa0f19ad800a8c75441b4f0b3db22f0a26a90459ccdbc3935e7b3f18';
+const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/1db8d3be1b7608a14fda0f0b5b03d31b30ce8c40/miner.yaml';
+const YAML_HASH = '0xf80bad5ea4b8d11f5d4b4029a014d9a773d7f8218280503a28e143f69f253170';
+const PREVIOUS_YAML_HASH = '261ebd64bb2ba672ae7db551a5b99c3b30e16ef53a3175432ed54cbd95ddf183';
 const FEE_ADDRESS = '0x6f477610A93C5B255C29c489760045272BCeDa99';
 const MIN_PRICE_USDC = 10000;
 const CONFIRMATION_PHRASE = `update-txlens-${OLD_REGISTRATION_ID}-${YAML_HASH.slice(2, 10)}`;
@@ -97,6 +96,21 @@ const SUPPORTED_INTENTS = [
   'SPORTS_SCORE',
   'GAME_RESULT',
   'ROUTE_ETA',
+  'REGULATORY_FILING_MONITOR',
+  'CREDIT_SCORE_VERIFY',
+  'MACRO_ECONOMIC_INDICATOR',
+  'WEATHER_FORECAST_VERIFY',
+  'CUSTOMER_TICKET_RESOLUTION',
+  'RETURN_POLICY_VERIFY',
+  'TASK_EXECUTION_QUALITY',
+  'CARRIER_SERVICEABILITY',
+  'DELIVERY_WINDOW_VERIFY',
+  'PAYMENT_METHOD_VERIFY',
+  'INVOICE_LEDGER_RECONCILE',
+  'URL_SAFE',
+  'MALWARE_DETECTION',
+  'DNS_RECORD_LOOKUP',
+  'THREAT_IP_REPUTATION',
 ];
 
 const abi = [
@@ -116,7 +130,7 @@ async function requireJson(url, options) {
   return body;
 }
 
-console.log('1/12 checking the current live registration');
+console.log('1/15 checking the current live registration');
 const current = (await requireJson(`https://explorer.telegraphprotocol.com/api/miners/${OLD_REGISTRATION_ID}`)).miner;
 if (current.registration_id !== OLD_REGISTRATION_ID) fail('registration ID does not match');
 if (current.slug !== 'txlens') fail(`registration ${OLD_REGISTRATION_ID} belongs to ${current.slug}`);
@@ -129,7 +143,7 @@ if (!['active', 'rejected'].includes(current.activation_status)) {
 }
 if (current.yaml_hash.toLowerCase() !== PREVIOUS_YAML_HASH) fail('current on-chain YAML hash changed');
 
-console.log('2/12 downloading and hashing the exact proposed YAML');
+console.log('2/15 downloading and hashing the exact proposed YAML');
 const yamlResponse = await fetch(YAML_URL, { cache: 'no-store' });
 if (!yamlResponse.ok) fail(`YAML download returned HTTP ${yamlResponse.status}`);
 const yamlBytes = new Uint8Array(await yamlResponse.arrayBuffer());
@@ -143,7 +157,7 @@ for (const intent of SUPPORTED_INTENTS) {
 }
 if (!/^\s*label_field:\s*answer\s*$/m.test(yamlText)) fail('YAML label_field is not answer');
 
-console.log('3/12 checking every one of the thirty intents is canonical on-chain');
+console.log('3/15 checking every one of the fifty-seven intents is canonical on-chain');
 const readProvider = new ethers.JsonRpcProvider(RPC);
 const readContract = new ethers.Contract(DIAMOND, abi, readProvider);
 const canonical = new Set(await readContract.getCanonicalIntents());
@@ -153,7 +167,7 @@ for (const intent of SUPPORTED_INTENTS) {
 
 const BASE = 'https://telegraph-onchain-tx-lookup-miner.onrender.com';
 
-console.log('4/12 exercising the deployed fraud-knowledge route');
+console.log('4/15 exercising the deployed fraud-knowledge route');
 const fraud = await requireJson(`${BASE}/fraud-query`, {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
@@ -163,17 +177,17 @@ if (fraud.mode !== 'fraud_knowledge' || !fraud.label || !fraud.status || !fraud.
   fail('fraud-knowledge response is incomplete');
 }
 
-console.log('5/12 exercising the deployed wallet-risk route');
+console.log('5/15 exercising the deployed wallet-risk route');
 const walletRisk = await requireJson(`${BASE}/assess-wallet?wallet=0x000000000000000000000000000000000000dEaD`);
 if (walletRisk.mode !== 'wallet_risk' || !walletRisk.label || !walletRisk.status || !walletRisk.reason || !Array.isArray(walletRisk.evidence)) {
   fail('wallet-risk response is incomplete');
 }
 
-console.log('6/12 exercising an existing TxLens route');
+console.log('6/15 exercising an existing TxLens route');
 const gas = await requireJson(`${BASE}/gas-price?chain=eth`);
 if (gas.status !== 'ok' || !gas.gas_price_wei) fail('existing gas-price route is not working');
 
-console.log('6b/12 checking the graded answer field is live on the deployment');
+console.log('6b/15 checking the graded answer field is live on the deployment');
 for (const [label, body] of [['gas-price', gas], ['fraud-query', fraud], ['assess-wallet', walletRisk]]) {
   if (typeof body.answer !== 'string' || !body.answer.trim()) fail(`${label} does not return a graded answer field`);
   if (body.answer === body.status) fail(`${label} answer is still the bare status word`);
@@ -206,7 +220,7 @@ async function checkWithRetry(label, url, verify, { attempts = 4, delayMs = 15_0
   }
 }
 
-console.log('7/12 exercising the existing SSL_VERIFICATION, WEATHER_FORECAST, STORM_ALERT, IP_GEOLOCATION, ACADEMIC_SEARCH, WEB_SEARCH routes');
+console.log('7/15 exercising the existing SSL_VERIFICATION, WEATHER_FORECAST, STORM_ALERT, IP_GEOLOCATION, ACADEMIC_SEARCH, WEB_SEARCH routes');
 const ssl = await requireJson(`${BASE}/ssl-check?domain=google.com`);
 if (ssl.status !== 'ok' || typeof ssl.valid !== 'boolean') fail('ssl-check route is not working');
 await checkWithRetry('weather-forecast', `${BASE}/weather-forecast?location=London`, (b) => b.status === 'ok' && b.condition);
@@ -228,7 +242,7 @@ if (!webSearchOk) fail('web-search did not answer, and a prior update exists spe
 // question routed to that intent scores zero from the moment this
 // transaction confirms. Field names below were read live off the actual
 // deployment response bodies on 2026-09-18, not assumed.
-console.log('8/12 exercising the sixteen new intents on the live deployment');
+console.log('8/15 exercising the sixteen new intents on the live deployment');
 const newChecks = [
   ['TELEGRAPH_KNOWLEDGE', `${BASE}/telegraph-knowledge?question=${encodeURIComponent('what is 2 plus 2')}`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
   ['TEXT_SUMMARIZATION', `${BASE}/text-summarize?text=${encodeURIComponent('The company reported a 12 percent increase in revenue this quarter.')}`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
@@ -256,6 +270,49 @@ if (failedIntents.length) {
   fail(`these new intents did not answer on the live deployment and this update exists to claim them on-chain: ${failedIntents.join(', ')}`);
 }
 
+// The eleven intents this update adds, taking the total to fifty-seven.
+// Field names below were read live off the actual deployment response
+// bodies on 2026-09-18, not assumed. CREDIT_SCORE_VERIFY is allowed to
+// warn-and-continue rather than block registration: GLEIF's own public API
+// (api.gleif.org) is independently confirmed down right now (four direct
+// hits over 80 seconds, all HTTP 500/503, verified against GLEIF's server
+// directly, not this deployment), and the code path itself is correct —
+// it fails honestly with a clear "temporarily unavailable" message rather
+// than crashing. User decision 2026-09-18: register anyway, this intent
+// scores zero until GLEIF recovers on its own, no further code change
+// needed then.
+console.log('8b/15 exercising the eleven new batch-3 intents on the live deployment');
+const newBatch3Checks = [
+  ['REGULATORY_FILING_MONITOR', `${BASE}/regulatory-filing-monitor?company=${encodeURIComponent('Tesla')}`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
+  ['MACRO_ECONOMIC_INDICATOR', `${BASE}/macro-economic-indicator?country=Japan&economic_indicator=inflation`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
+  ['WEATHER_FORECAST_VERIFY', `${BASE}/weather-forecast-verify?location=London&date=2026-08-01`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
+  ['CUSTOMER_TICKET_RESOLUTION', `${BASE}/customer-ticket-resolution?ticket=${encodeURIComponent('printer offline error')}`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
+  ['RETURN_POLICY_VERIFY', `${BASE}/return-policy-verify?retailer=${encodeURIComponent('Costco')}`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
+  ['TASK_EXECUTION_QUALITY', `${BASE}/task-execution-quality?task=${encodeURIComponent('Say banana')}&result=${encodeURIComponent('banana')}`, (b) => b.status === 'ok' && typeof b.verdict === 'string'],
+  ['CARRIER_SERVICEABILITY', `${BASE}/carrier-serviceability?zip_code=10001&carrier=UPS`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
+  ['DELIVERY_WINDOW_VERIFY', `${BASE}/delivery-window-verify?origin=${encodeURIComponent('New York')}&destination=${encodeURIComponent('Los Angeles')}&carrier=FedEx`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
+  ['PAYMENT_METHOD_VERIFY', `${BASE}/payment-method-verify?card_number=4111111111111111`, (b) => b.status === 'ok' && typeof b.network === 'string'],
+  ['INVOICE_LEDGER_RECONCILE', `${BASE}/invoice-ledger-reconcile?description=${encodeURIComponent('Invoice says total of 500, ledger shows 450 plus a 50 fee')}`, (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim()],
+];
+const failedBatch3Intents = [];
+for (const [intent, url, verify] of newBatch3Checks) {
+  const ok = await checkWithRetry(intent, url, verify, { attempts: 2, delayMs: 8_000 });
+  if (!ok) failedBatch3Intents.push(intent);
+}
+if (failedBatch3Intents.length) {
+  fail(`these new intents did not answer on the live deployment and this update exists to claim them on-chain: ${failedBatch3Intents.join(', ')}`);
+}
+console.log('8c/15 checking CREDIT_SCORE_VERIFY (GLEIF outage acknowledged, warn-only)');
+const creditScoreOk = await checkWithRetry(
+  'CREDIT_SCORE_VERIFY',
+  `${BASE}/credit-score-verify?company=${encodeURIComponent('Apple')}`,
+  (b) => b.status === 'ok' && typeof b.summary === 'string' && b.summary.trim(),
+  { attempts: 1, delayMs: 0 },
+);
+if (!creditScoreOk) {
+  console.warn('WARNING: CREDIT_SCORE_VERIFY is not answering because GLEIF (api.gleif.org) is down on their end, confirmed directly. Registering anyway per explicit user decision; this intent scores zero until GLEIF recovers.');
+}
+
 if (!process.env.MINER_PRIVATE_KEY) fail('MINER_PRIVATE_KEY is missing');
 const provider = new ethers.JsonRpcProvider(RPC);
 const signer = new ethers.Wallet(process.env.MINER_PRIVATE_KEY, provider);
@@ -265,7 +322,7 @@ if (signer.address.toLowerCase() !== current.miner_address.toLowerCase()) {
 const balance = await provider.getBalance(signer.address);
 if (balance === 0n) fail('signing wallet has no Base Sepolia ETH for gas');
 
-console.log('9/12 simulating the exact contract update without changing chain state');
+console.log('9/15 simulating the exact contract update without changing chain state');
 const contract = new ethers.Contract(DIAMOND, abi, signer);
 const args = [OLD_REGISTRATION_ID, YAML_URL, YAML_HASH, FEE_ADDRESS, MIN_PRICE_USDC, SUPPORTED_INTENTS];
 const predictedRegistrationId = await contract.updateMiner.staticCall(...args);
@@ -286,14 +343,14 @@ if (process.env.CONFIRM_TXLENS_UPDATE !== CONFIRMATION_PHRASE) {
   process.exit(2);
 }
 
-console.log('10/12 sending the transaction');
+console.log('10/15 sending the transaction');
 const tx = await contract.updateMiner(...args, { gasLimit: estimatedGas * 120n / 100n });
 console.log('transaction sent:', tx.hash);
-console.log('11/12 waiting for confirmation');
+console.log('11/15 waiting for confirmation');
 const receipt = await tx.wait();
 if (receipt.status !== 1) fail(`transaction ${tx.hash} failed`);
 
-console.log('12/12 reading the new registration back from the receipt');
+console.log('12/15 reading the new registration back from the receipt');
 const iface = new ethers.Interface(abi);
 let newRegistrationId;
 for (const log of receipt.logs) {

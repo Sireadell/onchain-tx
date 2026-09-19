@@ -63,6 +63,10 @@ import checkCarrierServiceabilityRouter from './routes/checkCarrierServiceabilit
 import checkDeliveryWindowVerifyRouter from './routes/checkDeliveryWindowVerify.js';
 import checkPaymentMethodVerifyRouter from './routes/checkPaymentMethodVerify.js';
 import checkInvoiceLedgerReconcileRouter from './routes/checkInvoiceLedgerReconcile.js';
+import checkUrlSafeRouter from './routes/checkUrlSafe.js';
+import checkMalwareDetectionRouter from './routes/checkMalwareDetection.js';
+import checkDnsRecordsRouter from './routes/checkDnsRecords.js';
+import checkThreatIpReputationRouter from './routes/checkThreatIpReputation.js';
 import sentinelFraudRouter from './routes/sentinelFraud.js';
 import { misrouteWatchMiddleware, extractRequestText } from './lib/misrouteWatch.js';
 import { createMisrouteHandoffMiddleware } from './lib/misrouteHandoff.js';
@@ -136,6 +140,10 @@ const checkCarrierServiceabilityRateLimit = signalRateLimit();
 const checkDeliveryWindowVerifyRateLimit = signalRateLimit();
 const checkPaymentMethodVerifyRateLimit = signalRateLimit();
 const checkInvoiceLedgerReconcileRateLimit = signalRateLimit();
+const checkUrlSafeRateLimit = signalRateLimit();
+const checkMalwareDetectionRateLimit = signalRateLimit();
+const checkDnsRecordsRateLimit = signalRateLimit();
+const checkThreatIpReputationRateLimit = signalRateLimit();
 const sentinelFraudRateLimit = signalRateLimit();
 const misrouteHandoffMiddleware = createMisrouteHandoffMiddleware({
   transaction: checkTxRateLimit,
@@ -352,6 +360,10 @@ export function buildApp() {
   app.use('/delivery-window-verify', checkDeliveryWindowVerifyRateLimit, forwardAsyncErrors(checkDeliveryWindowVerifyRouter));
   app.use('/payment-method-verify', checkPaymentMethodVerifyRateLimit, forwardAsyncErrors(checkPaymentMethodVerifyRouter));
   app.use('/invoice-ledger-reconcile', checkInvoiceLedgerReconcileRateLimit, forwardAsyncErrors(checkInvoiceLedgerReconcileRouter));
+  app.use('/url-safe', checkUrlSafeRateLimit, forwardAsyncErrors(checkUrlSafeRouter));
+  app.use('/malware-detection', checkMalwareDetectionRateLimit, forwardAsyncErrors(checkMalwareDetectionRouter));
+  app.use('/dns-check', checkDnsRecordsRateLimit, forwardAsyncErrors(checkDnsRecordsRouter));
+  app.use('/threat-ip-reputation', checkThreatIpReputationRateLimit, forwardAsyncErrors(checkThreatIpReputationRouter));
   app.use('/fraud-query', sentinelFraudRateLimit, misrouteHandoffMiddleware);
   app.use('/assess-wallet', sentinelFraudRateLimit, misrouteHandoffMiddleware);
   app.use('/', forwardAsyncErrors(sentinelFraudRouter));
