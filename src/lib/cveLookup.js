@@ -109,6 +109,18 @@ export function extractCveId(text) {
   return `CVE-${match[1]}-${match[2]}`;
 }
 
+// Every CVE id in the text, canonical and de-duplicated, in the order given.
+export function extractCveIds(text) {
+  if (typeof text !== 'string') return [];
+  const re = new RegExp(CVE_ID_ANYWHERE_RE.source, 'gi');
+  const ids = [];
+  for (const m of text.matchAll(re)) {
+    const id = `CVE-${m[1]}-${m[2]}`.toUpperCase();
+    if (!ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
 // Severity band from a CVSS v3/v4 base score, for records that carry a
 // score but no label (NVD's v2 metrics, some CNA-supplied metrics).
 export function severityFromScore(score) {

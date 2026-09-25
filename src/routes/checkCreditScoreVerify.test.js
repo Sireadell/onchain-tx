@@ -207,6 +207,7 @@ test('CREDIT_SCORE_VERIFY general question with the web source down reports an e
 
 test('CREDIT_SCORE_VERIFY nonsense input refuses without crashing', async (t) => {
   const base = startServer(t);
+  stubGleif(t, { data: [] });
   const res = await fetch(`${base}/credit-score-verify?company=${encodeURIComponent('???')}`);
   const json = await res.json();
   assert.equal(res.status, 200);
