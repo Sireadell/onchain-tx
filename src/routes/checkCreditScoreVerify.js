@@ -12,8 +12,64 @@ import {
 } from '../lib/entityRegistry.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { firstUsableValue, extractSubject, looksLikeSentence } from '../lib/entityExtract.js';
+import { searchWeb, hasWebSearchProvider } from '../lib/webSearch.js';
 
 const router = Router();
+
+// FICO and VantageScore are scoring models, not companies: GLEIF fuzzy-matches
+// "FICO" to unrelated firms such as "FICO AGATA". A question about how credit
+// scores work names no company at all. Both go to the web instead of the registry.
+const SCORING_MODEL = /\b(fico|vantage ?score)\b/i;
+const GENERAL_CREDIT_WORDS = /\b(range|ranges|factors?|good|bad|average|typical|lower|raise|improve|affect|affects|calculated|work|works|mean|means)\b/i;
+const CREDIT_SCORE_PHRASE = /\bcredit scores?\b/i;
+const WEB_BUDGET_MS = 8_000;
+
+function isGeneralCreditQuestion(text) {
+  if (SCORING_MODEL.test(text)) return true;
+  return CREDIT_SCORE_PHRASE.test(text) && GENERAL_CREDIT_WORDS.test(text);
+}
+
+function generalQuestionText(rawInput) {
+  const text = rawInput.replace(/\bCREDIT_SCORE_VERIFY\b/g, '').trim();
+  if (looksLikeSentence(text)) return text;
+  return `What is the ${text} credit score, what score range counts as good, and what factors lower a score?`;
+}
+
+async function answerGeneralCreditQuestion(res, rawInput) {
+  const question = generalQuestionText(rawInput);
+  let result = null;
+  if (hasWebSearchProvider()) {
+    try {
+      result = await searchWeb(question, { budgetMs: WEB_BUDGET_MS });
+    } catch {
+      result = null;
+    }
+  }
+  const answer = typeof result?.answer === 'string' ? result.answer.trim() : '';
+  if (!answer) {
+    return res.status(502).json({
+      status: 'error',
+      summary: 'The live source for general credit score information is temporarily unavailable, so this question could not be answered right now. Retry shortly.',
+      confidence: 0,
+    });
+  }
+  const sources = (result.results ?? []).slice(0, 3);
+  const cited = sources.map((r) => `${r.title}${r.url ? ` (${r.url})` : ''}`).join('; ');
+  const summary = sources.length
+    ? `${answer} Answered from a live web search at request time, the most relevant sources being: ${cited}.`
+    : `${answer} Answered from a live web search at request time.`;
+  return res.json({
+    status: 'ok',
+    summary,
+    confidence: 0.85,
+    canonical: ['credit-score-verify', 'general', question.toLowerCase().slice(0, 80)].join(':'),
+    query: question,
+    credit_score_available: false,
+    sources,
+    provider: result.provider,
+    checked_at: new Date().toISOString(),
+  });
+}
 
 const PARAM_KEYS = [
   'company', 'entity', 'name', 'company_name', 'legal_name', 'business',
@@ -57,6 +113,8 @@ async function handleCreditScoreVerify(req, res) {
       'I cannot verify a business entity because no company name was supplied. Pass a company name as the company parameter.',
     );
   }
+
+  if (isGeneralCreditQuestion(rawInput)) return answerGeneralCreditQuestion(res, rawInput);
 
   const query = looksLikeSentence(rawInput) ? (extractSubject(rawInput) ?? rawInput) : rawInput;
   if (!query || query.length < 2) {

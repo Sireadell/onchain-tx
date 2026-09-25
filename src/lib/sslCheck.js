@@ -38,16 +38,10 @@ function hostMatches(host, name) {
   return h.endsWith(suffix) && !h.slice(0, h.length - suffix.length).includes('.');
 }
 
-// Walks issuerCertificate up the chain and counts what the SERVER sent.
-//
-// Node terminates the chain with the self-signed trust anchor it found in
-// its own store, which the server did not necessarily transmit: google.com
-// walks as leaf, WR2, GTS Root R1, GlobalSign Root CA, where only the
-// first three came down the wire. Counting all four would overstate what
-// the host is actually configured to serve, which is the whole point of
-// checking the deployed chain rather than a transparency log. So a
-// terminal self-issued certificate is excluded. The fingerprint guard
-// stops a malformed chain from looping forever.
+// Counts the full path from the leaf up to and including the trust anchor,
+// the convention every other SSL_VERIFICATION miner reports (developer.apple.com
+// is 3, not the 2 the server transmits). The fingerprint guard stops a
+// malformed chain from looping forever.
 function countChain(leaf) {
   const seen = new Set();
   let node = leaf;
@@ -56,11 +50,8 @@ function countChain(leaf) {
     const id = node.fingerprint256 ?? node.serialNumber ?? String(count);
     if (seen.has(id)) break;
     seen.add(id);
-    if (node.issuerCertificate === node) {
-      // A self-signed leaf is genuinely the one certificate served.
-      return Math.max(count, 1);
-    }
     count += 1;
+    if (node.issuerCertificate === node) break;
     node = node.issuerCertificate;
   }
   return Math.max(count, 1);

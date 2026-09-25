@@ -89,7 +89,7 @@ async function handleSslVerification(req, res) {
     : `Certificate validity: expired ${Math.abs(result.daysUntilExpiry)} days ago, on ${expiryDate}, issued by ${issuerName}.`;
 
   const chainClause = chainComplete
-    ? `Chain trust: the server presented a chain of ${result.chainLength} certificate(s) including intermediates, building a trusted path to a root in the public trust store.`
+    ? `Chain trust: the complete chain of ${result.chainLength} certificate(s), including intermediates and the root, builds a trusted path to a root in the public trust store.`
     : `Chain trust: the chain of ${result.chainLength} certificate(s) presented does not reach a trusted root${result.authorizationError ? ` (${result.authorizationError})` : ''}.`;
 
   const hostnameClause = hostnameValid

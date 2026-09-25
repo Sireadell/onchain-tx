@@ -131,6 +131,80 @@ test('CREDIT_SCORE_VERIFY POST works the same as GET', async (t) => {
   assert.equal(json.status, 'ok');
 });
 
+function withTavily(t, body) {
+  const previous = { PERPLEXITY_API_KEY: process.env.PERPLEXITY_API_KEY, TAVILY_API_KEY: process.env.TAVILY_API_KEY };
+  delete process.env.PERPLEXITY_API_KEY;
+  process.env.TAVILY_API_KEY = 'tvly-test-key';
+  __clearEntityRegistryCacheForTesting();
+  const original = globalThis.fetch;
+  const calls = { tavily: [], gleif: 0 };
+  globalThis.fetch = async (url, init) => {
+    const str = String(url);
+    if (str.startsWith('https://api.tavily.com')) {
+      calls.tavily.push(JSON.parse(init.body).query);
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (str.startsWith('https://api.gleif.org')) {
+      calls.gleif += 1;
+      return new Response(JSON.stringify(SAMPLE_MATCH), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    return original(url, init);
+  };
+  t.after(() => {
+    globalThis.fetch = original;
+    for (const [k, v] of Object.entries(previous)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  });
+  return calls;
+}
+
+const TAVILY_FICO = {
+  query: 'fico range',
+  answer: 'A FICO Score of 670 to 739 is generally considered good on the 300 to 850 scale.',
+  results: [{ title: 'What is a good credit score', url: 'https://example.com/fico', content: '670-739 is good.', score: 0.9 }],
+  response_time: 1.1,
+};
+
+test('CREDIT_SCORE_VERIFY general FICO question is answered from the web, not the company registry', async (t) => {
+  const calls = withTavily(t, TAVILY_FICO);
+  const base = startServer(t);
+  const q = "What is the typical FICO Score range considered 'good' as of September 2026, and what are common adverse factors that could lower it?";
+  const res = await fetch(`${base}/credit-score-verify?company=${encodeURIComponent(q)}&intent=CREDIT_SCORE_VERIFY`);
+  const json = await res.json();
+  assert.equal(json.status, 'ok');
+  assert.match(json.summary, /670 to 739/);
+  assert.equal(calls.gleif, 0);
+  assert.equal(calls.tavily.length, 1);
+});
+
+test('CREDIT_SCORE_VERIFY bare "FICO" is treated as the scoring model, not a fuzzy company match', async (t) => {
+  const calls = withTavily(t, TAVILY_FICO);
+  const base = startServer(t);
+  const res = await fetch(`${base}/credit-score-verify?company=FICO&intent=CREDIT_SCORE_VERIFY`);
+  const json = await res.json();
+  assert.equal(json.status, 'ok');
+  assert.equal(calls.gleif, 0);
+  assert.match(calls.tavily[0], /FICO credit score/);
+  assert.doesNotMatch(calls.tavily[0], /CREDIT_SCORE_VERIFY/);
+});
+
+test('CREDIT_SCORE_VERIFY a named company question still uses the registry', async (t) => {
+  const calls = withTavily(t, TAVILY_FICO);
+  const base = startServer(t);
+  const res = await fetch(`${base}/credit-score-verify?question=${encodeURIComponent("What is Apple's credit score?")}`);
+  const json = await res.json();
+  assert.equal(json.lei_registered, true);
+  assert.equal(calls.tavily.length, 0);
+});
+
+test('CREDIT_SCORE_VERIFY general question with the web source down reports an error, not a random company', async (t) => {
+  withTavily(t, { query: 'x', answer: '', results: [], response_time: 0.2 });
+  const base = startServer(t);
+  const res = await fetch(`${base}/credit-score-verify?company=FICO`);
+  const json = await res.json();
+  assert.equal(res.status, 502);
+  assert.equal(json.status, 'error');
+});
+
 test('CREDIT_SCORE_VERIFY nonsense input refuses without crashing', async (t) => {
   const base = startServer(t);
   const res = await fetch(`${base}/credit-score-verify?company=${encodeURIComponent('???')}`);
