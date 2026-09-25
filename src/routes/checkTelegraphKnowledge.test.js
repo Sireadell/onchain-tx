@@ -93,6 +93,7 @@ test('telegraph-knowledge: a dated protocol question searches the web and is tol
   const pplxCall = calls.find((c) => c.body);
   assert.deepEqual(pplxCall.body.tools, [{ type: 'web_search' }]);
   assert.match(pplxCall.body.instructions, /never invent one/);
+  assert.match(pplxCall.body.instructions, new RegExp(`Today is ${new Date().toISOString().slice(0, 10)}`));
   assert.match(pplxCall.body.instructions, /21,000,000/);
 });
 
