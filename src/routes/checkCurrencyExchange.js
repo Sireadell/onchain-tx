@@ -96,9 +96,9 @@ function summarize({
   return `${amtText} ${from} is worth ${resultText} ${to} at the ECB reference rate as of ${date} (1 ${from} = ${rate} ${to}).`;
 }
 
-async function handleCurrencyExchange(req, res) {
-  const params = (req.method === 'GET' ? req.query : req.body) ?? {};
-
+// Reads from, to and amount out of structured params or a whole question.
+// Shared with /fx-now, which answers the same questions from a live feed.
+export function parseCurrencyParams(params) {
   const fromRaw = firstUsableValue(...FROM_KEYS.map((k) => params[k]));
   const toRaw = firstUsableValue(...TO_KEYS.map((k) => params[k]));
   const amountRaw = firstUsableValue(...AMOUNT_KEYS.map((k) => params[k]));
@@ -116,6 +116,12 @@ async function handleCurrencyExchange(req, res) {
       if (amount === undefined) amount = derived.amount;
     }
   }
+  return { from, to, amount };
+}
+
+async function handleCurrencyExchange(req, res) {
+  const params = (req.method === 'GET' ? req.query : req.body) ?? {};
+  const { from, to, amount } = parseCurrencyParams(params);
 
   if (!from && !to) {
     return respondUnusableInput(

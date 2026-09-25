@@ -560,6 +560,18 @@ endpoints:
       "convert 50 GBP to JPY", using live ECB reference rates. Params: from,
       to (currency codes or names such as "dollars", "euros"), amount
       (optional, default 1).
+  - path: /fx-now
+    external_path: /fx-now
+    method: GET
+    intents: [FX_NOW]
+    description: >
+      FX_NOW. Answers "what is the USD to EUR rate right now", "current GBP
+      JPY exchange rate", "how much is 250 dollars in naira today" with the
+      current mid-market rate from a live FX feed covering 166 currencies,
+      falling back to the ECB reference rate. Params: from (also base), to
+      (also symbols, quote_currency), both currency codes or names such as
+      "dollars", "euros"; amount (optional, default 1); or the whole question
+      as query.
   - path: /sanctions-screening
     external_path: /sanctions-screening
     method: GET
@@ -2004,6 +2016,7 @@ semantics:
     - MALWARE_DETECTION
     - DNS_RECORD_LOOKUP
     - THREAT_IP_REPUTATION
+    - FX_NOW
 
 docs:
   repository: https://github.com/Sireadell/onchain-tx
