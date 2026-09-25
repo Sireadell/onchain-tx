@@ -77,6 +77,34 @@ test('telegraph-knowledge: isProtocolQuestion distinguishes the network from the
   assert.equal(isProtocolQuestion('Who invented the telegraph?'), false);
 });
 
+test('telegraph-knowledge: hackathon, validator and token questions count as protocol questions', () => {
+  assert.equal(isProtocolQuestion('What is the current status of the Telegraph Hackathon?'), true);
+  assert.equal(isProtocolQuestion('How do Telegraph validators finalize rankings?'), true);
+  assert.equal(isProtocolQuestion('What is the max supply of the Telegraph MACHINA token?'), true);
+});
+
+test('telegraph-knowledge: a dated protocol question searches the web and is told not to invent a date', async (t) => {
+  withKey(t);
+  const calls = stubFetch(t, { content: 'Telegraph has not published a 2026 hackathon deadline.' });
+  const base = startServer(t);
+  const q = 'What is the current status of the Telegraph Hackathon, and when is the deadline for submissions for the 2026 event?';
+  const body = await (await fetch(`${base}/telegraph-knowledge?question=${encodeURIComponent(q)}`)).json();
+  assert.equal(body.knowledge_topic, 'telegraph-protocol');
+  const pplxCall = calls.find((c) => c.body);
+  assert.deepEqual(pplxCall.body.tools, [{ type: 'web_search' }]);
+  assert.match(pplxCall.body.instructions, /never invent one/);
+  assert.match(pplxCall.body.instructions, /21,000,000/);
+});
+
+test('telegraph-knowledge: an undated protocol question stays on the reference text without searching', async (t) => {
+  withKey(t);
+  const calls = stubFetch(t, { content: 'Validators re-run the Canonical Evaluator and finalize the ranking.' });
+  const base = startServer(t);
+  await fetch(`${base}/telegraph-knowledge?question=${encodeURIComponent('How do Telegraph validators finalize the miner ranking?')}`);
+  const pplxCall = calls.find((c) => c.body);
+  assert.equal(pplxCall.body.tools, undefined);
+});
+
 test('telegraph-knowledge: missing question answered with guidance, not a 400', async (t) => {
   withKey(t);
   const base = startServer(t);
