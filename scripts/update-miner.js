@@ -15,11 +15,15 @@ const RPC = 'https://sepolia.base.org';
 // re-verified before the next one: scan forward from this id for a slug:
 // txlens row with activation_status: active, then confirm with a
 // staticCall.
-// 2026-09-25: 2749 is deregistered; scanning 2749-3400 found 2752 as the only
-// active txlens row (61 intents, yaml_hash 3390d29c...).
-const OLD_REGISTRATION_ID = 2752;
+// 2026-09-25: 2752 was retired by the FX_NOW update, which created 2971
+// (62 intents, yaml_hash 3430b4f5...).
+const OLD_REGISTRATION_ID = 2971;
 
-// This update adds FX_NOW, bringing the total to sixty-two.
+// This update adds ten intents (batch 5), bringing the total to seventy-two:
+// TOKEN_TOTAL_SUPPLY_VERIFY, CORPORATE_REGISTRY_LOOKUP, EMAIL_SECURITY,
+// MINING_HASHPRICE_VERIFY, SECURITY_REVIEW, LLM_OUTPUT_EVALUATION,
+// CONTRACT_OBLIGATION_AUDIT, CODE_GENERATION, CODE_REVIEW,
+// TEXT_AUTHENTICITY_CHECK.
 // Same rule as every prior update: updateMiner mints a NEW registration and
 // retires the old one, so a YAML the off-chain validator rejects leaves the
 // miner with nothing active. That is not theoretical: 341 was rejected on a
@@ -40,9 +44,9 @@ const OLD_REGISTRATION_ID = 2752;
 //     (134 total).
 //   - Every one of the four new endpoints answers on the live Render
 //     deployment, checked individually below, same as every prior update.
-const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/a12b32de76a687dd0cb91690be559298f89af29b/miner.yaml';
-const YAML_HASH = '0x3430b4f531ac7af28512829ba2981d8f13dcca4cfdc08c2ac65b5367978fd006';
-const PREVIOUS_YAML_HASH = '3390d29ce435d1dc12e4b98fb9f3b1c363497ca9b4bccb6f223bba7d20575fde';
+const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/ec2b35e9d84f337ddd8d3b2425839c83f43ccee4/miner.yaml';
+const YAML_HASH = '0x60ccd49492a058de6830062fa293624d9aa004d5d556dc8090d002e95a48e9ed';
+const PREVIOUS_YAML_HASH = '3430b4f531ac7af28512829ba2981d8f13dcca4cfdc08c2ac65b5367978fd006';
 const FEE_ADDRESS = '0x6f477610A93C5B255C29c489760045272BCeDa99';
 const MIN_PRICE_USDC = 10000;
 const CONFIRMATION_PHRASE = `update-txlens-${OLD_REGISTRATION_ID}-${YAML_HASH.slice(2, 10)}`;
@@ -109,6 +113,16 @@ const SUPPORTED_INTENTS = [
   'DNS_RECORD_LOOKUP',
   'THREAT_IP_REPUTATION',
   'FX_NOW',
+  'TOKEN_TOTAL_SUPPLY_VERIFY',
+  'CORPORATE_REGISTRY_LOOKUP',
+  'EMAIL_SECURITY',
+  'MINING_HASHPRICE_VERIFY',
+  'SECURITY_REVIEW',
+  'LLM_OUTPUT_EVALUATION',
+  'CONTRACT_OBLIGATION_AUDIT',
+  'CODE_GENERATION',
+  'CODE_REVIEW',
+  'TEXT_AUTHENTICITY_CHECK',
 ];
 
 const abi = [
@@ -155,7 +169,7 @@ for (const intent of SUPPORTED_INTENTS) {
 }
 if (!/^\s*label_field:\s*answer\s*$/m.test(yamlText)) fail('YAML label_field is not answer');
 
-console.log('3/15 checking every one of the fifty-seven intents is canonical on-chain');
+console.log('3/15 checking every intent is canonical on-chain');
 const readProvider = new ethers.JsonRpcProvider(RPC);
 const readContract = new ethers.Contract(DIAMOND, abi, readProvider);
 const canonical = new Set(await readContract.getCanonicalIntents());
@@ -330,14 +344,38 @@ if (failedBatch4Intents.length) {
   console.warn(`WARNING: these batch-4 intents had transient issues but are already live on-chain, registering anyway: ${failedBatch4Intents.join(', ')}`);
 }
 
-console.log('8e/15 exercising FX_NOW, the intent this update adds');
+console.log('8e/15 exercising FX_NOW (already live on-chain, warn-only)');
 const fxOk = await checkWithRetry(
   'FX_NOW',
   `${BASE}/fx-now?from=USD&to=EUR`,
   (b) => b.status === 'ok' && typeof b.rate === 'number' && typeof b.answer === 'string' && b.answer.trim(),
   { attempts: 2, delayMs: 8_000 },
 );
-if (!fxOk) fail('FX_NOW did not answer on the live deployment and this update exists to claim it on-chain');
+if (!fxOk) console.warn('WARNING: FX_NOW had a transient issue but is already live on-chain, registering anyway');
+
+// The ten intents this update adds. Each must answer on the live
+// deployment, since this update exists to claim them. Field names were
+// read off the local build's responses on 2026-09-25.
+console.log('8f/15 exercising the ten new batch-5 intents on the live deployment');
+const hasAnswer = (b) => b.status === 'ok' && typeof b.answer === 'string' && b.answer.trim();
+const newBatch5Checks = [
+  ['TOKEN_TOTAL_SUPPLY_VERIFY', `${BASE}/token-total-supply?token=0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48&venue=eth-mainnet`, (b) => hasAnswer(b) && /^\d+$/.test(b.total_supply_raw)],
+  ['CORPORATE_REGISTRY_LOOKUP', `${BASE}/corporate-registry?name=Microsoft%20Corporation`, (b) => hasAnswer(b) && b.status_active === 1],
+  ['EMAIL_SECURITY', `${BASE}/email-security?domain=gmail.com`, (b) => hasAnswer(b) && typeof b.grade === 'string' && b.dmarc],
+  ['MINING_HASHPRICE_VERIFY', `${BASE}/mining-hashprice?height=800000`, (b) => hasAnswer(b) && b.hashprice_sats_per_ph_s_day > 200000],
+  ['SECURITY_REVIEW', `${BASE}/security-review?code=${encodeURIComponent("db.query('SELECT * FROM users WHERE id=' + req.query.id)")}`, (b) => hasAnswer(b)],
+  ['LLM_OUTPUT_EVALUATION', `${BASE}/llm-output-evaluation?prompt=${encodeURIComponent('What is the capital of Australia?')}&output=Sydney`, (b) => hasAnswer(b)],
+  ['CONTRACT_OBLIGATION_AUDIT', `${BASE}/contract-obligation-audit?contract=${encodeURIComponent('Supplier shall deliver within 30 days of the order.')}&facts=${encodeURIComponent('Ordered March 1, delivered April 15.')}`, (b) => hasAnswer(b)],
+  ['CODE_GENERATION', `${BASE}/code-generation?instruction=${encodeURIComponent('Python function that reverses a string')}`, (b) => hasAnswer(b) && /def /.test(b.answer)],
+  ['CODE_REVIEW', `${BASE}/code-review?code=${encodeURIComponent('def avg(xs): return sum(xs)/len(xs)')}`, (b) => hasAnswer(b)],
+  ['TEXT_AUTHENTICITY_CHECK', `${BASE}/text-authenticity?text=${encodeURIComponent('"Ask not what your country can do for you" - John F. Kennedy, 1961')}`, (b) => hasAnswer(b)],
+];
+const failedBatch5Intents = [];
+for (const [intent, url, verify] of newBatch5Checks) {
+  const ok = await checkWithRetry(intent, url, verify, { attempts: 2, delayMs: 8_000 });
+  if (!ok) failedBatch5Intents.push(intent);
+}
+if (failedBatch5Intents.length) fail(`these new intents did not answer on the live deployment: ${failedBatch5Intents.join(', ')}`);
 
 if (!process.env.MINER_PRIVATE_KEY) fail('MINER_PRIVATE_KEY is missing');
 const provider = new ethers.JsonRpcProvider(RPC);
