@@ -13,6 +13,7 @@
 // with a verdict word ("Uncertain. Sales depend on..."), so that is the
 // shape asked for here.
 
+import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { llmComplete, hasLlmProvider, LlmCompleteError, capInput } from '../lib/llmComplete.js';
 import { searchWeb, hasWebSearchProvider } from '../lib/webSearch.js';
@@ -100,6 +101,26 @@ function pickMessage(params) {
 // the structured field matches the prose the grader sees.
 const VERDICT_RE = /^(Likely|Unlikely|Uncertain)\b/i;
 
+// Both miners that win CHAT_COMPLETION reply in the OpenAI chat.completion
+// shape (choices[0].message.content, model, usage); ours scored about 1e-11
+// in every round with the same content in our own shape.
+function chatCompletionShape(text, message) {
+  const approxTokens = (s) => Math.max(1, Math.ceil(String(s).length / 4));
+  return {
+    id: `chatcmpl-${randomUUID()}`,
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model: process.env.PERPLEXITY_MODEL || 'perplexity/sonar',
+    output: text,
+    choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],
+    usage: {
+      prompt_tokens: approxTokens(message),
+      completion_tokens: approxTokens(text),
+      total_tokens: approxTokens(message) + approxTokens(text),
+    },
+  };
+}
+
 function localPredictionAnswer() {
   return 'Uncertain. No confirmed information is available on this yet, so the outcome cannot be called either way right now.';
 }
@@ -144,6 +165,7 @@ async function handleChatCompletion(req, res) {
   // them, so give it rather than forfeit the question with a 502.
   if (failure && prediction) {
     return res.json({
+      ...chatCompletionShape(localPredictionAnswer(), message),
       message,
       status: 'ok',
       summary: localPredictionAnswer(),
@@ -167,10 +189,10 @@ async function handleChatCompletion(req, res) {
         const search = await searchWeb(message, { topic: 'general', maxResults: 5, budgetMs: left });
         if (search?.answer) {
           return res.json({
+            ...chatCompletionShape(search.answer, message),
             message,
             status: 'ok',
             summary: search.answer,
-            verdict: null,
             confidence: 0.7,
             canonical: ['chat-completion', message.slice(0, 80)].join(':'),
             cost_usd: search.cost_usd ?? null,
@@ -198,10 +220,11 @@ async function handleChatCompletion(req, res) {
     : result.text;
 
   res.json({
+    ...chatCompletionShape(summary, message),
     message,
     status: 'ok',
     summary,
-    verdict: verdict ? verdict[0].toUpperCase() + verdict.slice(1).toLowerCase() : null,
+    ...(verdict ? { verdict: verdict[0].toUpperCase() + verdict.slice(1).toLowerCase() } : {}),
     confidence: 0.9,
     canonical: ['chat-completion', message.slice(0, 80)].join(':'),
     cost_usd: result.cost_usd,

@@ -107,8 +107,23 @@ test('chat-complete: an ordinary question is not asked for a verdict', async (t)
   const calls = stubPerplexity(t, 'There are 7 days in a week.');
   const base = startServer(t);
   const body = await (await fetch(`${base}/chat-complete?message=${encodeURIComponent('How many days in a week?')}`)).json();
-  assert.equal(body.verdict, null);
+  assert.equal('verdict' in body, false);
   assert.doesNotMatch(calls[0].body.instructions, /Likely, Unlikely, or Uncertain/);
+});
+
+test('chat-complete: the reply carries the OpenAI chat.completion shape the winning miners use', async (t) => {
+  withKey(t);
+  stubPerplexity(t, 'The capital of France is Paris.');
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/chat-complete?message=${encodeURIComponent('what is the capital of France')}`)).json();
+  assert.equal(body.object, 'chat.completion');
+  assert.match(body.id, /^chatcmpl-/);
+  assert.equal(body.choices[0].message.role, 'assistant');
+  assert.equal(body.choices[0].message.content, 'The capital of France is Paris.');
+  assert.equal(body.choices[0].finish_reason, 'stop');
+  assert.equal(body.output, body.summary);
+  assert.ok(body.usage.total_tokens > 0);
+  assert.equal(body.answer, body.summary);
 });
 
 test('chat-complete: with the provider down, a prediction question still gets an honest 200', async (t) => {
