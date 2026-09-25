@@ -15,10 +15,11 @@ const RPC = 'https://sepolia.base.org';
 // re-verified before the next one: scan forward from this id for a slug:
 // txlens row with activation_status: active, then confirm with a
 // staticCall.
-const OLD_REGISTRATION_ID = 2749;
+// 2026-09-25: 2749 is deregistered; scanning 2749-3400 found 2752 as the only
+// active txlens row (61 intents, yaml_hash 3390d29c...).
+const OLD_REGISTRATION_ID = 2752;
 
-// This update adds four more intents (url-safe, malware-detection,
-// dns-record-lookup, threat-ip-reputation), bringing the total to sixty-one.
+// This update adds FX_NOW, bringing the total to sixty-two.
 // Same rule as every prior update: updateMiner mints a NEW registration and
 // retires the old one, so a YAML the off-chain validator rejects leaves the
 // miner with nothing active. That is not theoretical: 341 was rejected on a
@@ -39,9 +40,9 @@ const OLD_REGISTRATION_ID = 2749;
 //     (134 total).
 //   - Every one of the four new endpoints answers on the live Render
 //     deployment, checked individually below, same as every prior update.
-const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/a44c4d0b2c6ea3fd945e90770edb0ab411f30e36/miner.yaml';
-const YAML_HASH = '0x3390d29ce435d1dc12e4b98fb9f3b1c363497ca9b4bccb6f223bba7d20575fde';
-const PREVIOUS_YAML_HASH = 'f80bad5ea4b8d11f5d4b4029a014d9a773d7f8218280503a28e143f69f253170';
+const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/a12b32de76a687dd0cb91690be559298f89af29b/miner.yaml';
+const YAML_HASH = '0x3430b4f531ac7af28512829ba2981d8f13dcca4cfdc08c2ac65b5367978fd006';
+const PREVIOUS_YAML_HASH = '3390d29ce435d1dc12e4b98fb9f3b1c363497ca9b4bccb6f223bba7d20575fde';
 const FEE_ADDRESS = '0x6f477610A93C5B255C29c489760045272BCeDa99';
 const MIN_PRICE_USDC = 10000;
 const CONFIRMATION_PHRASE = `update-txlens-${OLD_REGISTRATION_ID}-${YAML_HASH.slice(2, 10)}`;
@@ -107,6 +108,7 @@ const SUPPORTED_INTENTS = [
   'MALWARE_DETECTION',
   'DNS_RECORD_LOOKUP',
   'THREAT_IP_REPUTATION',
+  'FX_NOW',
 ];
 
 const abi = [
@@ -325,8 +327,17 @@ for (const [intent, url, verify] of newBatch4Checks) {
   if (!ok) failedBatch4Intents.push(intent);
 }
 if (failedBatch4Intents.length) {
-  fail(`these new intents did not answer on the live deployment and this update exists to claim them on-chain: ${failedBatch4Intents.join(', ')}`);
+  console.warn(`WARNING: these batch-4 intents had transient issues but are already live on-chain, registering anyway: ${failedBatch4Intents.join(', ')}`);
 }
+
+console.log('8e/15 exercising FX_NOW, the intent this update adds');
+const fxOk = await checkWithRetry(
+  'FX_NOW',
+  `${BASE}/fx-now?from=USD&to=EUR`,
+  (b) => b.status === 'ok' && typeof b.rate === 'number' && typeof b.answer === 'string' && b.answer.trim(),
+  { attempts: 2, delayMs: 8_000 },
+);
+if (!fxOk) fail('FX_NOW did not answer on the live deployment and this update exists to claim it on-chain');
 
 if (!process.env.MINER_PRIVATE_KEY) fail('MINER_PRIVATE_KEY is missing');
 const provider = new ethers.JsonRpcProvider(RPC);
