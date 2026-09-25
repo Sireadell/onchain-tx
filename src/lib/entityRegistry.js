@@ -71,19 +71,25 @@ async function fetchWithTimeout(url) {
   }
 }
 
+function formatAddress(a) {
+  if (!a) return null;
+  const parts = [...(a.addressLines ?? []), a.city, a.region, a.postalCode, a.country].filter((x) => typeof x === 'string' && x.trim());
+  return parts.length ? parts.join(', ') : null;
+}
+
 // Looks up `name` in GLEIF's LEI registry by legal name (fuzzy prefix
 // match, GLEIF's own filter behavior). Returns { matches: [...] } where an
 // empty array is a genuine "no registered LEI found" answer, not an error.
-export async function lookupEntity(name) {
+export async function lookupEntity(name, { fulltext = false } = {}) {
   const trimmed = String(name ?? '').trim();
   if (!trimmed) throw new EntityRegistryLookupError('no company name supplied to look up');
 
-  const cacheKey = trimmed.toLowerCase();
+  const cacheKey = `${fulltext ? 'ft:' : ''}${trimmed.toLowerCase()}`;
   const cached = lookupCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
   const params = new URLSearchParams({
-    'filter[entity.legalName]': trimmed,
+    [fulltext ? 'filter[fulltext]' : 'filter[entity.legalName]']: trimmed,
     'page[size]': '5',
   });
   const url = `${GLEIF_URL}?${params.toString()}`;
@@ -104,6 +110,10 @@ export async function lookupEntity(name) {
     registration_status: r.attributes?.registration?.status ?? null,
     entity_status: r.attributes?.entity?.status ?? null,
     headquarters_country: r.attributes?.entity?.headquartersAddress?.country ?? null,
+    legal_address: formatAddress(r.attributes?.entity?.legalAddress),
+    headquarters_address: formatAddress(r.attributes?.entity?.headquartersAddress),
+    registered_as: r.attributes?.entity?.registeredAs ?? null,
+    creation_date: r.attributes?.entity?.creationDate ?? null,
     initial_registration_date: r.attributes?.registration?.initialRegistrationDate ?? null,
     last_update_date: r.attributes?.registration?.lastUpdateDate ?? null,
   }));

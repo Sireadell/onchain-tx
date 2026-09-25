@@ -33,7 +33,7 @@ protocol: generic
 name: TxLens
 description: >
   TxLens provides live, verifiable answers to on-chain and market questions
-  from authoritative sources. Covering 61 intents across blockchain, finance,
+  from authoritative sources. Covering 72 intents across blockchain, finance,
   weather, content, security, and general intelligence domains—each answer
   includes source attribution and fetch timestamps for transparency.
 base_url: https://telegraph-onchain-tx-lookup-miner.onrender.com
@@ -819,6 +819,123 @@ endpoints:
       of sources that returned data. Params: ip or domain (required; also
       accepted as indicator, ioc, host, query, q, or question).
 
+  - path: /token-total-supply
+    external_path: /token-total-supply
+    method: GET
+    intents: [TOKEN_TOTAL_SUPPLY_VERIFY]
+    description: >
+      TOKEN_TOTAL_SUPPLY_VERIFY. Answers "what is the total supply of USDC
+      on Ethereum", "verify the supply of token 0xA0b8... at block
+      23000000". Reads totalSupply(), decimals() and symbol() straight from
+      the chain and returns total_supply (human units), total_supply_raw
+      (the exact on-chain integer), decimals, symbol and block. Params:
+      token (a 0x contract address, or a symbol such as USDC, USDT, DAI,
+      WETH), chain (also venue or network: ethereum, eth-mainnet, 1, base,
+      arbitrum, polygon, avalanche; default ethereum), block (optional
+      block number, default latest).
+  - path: /corporate-registry
+    external_path: /corporate-registry
+    method: GET
+    intents: [CORPORATE_REGISTRY_LOOKUP]
+    description: >
+      CORPORATE_REGISTRY_LOOKUP. Answers "what is the registered address
+      and incorporation status of Acme Inc. in Delaware", "is SpaceX an
+      active company". Looks the company up in GLEIF, the global Legal
+      Entity Identifier register: legal name, LEI, active status
+      (status_active 1 or 0), jurisdiction, registered and headquarters
+      address, creation date. Says plainly when no record exists. Params:
+      name (also company, entity, legal_name; the company name),
+      jurisdiction (optional, a state or country), or the whole question as
+      query.
+  - path: /email-security
+    external_path: /email-security
+    method: GET
+    intents: [EMAIL_SECURITY]
+    description: >
+      EMAIL_SECURITY. Answers "is gmail.com protected against email
+      spoofing", "check SPF, DKIM and DMARC for example.com". Reads the
+      domain's live DNS (MX, SPF with redirects followed, DMARC policy,
+      DKIM at common selectors, MTA-STS) and grades it Strong, Good, Weak
+      or Unprotected with the specific gaps. Params: domain (a bare domain,
+      also email, name or host; an email address works too), or the whole
+      question as query.
+  - path: /mining-hashprice
+    external_path: /mining-hashprice
+    method: GET
+    intents: [MINING_HASHPRICE_VERIFY]
+    description: >
+      MINING_HASHPRICE_VERIFY. Answers "what is the Bitcoin hashprice at
+      block 800000", "current hashprice". Computes hashprice in sats per
+      PH/s per day (hashprice_sats_per_ph_s_day) from the block's coinbase
+      reward and difficulty: reward x 144 / (difficulty x 2^32 / 600 /
+      1e15), plus the fee-free figure and implied network hashrate. Params:
+      height (a block height, or latest; also block).
+  - path: /security-review
+    external_path: /security-review
+    method: GET
+    intents: [SECURITY_REVIEW]
+    description: >
+      SECURITY_REVIEW. Reviews supplied code, configuration or a system
+      description for security weaknesses. The answer leads with a verdict
+      (Secure, Needs changes, Insecure), then the most serious issues with
+      CWE/OWASP category and the concrete fix. Params: code (also snippet,
+      config, diff, description), or the whole request as query.
+  - path: /llm-output-evaluation
+    external_path: /llm-output-evaluation
+    method: GET
+    intents: [LLM_OUTPUT_EVALUATION]
+    description: >
+      LLM_OUTPUT_EVALUATION. Grades a language model's answer for accuracy,
+      completeness, relevance and clarity. The answer leads with a rating
+      (Excellent, Good, Acceptable, Poor, Fails) and "Score: N/10", then the
+      specific strengths and errors. Params: prompt (the original question),
+      output (also response, answer, completion; the model answer to grade),
+      reference (optional expected answer), criteria (optional), or all of it
+      as query.
+  - path: /contract-obligation-audit
+    external_path: /contract-obligation-audit
+    method: GET
+    intents: [CONTRACT_OBLIGATION_AUDIT]
+    description: >
+      CONTRACT_OBLIGATION_AUDIT. Audits contract obligations: who owes what
+      by when, and, given performance facts, whether each was met. The
+      answer leads with a verdict (Compliant, Partially compliant,
+      Non-compliant, Unclear) and cites the clause wording. Params: contract
+      (also clause, agreement), obligation (optional), facts (also evidence,
+      performance; optional), or the whole request as query.
+  - path: /code-generation
+    external_path: /code-generation
+    method: GET
+    intents: [CODE_GENERATION]
+    description: >
+      CODE_GENERATION. Writes complete, runnable code for an instruction, in
+      the requested language (Python by default), as one fenced code block
+      followed by a short note. Params: instruction (also task, spec,
+      description), language (optional), or the whole request as query.
+  - path: /code-review
+    external_path: /code-review
+    method: GET
+    intents: [CODE_REVIEW]
+    description: >
+      CODE_REVIEW. Reviews supplied code or a diff for correctness bugs,
+      security, performance and readability. The answer leads with a
+      verdict (Approve, Request changes, Comment), then the findings in
+      severity order with concrete fixes. Params: code (also diff, patch,
+      snippet), language (optional), focus (optional), or the whole request
+      as query.
+  - path: /text-authenticity
+    external_path: /text-authenticity
+    method: GET
+    intents: [TEXT_AUTHENTICITY_CHECK]
+    description: >
+      TEXT_AUTHENTICITY_CHECK. Judges whether a text is authentic, genuinely
+      from its attributed source and not fabricated, altered or
+      machine-generated to deceive. The answer leads with a verdict
+      (Authentic, Likely authentic, Likely fabricated, Fabricated,
+      Unverifiable) and the strongest reasons. Params: text (also content,
+      passage, quote), source or author (optional attribution), or the whole
+      request as query.
+
 # input_schema/output_schema are top-level-only fields, documentation
 # surfaced to callers rather than a per-endpoint validator (confirmed
 # against docs.telegraphprotocol.com/docs/miners/yaml-config). One shared
@@ -1181,6 +1298,52 @@ input_schema:
         Free-text description of the figures and any claimed discrepancy on
         /invoice-ledger-reconcile. Also accepted as invoice, ledger, or
         discrepancy.
+    venue:
+      type: string
+      description: >
+        Chain for /token-total-supply, same as chain (ethereum, eth-mainnet,
+        or a chain id such as 1).
+    block:
+      type: string
+      description: >
+        Block number for /token-total-supply (default latest).
+    height:
+      type: string
+      description: >
+        Bitcoin block height for /mining-hashprice, or latest.
+    jurisdiction:
+      type: string
+      description: >
+        State or country the company is registered in, on
+        /corporate-registry. Optional.
+    code:
+      type: string
+      description: >
+        Source code or a diff on /security-review and /code-review.
+    instruction:
+      type: string
+      description: >
+        What the code should do, on /code-generation.
+    language:
+      type: string
+      description: >
+        Programming language on /code-generation and /code-review.
+    output:
+      type: string
+      description: >
+        The model answer to grade on /llm-output-evaluation.
+    reference:
+      type: string
+      description: >
+        Optional expected answer on /llm-output-evaluation.
+    contract:
+      type: string
+      description: >
+        Contract text or clause on /contract-obligation-audit.
+    facts:
+      type: string
+      description: >
+        What actually happened, on /contract-obligation-audit. Optional.
 output_schema:
   type: object
   properties:
@@ -2017,6 +2180,16 @@ semantics:
     - DNS_RECORD_LOOKUP
     - THREAT_IP_REPUTATION
     - FX_NOW
+    - TOKEN_TOTAL_SUPPLY_VERIFY
+    - CORPORATE_REGISTRY_LOOKUP
+    - EMAIL_SECURITY
+    - MINING_HASHPRICE_VERIFY
+    - SECURITY_REVIEW
+    - LLM_OUTPUT_EVALUATION
+    - CONTRACT_OBLIGATION_AUDIT
+    - CODE_GENERATION
+    - CODE_REVIEW
+    - TEXT_AUTHENTICITY_CHECK
 
 docs:
   repository: https://github.com/Sireadell/onchain-tx

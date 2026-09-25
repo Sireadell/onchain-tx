@@ -267,3 +267,12 @@ export async function getTokenBalance(chainSegment, tokenAddress, walletAddress)
     fetchAnkrRpc(chainSegment, 'eth_call', callParams)
   );
 }
+
+// Generic read-only contract call (eth_call), at `block` (a hex or decimal
+// block number, or 'latest'). Used for totalSupply()/decimals()/symbol().
+export async function ethCall(chainSegment, to, data, block = 'latest') {
+  const tag = block === 'latest' ? 'latest' : `0x${BigInt(block).toString(16)}`;
+  return cachedFetch(chainSegment, 'eth_call', [to, data, tag], () =>
+    fetchAnkrRpc(chainSegment, 'eth_call', [{ to, data }, tag])
+  );
+}

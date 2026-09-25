@@ -123,7 +123,7 @@ function stripMarkup(text) {
     .trim();
 }
 
-async function attempt(systemPrompt, userContent, { budgetMs, maxTokens, disableSearch, temperature }) {
+async function attempt(systemPrompt, userContent, { budgetMs, maxTokens, disableSearch, temperature, keepFormatting }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), budgetMs);
   try {
@@ -169,7 +169,9 @@ async function attempt(systemPrompt, userContent, { budgetMs, maxTokens, disable
     const raw = textPart?.text;
     if (typeof raw !== 'string' || !raw.trim()) return null;
     return {
-      text: stripMarkup(raw),
+      // Code keeps its line breaks and indentation, which stripMarkup would
+      // flatten into one line and so break.
+      text: keepFormatting ? raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim() : stripMarkup(raw),
       cost_usd: Number.isFinite(body?.usage?.cost?.total_cost) ? body.usage.cost.total_cost : null,
     };
   } catch (err) {
@@ -189,13 +191,14 @@ async function attempt(systemPrompt, userContent, { budgetMs, maxTokens, disable
 //   maxTokens     reply length cap passed to the provider
 //   disableSearch true for pure text transformations (see file comment)
 //   temperature   set low (0 to 0.2) where a stable label matters
+//   keepFormatting  return the reply with its line breaks (for code)
 //
 // One retry on a rate limit, a 5xx, or a network failure, as long as enough
 // of the budget is left for it to finish. A 401/402 is not retried (the
 // second answer would be the same) and a timeout is not retried (there is
 // no budget left by definition).
 export async function llmComplete(systemPrompt, userContent, {
-  budgetMs = DEFAULT_BUDGET_MS, maxTokens = 600, disableSearch = false, temperature,
+  budgetMs = DEFAULT_BUDGET_MS, maxTokens = 600, disableSearch = false, temperature, keepFormatting = false,
 } = {}) {
   if (!hasLlmProvider()) throw new LlmCompleteError('PERPLEXITY_API_KEY is not set');
 
@@ -206,7 +209,7 @@ export async function llmComplete(systemPrompt, userContent, {
     if (i > 0 && left < MIN_RETRY_MS) break;
     try {
       return await attempt(systemPrompt, userContent, {
-        budgetMs: Math.min(left, ATTEMPT_CAP_MS), maxTokens, disableSearch, temperature,
+        budgetMs: Math.min(left, ATTEMPT_CAP_MS), maxTokens, disableSearch, temperature, keepFormatting,
       });
     } catch (err) {
       lastError = err;

@@ -48,6 +48,14 @@ import checkPackageStatusRouter from './routes/checkPackageStatus.js';
 import checkUrlScanRouter from './routes/checkUrlScan.js';
 import checkCurrencyExchangeRouter from './routes/checkCurrencyExchange.js';
 import checkFxNowRouter from './routes/checkFxNow.js';
+import checkTokenTotalSupplyRouter from './routes/checkTokenTotalSupply.js';
+import checkCorporateRegistryRouter from './routes/checkCorporateRegistry.js';
+import checkEmailSecurityRouter from './routes/checkEmailSecurity.js';
+import checkMiningHashpriceRouter from './routes/checkMiningHashprice.js';
+import {
+  securityReviewRouter, llmOutputEvaluationRouter, contractObligationAuditRouter,
+  codeGenerationRouter, codeReviewRouter, textAuthenticityRouter,
+} from './routes/llmIntents.js';
 import checkSanctionsScreeningMatchRouter from './routes/checkSanctionsScreeningMatch.js';
 import checkVulnerabilityTriageRouter from './routes/checkVulnerabilityTriage.js';
 import checkSportsScoreRouter from './routes/checkSportsScore.js';
@@ -126,6 +134,7 @@ const checkPackageStatusRateLimit = signalRateLimit();
 const checkUrlScanRateLimit = signalRateLimit();
 const checkCurrencyExchangeRateLimit = signalRateLimit();
 const checkFxNowRateLimit = signalRateLimit();
+const batch5RateLimit = signalRateLimit();
 const checkSanctionsScreeningMatchRateLimit = signalRateLimit();
 const checkVulnerabilityTriageRateLimit = signalRateLimit();
 const checkSportsScoreRateLimit = signalRateLimit();
@@ -347,6 +356,16 @@ export function buildApp() {
   app.use('/url-scan', checkUrlScanRateLimit, forwardAsyncErrors(checkUrlScanRouter));
   app.use('/currency-exchange', checkCurrencyExchangeRateLimit, forwardAsyncErrors(checkCurrencyExchangeRouter));
   app.use('/fx-now', checkFxNowRateLimit, forwardAsyncErrors(checkFxNowRouter));
+  app.use('/token-total-supply', batch5RateLimit, forwardAsyncErrors(checkTokenTotalSupplyRouter));
+  app.use('/corporate-registry', batch5RateLimit, forwardAsyncErrors(checkCorporateRegistryRouter));
+  app.use('/email-security', batch5RateLimit, forwardAsyncErrors(checkEmailSecurityRouter));
+  app.use('/mining-hashprice', batch5RateLimit, forwardAsyncErrors(checkMiningHashpriceRouter));
+  app.use('/security-review', batch5RateLimit, forwardAsyncErrors(securityReviewRouter));
+  app.use('/llm-output-evaluation', batch5RateLimit, forwardAsyncErrors(llmOutputEvaluationRouter));
+  app.use('/contract-obligation-audit', batch5RateLimit, forwardAsyncErrors(contractObligationAuditRouter));
+  app.use('/code-generation', batch5RateLimit, forwardAsyncErrors(codeGenerationRouter));
+  app.use('/code-review', batch5RateLimit, forwardAsyncErrors(codeReviewRouter));
+  app.use('/text-authenticity', batch5RateLimit, forwardAsyncErrors(textAuthenticityRouter));
   app.use('/sanctions-screening', checkSanctionsScreeningMatchRateLimit, forwardAsyncErrors(checkSanctionsScreeningMatchRouter));
   app.use('/vulnerability-triage', checkVulnerabilityTriageRateLimit, forwardAsyncErrors(checkVulnerabilityTriageRouter));
   app.use('/sports-score', checkSportsScoreRateLimit, forwardAsyncErrors(checkSportsScoreRouter));
