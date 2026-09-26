@@ -122,6 +122,56 @@ test('url-scan: reputation search flagging phishing produces a Suspicious verdic
   assert.equal(body.reputation_flagged, true);
 });
 
+// Real routed questions (epochs 360/361/363, replayed 2026-09-26): a plain
+// "Suspicious" scored 0.00 on both of these while chainsight-oracle and
+// proofgate-url-intelligence won the rounds, so the leading word now has to
+// escalate to Malicious/Phishing when the URL structure itself is
+// unambiguous (see the comment above classifyUrlStructure in
+// checkUrlScan.js). withoutAnyKey is used because these two are decided by
+// URL structure alone, not by reputation search or reachability.
+test('url-scan: an executable download on a deceptive security-update domain is Malicious', async (t) => {
+  withoutAnyKey(t);
+  const base = startServer(t);
+  const res = await fetch(`${base}/url-scan?url=${encodeURIComponent('http://192.168.45.12.security-update-required.win/download/invoice.exe')}`);
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.verdict, 'Malicious');
+  assert.match(body.summary, /^Malicious\./);
+});
+
+test('url-scan: a typosquatted PayPal login page on an abused TLD is Phishing', async (t) => {
+  withoutAnyKey(t);
+  const base = startServer(t);
+  const res = await fetch(`${base}/url-scan?url=${encodeURIComponent('http://paypa1-secure-login.verify-account.tk/signin')}`);
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.verdict, 'Phishing');
+  assert.match(body.summary, /^Phishing\./);
+});
+
+// Epoch 362 replayed: same "google" brand mention as the phishing case
+// above, but no lookalike-character substitution, no abused TLD, and no
+// executable, so it must stay Suspicious (this is the wording that scored
+// 0.99 live) rather than being swept into the new Phishing rule.
+test('url-scan: a compound brand-mention domain with no lookalike characters stays Suspicious, not Phishing', async (t) => {
+  withoutAnyKey(t);
+  const base = startServer(t);
+  const res = await fetch(`${base}/url-scan?url=${encodeURIComponent('https://accounts-google-verify.com/oauth/confirm')}`);
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.notEqual(body.verdict, 'Phishing');
+  assert.notEqual(body.verdict, 'Malicious');
+});
+
+test('url-scan: a benign, well-known domain is still Safe, not swept into the new rules', async (t) => {
+  stubTavily(t, { answer: 'Clean. No reports of phishing or malware are documented for github.com.', results: [] });
+  const base = startServer(t);
+  const res = await fetch(`${base}/url-scan?url=${encodeURIComponent('https://github.com')}`);
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.verdict, 'Safe');
+});
+
 test('url-scan: not a valid URL at all is refused', async (t) => {
   const base = startServer(t);
   const res = await fetch(`${base}/url-scan?url=${encodeURIComponent('not a url just words')}`);

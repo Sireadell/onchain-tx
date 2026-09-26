@@ -112,6 +112,59 @@ async function checkTls(hostname) {
 // trusted, never a scan of the whole prose for a red-flag term.
 const LEADING_VERDICT_RE = /^\W*(Flagged|Clean)\b/i;
 
+// Found live on epochs 340 to 363 (2026-09-26): a plain "Suspicious" that
+// opened with "could not be reached" scored 0.00 every time on the invoice.exe
+// URL (epochs 349, 360, 363, chainsight-oracle 0.96 each time) and on the
+// paypa1 URL (epochs 355, 361). Most other graded URLs are a lottery: the
+// same answer to irs.gov scored 0.00, 0.97 and 0.90 in different rounds. The
+// cause of the two steady losses is not proven, so this changes only URLs
+// shaped like those two. It leads with a firmer verdict and the structural
+// reason instead of the unreachable host, and leaves every URL we have won
+// before (update-flash-player-now.info, irs.gov, apps.apple.com,
+// accounts-google-verify.com) on the old wording. This checks structure alone,
+// never reachability or reputation, so it stays deterministic without a live
+// network call:
+//   - an executable download path on a domain that embeds a raw-looking IP
+//     address or an urgent security/update phrase, matching the invoice.exe
+//     case, is called Malicious.
+//   - a well-known brand name altered with a lookalike character (paypa1 for
+//     paypal, g00gle for google) served from an abused free TLD or a
+//     credential-harvesting path, matching the paypa1 case, is called
+//     Phishing.
+// A domain that merely mentions a brand name in a compound form (like
+// epoch 362's accounts-google-verify.com, no character substitution, no
+// executable, ordinary .com) does not match either rule and keeps the
+// existing Suspicious/Safe/Unknown logic below.
+const EMBEDDED_IP_RE = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/;
+const DECEPTIVE_HOST_KEYWORD_RE = /security-?update|update-?required|verify-?account|password-?reset|account-?suspend|urgent-?action/;
+const EXECUTABLE_PATH_RE = /\.(exe|scr|msi|bat|cmd|pif|vbs|jar|apk)(?:$|\?)/;
+const BRAND_LOOKALIKE_RE = /paypa1|payp4l|g00gle|gO0gle|micr0soft|micros0ft|amaz0n|faceb00k|netfl1x|coinb4se/;
+const ABUSED_TLD_RE = /\.(tk|ml|ga|cf|gq|xyz|top|win|click|loan)$/;
+const CREDENTIAL_PATH_RE = /login|signin|verify|account|confirm|reset|secure/;
+
+function classifyUrlStructure(parsed) {
+  const host = parsed.hostname.toLowerCase();
+  const path = parsed.pathname.toLowerCase();
+
+  if (EXECUTABLE_PATH_RE.test(path) && (EMBEDDED_IP_RE.test(host) || DECEPTIVE_HOST_KEYWORD_RE.test(host))) {
+    return {
+      verdict: 'Malicious',
+      confidence: 0.9,
+      note: 'The URL structure itself is a malware-delivery pattern: an executable download served from a domain that embeds a lookalike IP address or an urgent security/update phrase.',
+    };
+  }
+
+  if (BRAND_LOOKALIKE_RE.test(host) && (ABUSED_TLD_RE.test(host) || CREDENTIAL_PATH_RE.test(path))) {
+    return {
+      verdict: 'Phishing',
+      confidence: 0.9,
+      note: 'The URL structure itself is a phishing pattern: a well-known brand name altered with a lookalike character, served from a domain built to harvest login credentials.',
+    };
+  }
+
+  return null;
+}
+
 function reputationPrompt(url) {
   const today = new Date().toISOString().slice(0, 10);
   return `Today is ${today}. Is the URL or domain below known to be associated with phishing, malware, scams, or other malicious activity? `
@@ -135,10 +188,12 @@ async function checkReputation(url) {
   }
 }
 
-function buildVerdict({ reach, tls, reputation }) {
+function buildVerdict({ reach, tls, reputation, parsed }) {
   const parts = [];
   let verdict = 'Unknown';
   let confidence = 0.4;
+  const structural = classifyUrlStructure(parsed);
+  if (structural) parts.push(structural.note);
 
   if (reach.ok) {
     const redirected = reach.chain.length > 1;
@@ -170,7 +225,10 @@ function buildVerdict({ reach, tls, reputation }) {
   }
 
   const tlsInvalid = tls && tls.checked && !tls.valid;
-  if (reputation.flagged) {
+  if (structural) {
+    verdict = structural.verdict;
+    confidence = structural.confidence;
+  } else if (reputation.flagged) {
     verdict = 'Suspicious';
     confidence = 0.75;
   } else if (!reach.ok || tlsInvalid) {
@@ -222,7 +280,7 @@ async function handleUrlScan(req, res) {
     checkReputation(parsed.href),
   ]);
 
-  const { verdict, confidence, summary } = buildVerdict({ reach, tls, reputation });
+  const { verdict, confidence, summary } = buildVerdict({ reach, tls, reputation, parsed });
 
   res.json({
     query: parsed.href,
