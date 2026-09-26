@@ -67,7 +67,28 @@ const REVERSE_PAIR_RE = new RegExp(`\\b(?:how\\s+(?:many|much)\\s+)?(${CURRENCY_
 const SINGLE_CURRENCY_TERM = `(?:(?:american|british|us|u\\.s\\.|uk|swiss|canadian|australian|mexican|indian|japanese|chinese)\\s+)?(?:${CURRENCY_WORD})`;
 const SINGLE_CURRENCY_RE = new RegExp(`\\b(${SINGLE_CURRENCY_TERM})\\b`, 'i');
 
+// Market notation: "AUD/USD", "EUR-GBP", or run together as "EURUSD". Found
+// live 2026-09-26: every FX_NOW round asked "What is the live mid-market
+// rate for AUD/USD as of today, ...?" and PAIR_RE needs spaces around its
+// slash, so the pair was never read and the answer was a refusal. The
+// run-together form must be in capitals so an ordinary six-letter word
+// cannot match it.
+const SLASH_PAIR_RE = /\b([A-Za-z]{3})\s*[/-]\s*([A-Za-z]{3})\b/;
+const JOINED_PAIR_RE = /\b([A-Z]{3})([A-Z]{3})\b/;
+
 function extractFromQuestion(text) {
+  for (const re of [SLASH_PAIR_RE, JOINED_PAIR_RE]) {
+    const m = text.match(re);
+    // Either both codes are ECB currencies in any case, or both are written
+    // in capitals ("NGN/USD"): /fx-now covers 166 currencies, far more than
+    // the ECB list, and capitals rule out words like "and/the".
+    const known = m && isKnownCurrency(m[1]) && isKnownCurrency(m[2]);
+    const capitals = m && /^[A-Z]{3}$/.test(m[1]) && /^[A-Z]{3}$/.test(m[2]);
+    if (known || capitals) {
+      const amount = text.match(/(-?\d[\d,.]*)\s*(?=[A-Za-z]{3}\s*[/-]?\s*[A-Za-z]{3}\b)/)?.[1];
+      return { from: m[1].toUpperCase(), to: m[2].toUpperCase(), amount: amount ? Number(amount.replace(/,/g, '')) : undefined };
+    }
+  }
   const match = text.match(PAIR_RE);
   if (match) {
     const from = resolveCurrencyCode(match[2]);

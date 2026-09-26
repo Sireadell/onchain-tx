@@ -110,3 +110,15 @@ test('FX_NOW unpublished pair is refused honestly', async (t) => {
   const json = await (await fetch(`${base}/fx-now?from=USD&to=XYZ`)).json();
   assert.equal(json.status, 'invalid_input');
 });
+
+test('FX_NOW reads market notation such as AUD/USD, the exact question the grader asks', async (t) => {
+  const calls = stubFeeds(t, { erapi: { result: 'success', base_code: 'AUD', time_last_update_unix: 1790380952, rates: { AUD: 1, USD: 0.702542 } } });
+  const base = startServer(t);
+  const q = 'What is the live mid-market rate for AUD/USD as of today, September 20, 2026?';
+  const json = await (await fetch(`${base}/fx-now?query=${encodeURIComponent(q)}`)).json();
+  assert.equal(json.status, 'ok');
+  assert.equal(json.from, 'AUD');
+  assert.equal(json.to, 'USD');
+  assert.equal(json.rate, 0.702542);
+  assert.equal(calls.erapi[0], 'https://open.er-api.com/v6/latest/AUD');
+});

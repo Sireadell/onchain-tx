@@ -207,3 +207,15 @@ test('CURRENCY_EXCHANGE a currency this feed does not carry is refused by name, 
   assert.equal(json.status, 'invalid_input');
   assert.match(json.summary, /NGN/);
 });
+
+test('CURRENCY_EXCHANGE pair reader handles slash, dash and joined market notation', async () => {
+  const { parseCurrencyParams } = await import('./checkCurrencyExchange.js');
+  const read = (query) => parseCurrencyParams({ query });
+  assert.deepEqual(read('rate for AUD/USD today?'), { from: 'AUD', to: 'USD', amount: undefined });
+  assert.deepEqual(read('EUR-GBP now'), { from: 'EUR', to: 'GBP', amount: undefined });
+  assert.deepEqual(read('EURUSD right now'), { from: 'EUR', to: 'USD', amount: undefined });
+  assert.deepEqual(read('convert 250 GBP/JPY'), { from: 'GBP', to: 'JPY', amount: 250 });
+  assert.equal(read('NGN/USD rate').from, 'NGN');
+  assert.equal(read('and/the question').from, null);
+  assert.deepEqual(read('100 dollars to euros'), { from: 'USD', to: 'EUR', amount: 100 });
+});
