@@ -11,30 +11,10 @@ import { ethCall, withRpcBudget } from '../lib/ankrRpc.js';
 import { resolveRpcChainLoose, CHAINS } from '../lib/chains.js';
 import { extractAddress, firstUsableValue, freeTextParam } from '../lib/entityExtract.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
+import { KNOWN_TOKENS, decodeUint, decodeAbiString } from '../lib/knownTokens.js';
 
 const router = Router();
 
-// Contract addresses for the tokens a question most often names by symbol.
-// Each was checked live with symbol() on 2026-09-25.
-const KNOWN_TOKENS = {
-  eth: {
-    USDC: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-    USDT: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
-    DAI: '0x6B175474E89094C44Da98b954EedeAC495271d0F',
-    WETH: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
-    WBTC: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',
-    LINK: '0x514910771AF9Ca656af840dff83E8264EcF986CA',
-    UNI: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984',
-    SHIB: '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE',
-    PEPE: '0x6982508145454Ce325dDbE47a25d4ec3d2311933',
-    AAVE: '0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9',
-    MKR: '0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2',
-    STETH: '0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84',
-  },
-  base: {
-    USDC: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-  },
-};
 const TOKEN_NAMES = { TETHER: 'USDT', 'USD COIN': 'USDC', CHAINLINK: 'LINK', UNISWAP: 'UNI', 'WRAPPED ETHER': 'WETH', 'WRAPPED BITCOIN': 'WBTC', MAKER: 'MKR', 'LIDO STAKED ETHER': 'STETH' };
 
 const CHAIN_IDS = { 1: 'eth', 8453: 'base', 42161: 'arbitrum', 10: 'optimism', 137: 'polygon', 43114: 'avalanche' };
@@ -49,8 +29,8 @@ export function resolveChainId(value) {
 export function tokenFromText(text, chainKey) {
   const table = KNOWN_TOKENS[chainKey] ?? {};
   const upper = String(text ?? '').toUpperCase();
-  for (const [name, sym] of Object.entries(TOKEN_NAMES)) if (upper.includes(name)) return { symbol: sym, address: table[sym] ?? null };
-  for (const sym of Object.keys(table)) if (new RegExp(`(?:^|[^A-Z])${sym}(?:$|[^A-Z])`).test(upper)) return { symbol: sym, address: table[sym] };
+  for (const [name, sym] of Object.entries(TOKEN_NAMES)) if (upper.includes(name)) return { symbol: sym, address: table[sym]?.address ?? null };
+  for (const sym of Object.keys(table)) if (new RegExp(`(?:^|[^A-Z])${sym}(?:$|[^A-Z])`).test(upper)) return { symbol: sym, address: table[sym].address };
   return null;
 }
 
@@ -62,23 +42,6 @@ function parseBlock(value, text) {
   }
   const m = String(text ?? '').match(/\bblock(?:\s+(?:number|height))?\s*#?\s*([\d,_]{4,})/i);
   return m ? m[1].replace(/[,_]/g, '') : 'latest';
-}
-
-function decodeUint(hex) {
-  if (!hex || hex === '0x') return null;
-  return BigInt(hex);
-}
-
-function decodeString(hex) {
-  if (!hex || hex === '0x') return null;
-  const body = hex.slice(2);
-  try {
-    if (body.length === 64) return Buffer.from(body, 'hex').toString('utf8').replace(/\0+$/, '') || null;
-    const len = Number(BigInt(`0x${body.slice(64, 128)}`));
-    return Buffer.from(body.slice(128, 128 + len * 2), 'hex').toString('utf8') || null;
-  } catch {
-    return null;
-  }
 }
 
 export function formatUnits(raw, decimals) {
@@ -101,7 +64,7 @@ async function readSupply(chain, token, block) {
     ethCall(chain.segment, token, '0x313ce567', 'latest').catch(() => null),
     ethCall(chain.segment, token, '0x95d89b41', 'latest').catch(() => null),
   ]);
-  return { supply: decodeUint(supplyHex), decimals: decodeUint(decimalsHex), symbol: decodeString(symbolHex) };
+  return { supply: decodeUint(supplyHex), decimals: decodeUint(decimalsHex), symbol: decodeAbiString(symbolHex) };
 }
 
 async function handleTokenTotalSupply(req, res) {

@@ -32,6 +32,8 @@ async function handleTextGeneration(req, res) {
   const rawPrompt = firstUsableValue(
     params?.prompt, params?.instruction, params?.question, params?.query, params?.text,
     params?.input, params?.message, params?.content, params?.q,
+    // Found live 2026-09-24: "Write a short professional email ..." arrived as task=.
+    params?.task, params?.request, params?.brief,
   );
 
   if (!rawPrompt || !String(rawPrompt).trim()) {

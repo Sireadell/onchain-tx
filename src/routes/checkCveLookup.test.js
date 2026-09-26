@@ -237,8 +237,9 @@ test('cve-lookup: an unknown id is an honest answer, not a failure', async (t) =
   const res = await fetch(`${base}/cve-lookup?cve=CVE-9999-99999`);
   assert.equal(res.status, 200);
   const body = await res.json();
-  assert.equal(body.status, 'invalid_input');
-  assert.match(body.summary, /CVE-9999-99999 is not in the CVE registry/);
+  assert.equal(body.status, 'ok');
+  assert.equal(body.published, false);
+  assert.match(body.summary, /CVE-9999-99999 is not published in the CVE registry/);
 });
 
 test('cve-lookup: both sources down is the one real 502', async (t) => {

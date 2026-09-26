@@ -50,6 +50,8 @@ async function handleTextClassification(req, res) {
   const rawText = firstUsableValue(
     params?.text, params?.content, params?.input, params?.question, params?.query,
     params?.q, params?.message, params?.document, params?.sentence, params?.prompt,
+    // Found live 2026-09-24: a support ticket to classify arrived as ticket=.
+    params?.ticket, params?.review, params?.comment, params?.email,
   );
 
   if (!rawText || !String(rawText).trim()) {

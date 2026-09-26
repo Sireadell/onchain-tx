@@ -48,6 +48,7 @@ import checkPackageStatusRouter from './routes/checkPackageStatus.js';
 import checkUrlScanRouter from './routes/checkUrlScan.js';
 import checkCurrencyExchangeRouter from './routes/checkCurrencyExchange.js';
 import checkFxNowRouter from './routes/checkFxNow.js';
+import { isPlaceholder } from './lib/entityExtract.js';
 import checkTokenTotalSupplyRouter from './routes/checkTokenTotalSupply.js';
 import checkCorporateRegistryRouter from './routes/checkCorporateRegistry.js';
 import checkEmailSecurityRouter from './routes/checkEmailSecurity.js';
@@ -234,6 +235,20 @@ const corsMiddleware = (req, res, next) => {
 // untouched: FRAUD_DETECTION is the only intent already scoring ~0.99, and
 // it is the one endpoint with no `status` field at all — which is very
 // likely why it alone escaped this bug.
+// Drops parameters whose value is only a placeholder the Telegraph request
+// builder writes when it has nothing to send ("<nil>", "null"). Found live
+// 2026-09-26: /wallet-balance got token=<nil> in graded rounds and refused,
+// because the route read the raw param rather than through
+// firstUsableValue. Removing them here covers every route at once. Runs
+// after the request log, so the log still shows what actually arrived.
+export const placeholderParamMiddleware = (req, res, next) => {
+  for (const bag of [req.query, req.body]) {
+    if (!bag || typeof bag !== 'object' || Array.isArray(bag)) continue;
+    for (const key of Object.keys(bag)) if (isPlaceholder(bag[key])) delete bag[key];
+  }
+  next();
+};
+
 const answerFieldMiddleware = (req, res, next) => {
   const sendJson = res.json.bind(res);
   res.json = (body) => {
@@ -307,6 +322,7 @@ export function buildApp() {
   app.use(corsMiddleware);
   app.use(express.json());
   app.use(requestLogMiddleware);
+  app.use(placeholderParamMiddleware);
   app.use(answerFieldMiddleware);
   app.use(misrouteWatchMiddleware);
   // Mounted after the watcher so the watcher records what the caller was

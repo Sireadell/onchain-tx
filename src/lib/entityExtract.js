@@ -120,7 +120,7 @@ export function freeTextParam(params) {
   if (!params || typeof params !== 'object') return null;
   for (const key of FREE_TEXT_KEYS) {
     const value = params[key];
-    if (typeof value === 'string' && value.trim()) return value;
+    if (typeof value === 'string' && value.trim() && !isPlaceholder(value)) return value;
   }
   return null;
 }
@@ -149,10 +149,20 @@ export function freeTextParam(params) {
 // string the same way `??` treats null and undefined, and skips straight
 // to the next candidate, while a genuinely present value of any type
 // (a non-empty string, a number, an object) is still returned as-is.
+// Placeholder text the Telegraph request builder writes for a parameter it
+// has no value for. Found live 2026-09-26: /wallet-balance received
+// token=<nil> (Go's printed nil) in graded rounds and refused, when the
+// question was simply asking for the native balance.
+const PLACEHOLDER_RE = /^\s*(?:<nil>|nil|null|undefined|<null>|n\/a)\s*$/i;
+
+export function isPlaceholder(value) {
+  return typeof value === 'string' && PLACEHOLDER_RE.test(value);
+}
+
 export function firstUsableValue(...values) {
   for (const value of values) {
     if (typeof value === 'string') {
-      if (value.trim()) return value;
+      if (value.trim() && !isPlaceholder(value)) return value;
     } else if (value !== null && value !== undefined) {
       return value;
     }

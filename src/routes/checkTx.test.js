@@ -129,8 +129,9 @@ test('a successful Base transaction is described as Base, not Ethereum', async (
 
   const body = await (await fetch(`${base}/check-tx?chain=base&tx_hash=${hash}`)).json();
   assert.equal(body.status, 'confirmed');
-  assert.match(body.summary, /^Base transaction/);
-  assert.match(body.summary, /sent 1 ETH/);
+  assert.match(body.summary, /^The recipient was 0xb{40}/);
+  assert.match(body.summary, /carried 1 ETH in native value/);
+  assert.match(body.summary, /on Base \(transaction/);
   assert.doesNotMatch(body.summary, /^Ethereum transaction/);
 });
 
@@ -158,7 +159,7 @@ test('ERC-20 transfer selector is reported as canonical transfer', async (t) => 
 
   const body = await (await fetch(`${base}/check-tx?chain=eth&tx_hash=${hash}`)).json();
   assert.equal(body.method_signature, 'transfer(address,uint256)');
-  assert.match(body.summary, /called transfer/);
+  assert.match(body.summary, /the call invoked its transfer method/);
   assert.doesNotMatch(body.summary, /workMyDirefulOwner/);
 });
 
@@ -268,5 +269,5 @@ test('a bare "0x" transaction value answers zero instead of dropping the request
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.value_wei, '0');
-  assert.ok(body.summary.includes('sent 0 ETH'), body.summary);
+  assert.ok(body.summary.includes('carried 0 ETH in native value'), body.summary);
 });

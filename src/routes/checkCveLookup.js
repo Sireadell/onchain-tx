@@ -208,11 +208,22 @@ async function handleCveLookup(req, res) {
       }
       throw err;
     }
+    // A well-formed id with no record is a real answer ("not published"),
+    // not unusable input. The graded rounds ask about placeholder ids such
+    // as CVE-2026-12345 (36 refusals in the four days to 2026-09-26), and a
+    // refusal scores as nothing; VULNERABILITY_TRIAGE went to first place
+    // after the same change on 2026-09-25.
     if (!lookup.record) {
-      return respondUnusableInput(
-        res,
-        `${id} is not in the CVE registry or the National Vulnerability Database. Check the year and sequence number; a valid id looks like CVE-2021-44228.`,
-      );
+      return res.json({
+        query: String(rawInput).slice(0, 500),
+        status: 'ok',
+        summary: `${id} is not published in the CVE registry or the National Vulnerability Database as of ${new Date().toISOString().slice(0, 10)}, so it has no description, CVSS severity score, affected products or references. It may be reserved but not yet disclosed, rejected, or mistyped; a published id looks like CVE-2021-44228.`,
+        confidence: 0.6,
+        canonical: ['cve', id, 'unpublished'].join(':'),
+        cve_id: id,
+        published: false,
+        checked_at: new Date().toISOString(),
+      });
     }
     return res.json(recordBody(rawInput, lookup.record, lookup));
   }

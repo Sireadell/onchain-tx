@@ -286,6 +286,40 @@ export async function withQuestionFallback(run, text, fallbackText) {
   }
 }
 
+// Second geocoder for landmarks, airports and regions Open-Meteo's
+// place-name search does not carry. Found live: "Eiffel Tower", "Los Angeles
+// International Airport (LAX)" and "Outer Banks of North Carolina" all came
+// back as no location found. OpenStreetMap Nominatim asks for an
+// identifying User-Agent and at most one request a second; this runs only
+// after every Open-Meteo candidate has missed, so traffic stays tiny.
+const LANDMARK_RE = /\b(?:airport|international|tower|museum|cathedral|church|palace|castle|stadium|arena|station|terminal|port|harbou?r|bridge|park|beach|island|islands|banks|coast|bay|peninsula|lake|river|mount|mountain|valley|canyon|county|university|college|hospital|monument|square|landmark)\b/i;
+
+async function geocodeOsm(input) {
+  if (!LANDMARK_RE.test(String(input ?? ''))) return null;
+  const q = String(input ?? '').replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+  if (!q) return null;
+  const cacheKey = `osm:${q.toLowerCase()}`;
+  const cached = geocodeCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6_000);
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1&addressdetails=0`, {
+      headers: { 'User-Agent': 'TxLens-Telegraph-miner/1.0 (https://github.com/Sireadell/onchain-tx)', Accept: 'application/json' },
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const hit = (await res.json())?.[0];
+    const resolved = hit ? { name: q, latitude: Number(hit.lat), longitude: Number(hit.lon), timezone: null } : null;
+    geocodeCache.set(cacheKey, resolved, GEOCODE_CACHE_TTL_MS);
+    return resolved;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function resolveLocation(input) {
   // Coordinates win over any place name in the same sentence, and cost no
   // geocode call at all. Covers both a bare "lat,lon" and the long form
@@ -336,6 +370,8 @@ export async function resolveLocation(input) {
     geocodeCache.set(cacheKey, resolved, GEOCODE_CACHE_TTL_MS);
     return resolved;
   }
+  const osm = await geocodeOsm(input);
+  if (osm) return osm;
   throw new WeatherLookupError(`no location found matching '${input}'`);
 }
 
@@ -1009,6 +1045,8 @@ export async function resolveCurrentLocation(input) {
       };
     }
   }
+  const osm = await geocodeOsm(input);
+  if (osm) return osm;
   if (lastUpstream) throw lastUpstream;
   throw new WeatherLookupError(`no location found matching '${input}'`);
 }

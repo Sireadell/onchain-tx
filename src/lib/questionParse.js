@@ -145,6 +145,8 @@ const LAT_LON_RE = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/;
 const LABELLED_LAT_RE = /\blat(?:itude)?\b[\s:=]*(-?\d+(?:\.\d+)?)\s*(?:°\s*)?([NnSs])?/;
 const LABELLED_LON_RE = /\b(?:lon(?:g(?:itude)?)?|lng)\b[\s:=]*(-?\d+(?:\.\d+)?)\s*(?:°\s*)?([EeWw])?/;
 
+const HEMISPHERE_RE = /(\d+(?:\.\d+)?)\s*°?\s*([NnSs])\b[\s,;]*(\d+(?:\.\d+)?)\s*°?\s*([EeWw])\b/;
+
 function applyBearing(value, bearing, negativeLetters) {
   if (!bearing) return value;
   const negative = negativeLetters.includes(bearing.toLowerCase());
@@ -164,6 +166,15 @@ export function parseCoordinates(text) {
     const latitude = Number(bare[1]);
     const longitude = Number(bare[2]);
     return inRange(latitude, longitude) ? { latitude, longitude } : null;
+  }
+
+  // "34.0522 N, 118.2437 W" or "34.0522° N, 118.2437° W", seen live
+  // 2026-09-21 and 2026-09-24 on WEATHER_FORECAST_VERIFY and refused.
+  const hemi = HEMISPHERE_RE.exec(text);
+  if (hemi) {
+    const latitude = applyBearing(Number(hemi[1]), hemi[2], ['s']);
+    const longitude = applyBearing(Number(hemi[3]), hemi[4], ['w']);
+    if (inRange(latitude, longitude)) return { latitude, longitude };
   }
 
   const lat = LABELLED_LAT_RE.exec(text);

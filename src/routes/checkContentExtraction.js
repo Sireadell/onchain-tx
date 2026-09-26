@@ -28,7 +28,10 @@ const BARE_HOST_RE = /(?:^|[\s:(,])((?:[a-z0-9-]+\.)+(?:com|org|net|edu|gov|io|a
 
 // The passage path only runs on text long enough to be a passage. A short
 // non-URL value is a mistyped URL and gets the URL guidance instead.
-const MIN_PASSAGE_CHARS = 40;
+// Found live 2026-09-22: graded rounds send short product lines such as
+// "Organic Gala Apples - 3 lbs @ $2.99/lb" (38 characters) as the text to
+// extract from, which a 40-character floor refused.
+const MIN_PASSAGE_CHARS = 12;
 const MAX_PASSAGE_CHARS = 8_000;
 const PASSAGE_BUDGET_MS = 9_000;
 const SUMMARY_TEXT_CHARS = 1_200;
@@ -140,12 +143,22 @@ async function handleContentExtraction(req, res) {
 
   let url = null;
   for (const value of values) {
+    // Prose of eight or more words with no http(s) URL in it is a passage,
+    // even when a word in it looks like a bare domain. Found live
+    // 2026-09-22: a job advert sent as the text was read as a hostname and
+    // fetched instead of extracted.
+    if (!URL_RE.test(value) && value.trim().split(/\s+/).length >= 8) continue;
     url = extractUrl(value);
     if (url) break;
   }
 
   if (!url) {
-    if (String(rawValue).trim().length >= MIN_PASSAGE_CHARS) return answerPassage(res, rawValue);
+    // A short value is a passage only when it has something to extract
+    // (a number, a price) and reads as words, so "not a url" and
+    // "file:///etc/passwd" still get the URL guidance.
+    const v = String(rawValue).trim();
+    const passage = v.length >= 40 || (v.length >= MIN_PASSAGE_CHARS && /\s/.test(v) && /[\d$€£]/.test(v) && !/^[a-z][a-z0-9+.-]*:/i.test(v));
+    if (passage) return answerPassage(res, rawValue);
     return respondUnusableInput(
       res,
       `I cannot extract content because ${quoteParam(rawValue)} does not contain a valid http or https URL. Pass a full URL, including the scheme, as the url parameter.`,
