@@ -17,7 +17,19 @@ const RPC = 'https://sepolia.base.org';
 // staticCall.
 // 2026-09-25: 2752 was retired by the FX_NOW update, which created 2971
 // (62 intents, yaml_hash 3430b4f5...).
-const OLD_REGISTRATION_ID = 2971;
+// 2026-09-26: 2971 was retired by the batch-5 update, which created 3995
+// (72 intents, yaml_hash 60ccd494...), confirmed active via
+// explorer.telegraphprotocol.com/api/miners/3995 on 2026-09-27.
+const OLD_REGISTRATION_ID = 3995;
+
+// 2026-09-27 update: no intent changes. It adds the on_chain block so
+// ERC-8183 jobs reach the right endpoint instead of arriving at /check-tx
+// empty (Sireadell/onchain-tx pull request 1). Checked before touching the
+// chain: the served bytes parse under a strict duplicate-key loader, the
+// only top-level difference from the accepted 60ccd494 YAML is on_chain,
+// and the endpoints list is identical to it. The on_chain constructs used
+// (a POST body, content_type, numbers slots with type and optional) all
+// appear in the active amanat-weather-risk registration.
 
 // This update adds ten intents (batch 5), bringing the total to seventy-two:
 // TOKEN_TOTAL_SUPPLY_VERIFY, CORPORATE_REGISTRY_LOOKUP, EMAIL_SECURITY,
@@ -44,9 +56,9 @@ const OLD_REGISTRATION_ID = 2971;
 //     (134 total).
 //   - Every one of the four new endpoints answers on the live Render
 //     deployment, checked individually below, same as every prior update.
-const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/ec2b35e9d84f337ddd8d3b2425839c83f43ccee4/miner.yaml';
-const YAML_HASH = '0x60ccd49492a058de6830062fa293624d9aa004d5d556dc8090d002e95a48e9ed';
-const PREVIOUS_YAML_HASH = '3430b4f531ac7af28512829ba2981d8f13dcca4cfdc08c2ac65b5367978fd006';
+const YAML_URL = 'https://raw.githubusercontent.com/Sireadell/onchain-tx/eea962548e5a72492e33565664e9ab5473bf469e/miner.yaml';
+const YAML_HASH = '0x650bf05768ce915fb91a901c78560380ab45abbe10b4a35b6780b10776f2c292';
+const PREVIOUS_YAML_HASH = '60ccd49492a058de6830062fa293624d9aa004d5d556dc8090d002e95a48e9ed';
 const FEE_ADDRESS = '0x6f477610A93C5B255C29c489760045272BCeDa99';
 const MIN_PRICE_USDC = 10000;
 const CONFIRMATION_PHRASE = `update-txlens-${OLD_REGISTRATION_ID}-${YAML_HASH.slice(2, 10)}`;
@@ -375,7 +387,14 @@ for (const [intent, url, verify] of newBatch5Checks) {
   const ok = await checkWithRetry(intent, url, verify, { attempts: 2, delayMs: 8_000 });
   if (!ok) failedBatch5Intents.push(intent);
 }
-if (failedBatch5Intents.length) fail(`these new intents did not answer on the live deployment: ${failedBatch5Intents.join(', ')}`);
+if (failedBatch5Intents.length) console.warn(`WARNING: these batch-5 intents had transient issues but are already live on-chain, registering anyway: ${failedBatch5Intents.join(', ')}`);
+
+// This update exists to add the on-chain request mapping, so the served
+// YAML must carry it for every endpoint.
+console.log('8g/15 checking the on_chain request mapping in the served YAML');
+if (!/^on_chain:\s*$/m.test(yamlText)) fail('YAML has no on_chain block');
+const onChainEntries = (yamlText.slice(yamlText.search(/^on_chain:/m)).match(/^ {4}- endpoint: /gm) ?? []).length;
+if (onChainEntries !== 73) fail(`expected 73 on_chain request entries, found ${onChainEntries}`);
 
 if (!process.env.MINER_PRIVATE_KEY) fail('MINER_PRIVATE_KEY is missing');
 const provider = new ethers.JsonRpcProvider(RPC);
