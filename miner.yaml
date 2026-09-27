@@ -2233,3 +2233,370 @@ limitations:
     property: length
     value_num: 42
     operator: eq
+
+# Lets a contract reach txlens through an ERC-8183 job. Without a request
+# mapping the node calls the first endpoint in this file with no parameters,
+# so every job for any intent arrived at /check-tx empty and answered "no
+# transaction hash was supplied". Reported by the Amanat miner author, whose
+# storm contract hit it twice (Sireadell/onchain-tx pull request 1,
+# 2026-09-07). The shape follows telegraphprotocol/telegraph-examples
+# frontend/yaml/example-miner.yaml and the body form of the live, active
+# amanat-weather-risk registration. The node matches each entry's endpoint
+# as a substring of the endpoint path and the longest match wins, so
+# weather-forecast-verify is never taken for weather-forecast.
+# Slot convention for callers: strings.0 is the main input (a tx hash,
+# address, location, question or text), strings.1 and strings.2 are the
+# second and third inputs, numbers.0 is a count or an amount.
+on_chain:
+  description: >-
+    The finding in plain language, the answer status, and confidence as an
+    integer a contract can threshold on.
+  transform: direct
+  min_price_usdc: 0.01
+  fields:
+    strings:
+      - index: 0
+        name: summary
+        description: The finding in plain language, verdict first.
+        source_path: summary
+      - index: 1
+        name: status
+        description: ok when the question was answered, otherwise why not, for example invalid_input.
+        source_path: status
+    integers:
+      - index: 0
+        name: confidence_x10000
+        description: Confidence from 0 to 1, multiplied by 10000.
+        source_path: confidence
+        multiplier: 10000
+  request:
+    - endpoint: fraud-query
+      method: POST
+      content_type: application/json
+      body:
+        query: { source: strings.0 }
+    - endpoint: check-tx
+      method: GET
+      query_params:
+        tx_hash: { source: strings.0 }
+        chain: { source: strings.1, optional: true }
+    - endpoint: gas-price
+      method: GET
+      query_params:
+        chain: { source: strings.0 }
+    - endpoint: wallet-balance
+      method: GET
+      query_params:
+        address: { source: strings.0 }
+        chain: { source: strings.1, optional: true }
+        token: { source: strings.2, optional: true }
+    - endpoint: token-holders
+      method: GET
+      query_params:
+        token: { source: strings.0 }
+        chain: { source: strings.1, optional: true }
+    - endpoint: tvl
+      method: GET
+      query_params:
+        protocol: { source: strings.0 }
+    - endpoint: crypto-price
+      method: GET
+      query_params:
+        coin_id: { source: strings.0 }
+    - endpoint: stock-price
+      method: GET
+      query_params:
+        ticker: { source: strings.0 }
+        date: { source: strings.1, optional: true }
+    - endpoint: ssl-check
+      method: GET
+      query_params:
+        domain: { source: strings.0 }
+    - endpoint: weather-forecast
+      method: GET
+      query_params:
+        location: { source: strings.0 }
+        days: { source: numbers.0, type: int, optional: true }
+    - endpoint: storm-alert
+      method: GET
+      query_params:
+        location: { source: strings.0 }
+        hours: { source: numbers.0, type: int, optional: true }
+    - endpoint: ip-geolocate
+      method: GET
+      query_params:
+        ip: { source: strings.0 }
+    - endpoint: academic-search
+      method: GET
+      query_params:
+        topic: { source: strings.0 }
+        limit: { source: numbers.0, type: int, optional: true }
+    - endpoint: web-search
+      method: GET
+      query_params:
+        query: { source: strings.0 }
+        max_results: { source: numbers.0, type: int, optional: true }
+    - endpoint: content-extract
+      method: GET
+      query_params:
+        url: { source: strings.0 }
+    - endpoint: text-classify
+      method: GET
+      query_params:
+        text: { source: strings.0 }
+        labels: { source: strings.1, optional: true }
+    - endpoint: text-generate
+      method: GET
+      query_params:
+        prompt: { source: strings.0 }
+    - endpoint: language-generate
+      method: GET
+      query_params:
+        text: { source: strings.0 }
+        target: { source: strings.1, optional: true }
+    - endpoint: research-synthesis
+      method: GET
+      query_params:
+        query: { source: strings.0 }
+    - endpoint: cross-chain-state
+      method: GET
+      query_params:
+        address: { source: strings.0 }
+        chains: { source: strings.1, optional: true }
+    - endpoint: event-outcome
+      method: GET
+      query_params:
+        query: { source: strings.0 }
+    - endpoint: weather-check
+      method: GET
+      query_params:
+        location: { source: strings.0 }
+    - endpoint: language-translate
+      method: GET
+      query_params:
+        text: { source: strings.0 }
+        target: { source: strings.1, optional: true }
+    - endpoint: chat-complete
+      method: GET
+      query_params:
+        message: { source: strings.0 }
+    - endpoint: news-search
+      method: GET
+      query_params:
+        query: { source: strings.0 }
+        max_results: { source: numbers.0, type: int, optional: true }
+    - endpoint: news-headlines
+      method: GET
+      query_params:
+        topic: { source: strings.0 }
+        max_results: { source: numbers.0, type: int, optional: true }
+    - endpoint: fact-check
+      method: GET
+      query_params:
+        claim: { source: strings.0 }
+    - endpoint: sentiment-analyze
+      method: GET
+      query_params:
+        text: { source: strings.0 }
+    - endpoint: content-moderate
+      method: GET
+      query_params:
+        text: { source: strings.0 }
+    - endpoint: cve-lookup
+      method: GET
+      query_params:
+        cve: { source: strings.0 }
+    - endpoint: telegraph-knowledge
+      method: GET
+      query_params:
+        question: { source: strings.0 }
+    - endpoint: text-summarize
+      method: GET
+      query_params:
+        text: { source: strings.0 }
+        length: { source: strings.1, optional: true }
+    - endpoint: chatbot-conversation
+      method: GET
+      query_params:
+        message: { source: strings.0 }
+    - endpoint: semantic-similarity
+      method: GET
+      query_params:
+        text1: { source: strings.0 }
+        text2: { source: strings.1, optional: true }
+    - endpoint: grammar-spell-check
+      method: GET
+      query_params:
+        text: { source: strings.0 }
+    - endpoint: ai-text-detect
+      method: GET
+      query_params:
+        text: { source: strings.0 }
+    - endpoint: research-query
+      method: GET
+      query_params:
+        query: { source: strings.0 }
+        max_results: { source: numbers.0, type: int, optional: true }
+    - endpoint: threat-intelligence
+      method: GET
+      query_params:
+        indicator: { source: strings.0 }
+    - endpoint: package-status
+      method: GET
+      query_params:
+        tracking_number: { source: strings.0 }
+    - endpoint: url-scan
+      method: GET
+      query_params:
+        url: { source: strings.0 }
+    - endpoint: currency-exchange
+      method: GET
+      query_params:
+        from: { source: strings.0 }
+        to: { source: strings.1, optional: true }
+        amount: { source: numbers.0, type: float, optional: true }
+    - endpoint: fx-now
+      method: GET
+      query_params:
+        from: { source: strings.0 }
+        to: { source: strings.1, optional: true }
+        amount: { source: numbers.0, type: float, optional: true }
+    - endpoint: sanctions-screening
+      method: GET
+      query_params:
+        name: { source: strings.0 }
+    - endpoint: vulnerability-triage
+      method: GET
+      query_params:
+        cve: { source: strings.0 }
+    - endpoint: sports-score
+      method: GET
+      query_params:
+        team: { source: strings.0 }
+    - endpoint: game-result
+      method: GET
+      query_params:
+        team: { source: strings.0 }
+    - endpoint: route-eta
+      method: GET
+      query_params:
+        origin: { source: strings.0 }
+        destination: { source: strings.1, optional: true }
+        mode: { source: strings.2, optional: true }
+    - endpoint: regulatory-filing-monitor
+      method: GET
+      query_params:
+        company: { source: strings.0 }
+    - endpoint: credit-score-verify
+      method: GET
+      query_params:
+        company: { source: strings.0 }
+    - endpoint: macro-economic-indicator
+      method: GET
+      query_params:
+        country: { source: strings.0 }
+        economic_indicator: { source: strings.1, optional: true }
+    - endpoint: weather-forecast-verify
+      method: GET
+      query_params:
+        location: { source: strings.0 }
+        date: { source: strings.1, optional: true }
+    - endpoint: customer-ticket-resolution
+      method: GET
+      query_params:
+        ticket: { source: strings.0 }
+    - endpoint: return-policy-verify
+      method: GET
+      query_params:
+        retailer: { source: strings.0 }
+        product: { source: strings.1, optional: true }
+    - endpoint: task-execution-quality
+      method: GET
+      query_params:
+        task: { source: strings.0 }
+        result: { source: strings.1, optional: true }
+    - endpoint: carrier-serviceability
+      method: GET
+      query_params:
+        zip_code: { source: strings.0 }
+        carrier: { source: strings.1, optional: true }
+    - endpoint: delivery-window-verify
+      method: GET
+      query_params:
+        destination: { source: strings.0 }
+        carrier: { source: strings.1, optional: true }
+    - endpoint: payment-method-verify
+      method: GET
+      query_params:
+        card_number: { source: strings.0 }
+    - endpoint: invoice-ledger-reconcile
+      method: GET
+      query_params:
+        description: { source: strings.0 }
+    - endpoint: assess-wallet
+      method: GET
+      query_params:
+        wallet: { source: strings.0 }
+    - endpoint: url-safe
+      method: GET
+      query_params:
+        url: { source: strings.0 }
+    - endpoint: malware-detection
+      method: GET
+      query_params:
+        indicator: { source: strings.0 }
+    - endpoint: dns-check
+      method: GET
+      query_params:
+        hostname: { source: strings.0 }
+    - endpoint: threat-ip-reputation
+      method: GET
+      query_params:
+        domain: { source: strings.0 }
+    - endpoint: token-total-supply
+      method: GET
+      query_params:
+        token: { source: strings.0 }
+        chain: { source: strings.1, optional: true }
+        block: { source: numbers.0, type: int, optional: true }
+    - endpoint: corporate-registry
+      method: GET
+      query_params:
+        company: { source: strings.0 }
+        jurisdiction: { source: strings.1, optional: true }
+    - endpoint: email-security
+      method: GET
+      query_params:
+        domain: { source: strings.0 }
+    - endpoint: mining-hashprice
+      method: GET
+      query_params:
+        height: { source: strings.0 }
+    - endpoint: security-review
+      method: GET
+      query_params:
+        code: { source: strings.0 }
+    - endpoint: llm-output-evaluation
+      method: GET
+      query_params:
+        output: { source: strings.0 }
+        reference: { source: strings.1, optional: true }
+    - endpoint: contract-obligation-audit
+      method: GET
+      query_params:
+        contract: { source: strings.0 }
+        facts: { source: strings.1, optional: true }
+    - endpoint: code-generation
+      method: GET
+      query_params:
+        instruction: { source: strings.0 }
+        language: { source: strings.1, optional: true }
+    - endpoint: code-review
+      method: GET
+      query_params:
+        code: { source: strings.0 }
+        language: { source: strings.1, optional: true }
+    - endpoint: text-authenticity
+      method: GET
+      query_params:
+        text: { source: strings.0 }
