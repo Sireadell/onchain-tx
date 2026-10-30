@@ -141,7 +141,51 @@ export function resetRpcCache() {
   cache.clear();
 }
 
+// DWELLIR FIRST, ANKR AS BACKUP. Dwellir (free developer plan, 100 req/s) is
+// tried first on the chains it serves. Anything that goes wrong there, or an
+// empty answer for a transaction/receipt lookup (could be a block outside
+// Dwellir's kept history), falls through to the Ankr path below unchanged.
+// Off unless DWELLIR_API_KEY is set. Host names live-verified 2026-10-30;
+// Base and Optimism only answer on the archive host, Avalanche is not served.
+const DWELLIR_HOSTS = {
+  eth: 'api-ethereum-mainnet.n.dwellir.com',
+  base: 'api-base-mainnet-archive.n.dwellir.com',
+  arbitrum: 'api-arbitrum-mainnet-archive.n.dwellir.com',
+  optimism: 'api-optimism-mainnet-archive.n.dwellir.com',
+  polygon: 'api-polygon-mainnet.n.dwellir.com',
+};
+const DWELLIR_CALL_TIMEOUT_MS = Number(process.env.DWELLIR_CALL_TIMEOUT_MS) || 3_000;
+const EMPTY_MEANS_FALLBACK = new Set(['eth_getTransactionByHash', 'eth_getTransactionReceipt']);
+
+async function tryDwellirRpc(chainSegment, method, params) {
+  const key = process.env.DWELLIR_API_KEY;
+  const host = DWELLIR_HOSTS[chainSegment];
+  if (!key || !host) return { used: false };
+  try {
+    checkBudget();
+    const budget = budgetContext.getStore();
+    const remaining = budget ? Math.max(1, budget.deadlineAt - Date.now()) : DWELLIR_CALL_TIMEOUT_MS;
+    const res = await fetch(`https://${host}/${key}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+      signal: AbortSignal.timeout(Math.min(DWELLIR_CALL_TIMEOUT_MS, remaining)),
+    });
+    if (!res.ok) return { used: false };
+    const body = await res.json();
+    if (body.error) return { used: false };
+    if (body.result == null && EMPTY_MEANS_FALLBACK.has(method)) return { used: false };
+    return { used: true, result: body.result };
+  } catch (err) {
+    if (err instanceof RpcBudgetExceededError) throw err;
+    return { used: false };
+  }
+}
+
 async function fetchAnkrRpc(chainSegment, method, params) {
+  const viaDwellir = await tryDwellirRpc(chainSegment, method, params);
+  if (viaDwellir.used) return viaDwellir.result;
+
   const apiKey = requireApiKey();
 
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {

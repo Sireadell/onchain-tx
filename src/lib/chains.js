@@ -117,7 +117,8 @@ export function resolveChainLoose(input) {
 export function resolveRpcChainLoose(input) {
   const chain = resolveChainLoose(input);
   if (!chain || !chain.segment) return null;
-  if (chain.segment === 'optimism' && process.env.ANKR_ENABLE_OPTIMISM !== 'true') return null;
+  // Dwellir serves Optimism, so a Dwellir key also switches Optimism RPC on.
+  if (chain.segment === 'optimism' && process.env.ANKR_ENABLE_OPTIMISM !== 'true' && !process.env.DWELLIR_API_KEY) return null;
   return chain;
 }
 
