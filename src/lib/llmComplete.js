@@ -156,7 +156,8 @@ async function attempt(systemPrompt, userContent, { budgetMs, maxTokens, disable
       if (status === 401) throw new LlmCompleteError('perplexity rejected our key', { status });
       if (status === 402) throw new LlmCompleteError('the perplexity key has no credit left', { status });
       if (status === 429) throw new LlmCompleteError('perplexity is rate limiting us', { status, retryable: true });
-      throw new LlmCompleteError(`perplexity request failed with status ${status}`, { status, retryable: status >= 500 });
+      const why = String(errBody?.error?.message ?? errBody?.detail ?? '').slice(0, 160);
+      throw new LlmCompleteError(`perplexity request failed with status ${status}${why ? `: ${why}` : ''}`, { status, retryable: status >= 500 });
     }
 
     const body = await res.json();

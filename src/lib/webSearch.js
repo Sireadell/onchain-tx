@@ -162,7 +162,8 @@ async function callPerplexityRaw(query, options) {
       if (res.status === 401) throw new WebSearchError('perplexity rejected our key');
       if (res.status === 402) throw new WebSearchError('the perplexity key has no credit left');
       if (res.status === 429) throw new WebSearchError('perplexity is rate limiting us');
-      throw new WebSearchError(`perplexity request failed with status ${res.status}`);
+      const why = String(errBody?.error?.message ?? errBody?.detail ?? '').slice(0, 160);
+      throw new WebSearchError(`perplexity request failed with status ${res.status}${why ? `: ${why}` : ''}`);
     }
 
     const body = await res.json();
