@@ -83,20 +83,60 @@ async function fetchBlockscout(host, path) {
 // Returns { holdersCount, name, symbol, decimals } for an ERC-20 token, or
 // throws TokenNotFoundError if the address isn't a token Blockscout knows
 // about on that chain.
-export async function getTokenInfo(host, tokenAddress) {
+// Blockscout has started answering some chains with a bot-check page (HTTP
+// 403), so when it fails for any reason other than "no such token", the
+// holder count is read from Ankr's own indexer using the key we already have.
+// `ankrChain` is the chain segment ('base', 'eth', ...); leave it out to
+// skip the fallback.
+async function ankrHoldersCount(ankrChain, tokenAddress) {
+  const apiKey = process.env.ANKR_API_KEY;
+  if (!ankrChain || !apiKey) return null;
+  checkBudget();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), BLOCKSCOUT_CALL_TIMEOUT_MS);
+  try {
+    const res = await fetch(`https://rpc.ankr.com/multichain/${apiKey}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: 1, method: 'ankr_getTokenHoldersCount',
+        params: { blockchain: ankrChain, contractAddress: tokenAddress, pageSize: 1 },
+      }),
+      signal: controller.signal,
+    });
+    if (res.status !== 200) return null;
+    const body = await res.json();
+    const latest = body?.result?.holderCountHistory?.[0]?.holderCount;
+    return latest != null ? { holdersCount: latest } : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function getTokenInfo(host, tokenAddress, ankrChain) {
   const key = `${host}:${tokenAddress}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.storedAt < CACHE_TTL_MS) {
     return hit.value;
   }
 
-  const body = await fetchBlockscout(host, `/api/v2/tokens/${tokenAddress}`);
-  const value = {
-    holdersCount: body.holders_count ?? null,
-    name: body.name ?? null,
-    symbol: body.symbol ?? null,
-    decimals: body.decimals ?? null,
-  };
+  let value;
+  try {
+    const body = await fetchBlockscout(host, `/api/v2/tokens/${tokenAddress}`);
+    value = {
+      holdersCount: body.holders_count ?? null,
+      name: body.name ?? null,
+      symbol: body.symbol ?? null,
+      decimals: body.decimals ?? null,
+    };
+  } catch (err) {
+    if (err instanceof TokenNotFoundError) throw err;
+    const fallback = await ankrHoldersCount(ankrChain, tokenAddress);
+    if (!fallback) throw err;
+    value = { holdersCount: fallback.holdersCount, name: null, symbol: null, decimals: null };
+  }
 
   cache.set(key, { value, storedAt: Date.now() });
   if (cache.size > MAX_CACHE_ENTRIES) {

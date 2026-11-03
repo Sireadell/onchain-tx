@@ -51,7 +51,7 @@ export async function handleTokenHolders(req, res) {
 
   let info;
   try {
-    info = await getTokenInfo(chain.blockscoutHost, token);
+    info = await getTokenInfo(chain.blockscoutHost, token, chain.segment);
   } catch (err) {
     if (err instanceof TokenNotFoundError) {
       // "No token found here" is true but says nothing about what is

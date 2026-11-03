@@ -80,3 +80,25 @@ test('token-holders: unknown token address returns not_found, not an error', asy
   assert.equal(body.status, 'not_found');
   assert.equal(body.holders_count, null);
 });
+
+test('token-holders: a Blockscout bot-check 403 falls back to the Ankr holder count', async (t) => {
+  resetBlockscoutCache();
+  process.env.ANKR_API_KEY = 'k';
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, ...rest) => {
+    const u = String(url);
+    if (u.includes('.blockscout.com')) return new Response('Just a moment', { status: 403 });
+    if (u.includes('rpc.ankr.com/multichain')) {
+      return new Response(JSON.stringify({ result: { holderCountHistory: [{ holderCount: 4321 }] } }), { status: 200 });
+    }
+    return original(url, ...rest);
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/token-holders?chain=base&token=${TOKEN}`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.holders_count, 4321);
+  assert.match(body.summary, /has 4321 holders/);
+});
