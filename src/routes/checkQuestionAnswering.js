@@ -9,6 +9,8 @@ import { firstUsableValue, freeTextParam } from '../lib/entityExtract.js';
 import { respondUnusableInput } from '../lib/unusableInput.js';
 import { llmComplete, hasLlmProvider, capInput, frameInput, INJECTION_GUARD } from '../lib/llmComplete.js';
 import { wikiAnswer } from '../lib/wikiAnswer.js';
+import { searchWeb } from '../lib/webSearch.js';
+import { consensusConfigured } from '../lib/consensus.js';
 
 const router = Router();
 
@@ -24,6 +26,28 @@ async function handleQuestion(req, res) {
   }
   const { text: capped } = capInput(question, 2_000);
   const checkedAt = new Date().toISOString();
+
+  // Two or more independent voters must agree before an answer is stated.
+  if (consensusConfigured()) {
+    try {
+      const out = await searchWeb(capped, { budgetMs: 14_000, maxResults: 5 });
+      if (out?.provider === 'consensus' && out.answer) {
+        return res.json({
+          status: 'ok', summary: out.answer, confidence: out.votes?.agree === out.votes?.total ? 0.92 : 0.8,
+          canonical: ['question-answering', 'consensus'].join(':'), votes: out.votes,
+          source: `${out.votes?.agree} of ${out.votes?.total} independent sources agree`, checked_at: checkedAt,
+        });
+      }
+      if (out?.inconclusive) {
+        return res.json({
+          status: 'ok', summary: `The sources I checked do not agree on an answer to "${capped.slice(0, 160)}", so I am not stating one.`,
+          confidence: 0.2, canonical: ['question-answering', 'no-consensus'].join(':'), votes: out.votes, checked_at: checkedAt,
+        });
+      }
+    } catch {
+      // Too few voters answered: fall through to the older routes below.
+    }
+  }
 
   if (hasLlmProvider()) {
     try {

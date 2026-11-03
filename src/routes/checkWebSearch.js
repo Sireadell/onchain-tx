@@ -60,7 +60,7 @@ async function handleWebSearch(req, res) {
       status: 'error',
       summary: 'Web search is not configured on this deployment.',
       confidence: 0,
-      error: 'neither PERPLEXITY_API_KEY nor TAVILY_API_KEY is set',
+      error: 'no search provider key is set (TAVILY_API_KEY, GROQ_API_KEY, GEMINI_API_KEY or PERPLEXITY_API_KEY)',
     });
   }
 
@@ -88,6 +88,22 @@ async function handleWebSearch(req, res) {
   // matched. A provider that wrote an answer but listed no sources still
   // answered the question, and discarding that for having an empty source
   // list would throw away a scoring answer over presentation.
+  if (result.inconclusive) {
+    const positions = (result.votes?.positions ?? []).map((v) => `${v.name}: ${v.short}`).join(' | ');
+    return res.json({
+      query: rawQuery,
+      status: 'ok',
+      summary: `The sources I checked do not agree on an answer to ${quoteParam(rawQuery)}, so I am not stating one. Their positions: ${positions}.`,
+      confidence: 0.2,
+      canonical: ['web-search', searchQuery, 'no-consensus'].join(':'),
+      search_query: searchQuery,
+      topic: result.topic,
+      result_count: result.results.length,
+      sources: result.results,
+      provider: result.provider,
+      checked_at: new Date().toISOString(),
+    });
+  }
   if (!result.answer) {
     return respondUnusableInput(
       res,
@@ -132,6 +148,7 @@ async function handleWebSearch(req, res) {
     result_count: result.results.length,
     sources: result.results,
     provider: result.provider,
+    votes: result.votes ?? null,
     // Only Perplexity reports a per-question price. Surfaced so the running
     // cost of this intent is visible in the logs rather than only on a bill.
     cost_usd: result.cost_usd ?? null,

@@ -29,6 +29,8 @@
 //    beat it on data, only on wording.
 
 import { guarded, SpendCapError } from './spendGuard.js';
+import { consensusSearch, consensusConfigured } from './consensus.js';
+import { providerDisabled, disableProvider } from './llmProviders.js';
 
 const PERPLEXITY_URL = 'https://api.perplexity.ai/v1/agent';
 const TAVILY_URL = 'https://api.tavily.com/search';
@@ -80,7 +82,7 @@ const ANSWER_STYLE = 'You are answering a factual question for an automated syst
 export class WebSearchError extends Error {}
 
 export function hasWebSearchProvider() {
-  return Boolean(process.env.PERPLEXITY_API_KEY || process.env.TAVILY_API_KEY);
+  return Boolean(process.env.PERPLEXITY_API_KEY || process.env.TAVILY_API_KEY || process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY);
 }
 
 // Whatever is left of the shared budget, capped so the first provider
@@ -119,10 +121,14 @@ async function postJson(url, { key, body, signal }) {
 // Every Perplexity search passes the spend guard (cache, daily and per-caller
 // caps). A cap hit reads like any other provider failure to searchWeb().
 async function callPerplexity(query, options) {
+  if (providerDisabled('perplexity')) throw new WebSearchError('perplexity is paused after a refusal');
   try {
     return await guarded(JSON.stringify(['search', query]), () => callPerplexityRaw(query, options), { searches: true });
   } catch (err) {
     if (err instanceof SpendCapError) throw new WebSearchError(err.message);
+    // No credit, a refused key or a forbidden plan will not fix itself in the
+    // next second, so stop paying a round trip for it on every question.
+    if (/no credit|rejected our key|status 40[123]/.test(String(err?.message))) disableProvider('perplexity');
     throw err;
   }
 }
@@ -285,10 +291,26 @@ export async function searchWeb(query, options = {}) {
     ?? (Number.isFinite(envBudget) && envBudget > 0 ? envBudget : TOTAL_BUDGET_MS);
   const deadline = Date.now() + total;
 
+  // With Tavily plus Groq and/or Gemini configured, an answer must be agreed by
+  // at least two voters. Disagreement is reported, not guessed. If too few
+  // voters answered, the older best-effort chain below still runs.
+  if (consensusConfigured()) {
+    const outcome = await consensusSearch(query, { topic, maxResults, budgetMs: remainingMs({ deadline }, 15_000), tavily: callTavily }).catch(() => null);
+    if (outcome?.status === 'consensus') {
+      return {
+        answer: outcome.answer, results: outcome.results, provider: 'consensus', cost_usd: 0, topic,
+        votes: { agree: outcome.agree, total: outcome.total, voters: outcome.voters },
+      };
+    }
+    if (outcome?.status === 'inconclusive') {
+      return { answer: null, results: outcome.results, provider: 'consensus', cost_usd: 0, topic, inconclusive: true, votes: { total: outcome.voters.length, positions: outcome.voters } };
+    }
+  }
+
   // Perplexity leads because it writes the answer sentence the engine
   // actually grades. Tavily follows as the free safety net.
   const providers = [];
-  if (process.env.PERPLEXITY_API_KEY) providers.push(callPerplexity);
+  if (process.env.PERPLEXITY_API_KEY && !providerDisabled('perplexity')) providers.push(callPerplexity);
   if (process.env.TAVILY_API_KEY) providers.push(callTavily);
   if (!providers.length) throw new WebSearchError('no search provider is configured');
 

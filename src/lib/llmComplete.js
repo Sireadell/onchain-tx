@@ -30,6 +30,7 @@
 // change to keep that promise on the new API shape.
 
 import { guarded, SpendCapError } from './spendGuard.js';
+import { groqComplete, geminiComplete, hasGroq, hasGemini, providerDisabled, disableProvider } from './llmProviders.js';
 
 const PERPLEXITY_URL = 'https://api.perplexity.ai/v1/agent';
 
@@ -81,7 +82,7 @@ export class LlmCompleteError extends Error {
 }
 
 export function hasLlmProvider() {
-  return Boolean(process.env.PERPLEXITY_API_KEY);
+  return Boolean(process.env.PERPLEXITY_API_KEY || hasGroq() || hasGemini());
 }
 
 // Trims caller text to a size worth sending, and says whether it did, so a
@@ -203,10 +204,10 @@ async function attempt(systemPrompt, userContent, { budgetMs, maxTokens, disable
 export async function llmComplete(systemPrompt, userContent, {
   budgetMs = DEFAULT_BUDGET_MS, maxTokens = 600, disableSearch = false, temperature, keepFormatting = false,
 } = {}) {
-  if (!hasLlmProvider()) throw new LlmCompleteError('PERPLEXITY_API_KEY is not set');
+  if (!hasLlmProvider()) throw new LlmCompleteError('no language model key is set (PERPLEXITY_API_KEY, GROQ_API_KEY or GEMINI_API_KEY)');
 
   const deadline = Date.now() + budgetMs;
-  const run = async () => {
+  const perplexity = async () => {
     let lastError = null;
     for (let i = 0; i < 2; i += 1) {
       const left = deadline - Date.now();
@@ -222,11 +223,33 @@ export async function llmComplete(systemPrompt, userContent, {
     }
     throw lastError;
   };
-  // Every paid call passes the spend guard: cache, daily and per-caller caps.
-  try {
-    return await guarded(JSON.stringify(['llm', systemPrompt, userContent, maxTokens, disableSearch, temperature, keepFormatting]), run, { searches: !disableSearch });
-  } catch (err) {
-    if (err instanceof SpendCapError) throw new LlmCompleteError(err.message, { status: 429, retryable: false });
-    throw err;
+
+  // Free providers answer from the text alone (no live search), and strip the
+  // same markup Perplexity output gets.
+  const free = (name, fn) => async () => {
+    const out = await fn(systemPrompt, userContent, { maxTokens, temperature: Number.isFinite(temperature) ? temperature : 0.2, budgetMs: Math.max(Math.min(deadline - Date.now(), ATTEMPT_CAP_MS), 2_000) });
+    return { text: keepFormatting ? out.text.replace(/<think>[\s\S]*?<\/think>/g, '').trim() : stripMarkup(out.text), cost_usd: 0, provider: name };
+  };
+
+  const key = JSON.stringify(['llm', systemPrompt, userContent, maxTokens, disableSearch, temperature, keepFormatting]);
+  let lastError = null;
+  // Perplexity first when it works (it can search), then Groq, then Gemini.
+  // Every call passes the spend guard: cache, daily and per-caller caps.
+  if (process.env.PERPLEXITY_API_KEY && !providerDisabled('perplexity')) {
+    try {
+      return await guarded(key, perplexity, { searches: !disableSearch });
+    } catch (err) {
+      lastError = err instanceof SpendCapError ? new LlmCompleteError(err.message, { status: 429, retryable: false }) : err;
+      if (lastError instanceof LlmCompleteError && /no credit|rejected our key|status 40[123]/.test(lastError.message)) disableProvider('perplexity');
+    }
   }
+  for (const [name, has, fn] of [['groq', hasGroq, groqComplete], ['gemini', hasGemini, geminiComplete]]) {
+    if (!has() || providerDisabled(name)) continue;
+    try {
+      return await guarded(`${name}:${key}`, free(name, fn), { kind: 'free' });
+    } catch (err) {
+      lastError = err instanceof SpendCapError ? new LlmCompleteError(err.message, { status: 429, retryable: false }) : new LlmCompleteError(err.message, { status: err.status ?? null, retryable: false });
+    }
+  }
+  throw lastError ?? new LlmCompleteError('no language model provider is available right now');
 }
