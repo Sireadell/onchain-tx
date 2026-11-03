@@ -8,7 +8,7 @@
 const TICKERS_URL = process.env.SEC_TICKERS_URL || 'https://www.sec.gov/files/company_tickers.json';
 const CONCEPT_BASE = process.env.SEC_CONCEPT_BASE || 'https://data.sec.gov/api/xbrl/companyconcept';
 // The SEC asks every automated caller to identify itself.
-const USER_AGENT = process.env.SEC_USER_AGENT || 'TxLens-Miner/1.0 (public-data research; github.com/Sireadell/onchain-tx)';
+const USER_AGENT = process.env.SEC_USER_AGENT || 'TxLens Miner sireadell@gmail.com';
 const REQUEST_TIMEOUT_MS = Number(process.env.FINANCIAL_TIMEOUT_MS) || 8_000;
 const TICKERS_TTL_MS = 6 * 3_600_000;
 const CONCEPT_TTL_MS = Number(process.env.FINANCIAL_CACHE_TTL_MS) || 30 * 60_000;
