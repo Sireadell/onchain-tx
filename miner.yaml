@@ -33,7 +33,7 @@ protocol: generic
 name: TxLens
 description: >
   TxLens provides live, verifiable answers to on-chain and market questions
-  from authoritative sources. Covering 77 intents across blockchain, finance,
+  from authoritative sources. Covering 79 intents across blockchain, finance,
   weather, content, security, and general intelligence domains—each answer
   includes source attribution and fetch timestamps for transparency.
 base_url: https://telegraph-onchain-tx-lookup-miner.onrender.com
@@ -45,7 +45,7 @@ endpoints:
   - path: /check-tx
     external_path: /check-tx
     method: GET
-    intents: [ONCHAIN_TX_LOOKUP]
+    intents: [ONCHAIN_TX_LOOKUP_GENERAL]
     description: >
       ONCHAIN_TX_LOOKUP. Answers "is transaction 0xabc... confirmed or did
       it fail", "what did this tx hash do", "what is the status of this
@@ -59,7 +59,7 @@ endpoints:
   - path: /gas-price
     external_path: /gas-price
     method: GET
-    intents: [GAS_PRICE]
+    intents: [GAS_PRICE_GENERAL]
     description: >
       GAS_PRICE. Answers "what is gas right now on Ethereum", "how much does
       a transfer cost on Polygon", "are fees high on Base". Returns the
@@ -71,7 +71,7 @@ endpoints:
   - path: /wallet-balance
     external_path: /wallet-balance
     method: GET
-    intents: [WALLET_BALANCE_CHECK]
+    intents: [WALLET_BALANCE_CHECK_GENERAL]
     description: >
       WALLET_BALANCE_CHECK. Answers "how much ETH does 0xabc... hold", "what
       is the USDC balance of this address on Arbitrum". Takes a specific
@@ -84,7 +84,7 @@ endpoints:
   - path: /token-holders
     external_path: /token-holders
     method: GET
-    intents: [TOKEN_HOLDER_COUNT]
+    intents: [TOKEN_HOLDER_COUNT_GENERAL]
     description: >
       TOKEN_HOLDER_COUNT. Answers "how many wallets hold this token", "how
       many distinct addresses own 0xabc...". Takes a specific token contract
@@ -95,7 +95,7 @@ endpoints:
   - path: /tvl
     external_path: /tvl
     method: GET
-    intents: [TVL_LOOKUP]
+    intents: [TVL_LOOKUP_GENERAL]
     description: >
       TVL_LOOKUP. Answers "what is the TVL of Aave", "how much value is
       locked in Uniswap", "what is total value locked on Ethereum". Takes a
@@ -110,7 +110,7 @@ endpoints:
   - path: /crypto-price
     external_path: /crypto-price
     method: GET
-    intents: [CRYPTO_PRICE]
+    intents: [CRYPTO_PRICE_USD]
     description: >
       CRYPTO_PRICE. Answers "what is Bitcoin worth", "price of ETH in USD",
       "how much is the token at 0xabc... trading for". Names a
@@ -132,7 +132,7 @@ endpoints:
   - path: /stock-price
     external_path: /stock-price
     method: GET
-    intents: [STOCK_PRICE]
+    intents: [STOCK_PRICE_US_EQUITY]
     description: >
       STOCK_PRICE. Answers "what is Apple trading at", "current share price
       of TSLA", "how much is NVDA stock". Names a listed equity or ticker
@@ -146,7 +146,7 @@ endpoints:
   - path: /ssl-check
     external_path: /ssl-check
     method: GET
-    intents: [SSL_VERIFICATION]
+    intents: [SSL_VERIFICATION_CERT]
     description: >
       SSL_VERIFICATION. Answers "is the SSL certificate for example.com
       valid", "when does this domain's TLS certificate expire", "who issued
@@ -166,7 +166,7 @@ endpoints:
   - path: /weather-forecast
     external_path: /weather-forecast
     method: GET
-    intents: [WEATHER_FORECAST]
+    intents: [WEATHER_FORECAST_GENERAL]
     description: >
       WEATHER_FORECAST. Answers "what's the weather in Tokyo the next
       three days", "will it rain in London tomorrow", "how windy will it
@@ -190,7 +190,7 @@ endpoints:
   - path: /storm-alert
     external_path: /storm-alert
     method: GET
-    intents: [STORM_ALERT]
+    intents: [STORM_ALERT_GENERAL]
     description: >
       STORM_ALERT. Reports storm risk at a location over a stated window,
       answering questions of the form "what is the storm risk at latitude
@@ -215,7 +215,7 @@ endpoints:
   - path: /ip-geolocate
     external_path: /ip-geolocate
     method: GET
-    intents: [IP_GEOLOCATION]
+    intents: [IP_GEOLOCATION_GENERAL]
     description: >
       IP_GEOLOCATION. Answers "where is 8.8.8.8 located", "what country is
       this IP address from", "is this IP a VPN or a datacenter". Takes an
@@ -232,7 +232,7 @@ endpoints:
   - path: /academic-search
     external_path: /academic-search
     method: GET
-    intents: [ACADEMIC_SEARCH]
+    intents: [ACADEMIC_SEARCH_GENERAL]
     description: >
       ACADEMIC_SEARCH. Answers "find papers on federated learning",
       "peer-reviewed research on fraud detection since 2020". Takes a
@@ -249,7 +249,7 @@ endpoints:
   - path: /web-search
     external_path: /web-search
     method: GET
-    intents: [WEB_SEARCH]
+    intents: [WEB_SEARCH_GENERAL]
     description: >
       WEB_SEARCH. Answers an open question of any kind from a live web
       search performed at request time, for questions that have no single
@@ -273,7 +273,7 @@ endpoints:
   - path: /content-extract
     external_path: /content-extract
     method: GET
-    intents: [CONTENT_EXTRACTION]
+    intents: [CONTENT_EXTRACTION_GENERAL]
     description: >
       CONTENT_EXTRACTION. Answers "what does this page say", "extract the
       text from this URL", "summarize the content at this link". Fetches a
@@ -286,7 +286,7 @@ endpoints:
   - path: /text-classify
     external_path: /text-classify
     method: GET
-    intents: [TEXT_CLASSIFICATION]
+    intents: [TEXT_CLASSIFICATION_GENERAL]
     description: >
       TEXT_CLASSIFICATION. Answers "what category is this text", "is this
       email spam or not", "classify this review as positive or negative".
@@ -298,7 +298,7 @@ endpoints:
   - path: /text-generate
     external_path: /text-generate
     method: GET
-    intents: [TEXT_GENERATION]
+    intents: [TEXT_GENERATION_GENERAL]
     description: >
       TEXT_GENERATION. Answers "write a short bio for a software
       engineer", "draft a product description for a water bottle". Takes an
@@ -307,7 +307,7 @@ endpoints:
   - path: /language-generate
     external_path: /language-generate
     method: GET
-    intents: [LANGUAGE_GENERATION]
+    intents: [LANGUAGE_GENERATION_GENERAL]
     description: >
       LANGUAGE_GENERATION. Answers "translate this into French", "rewrite
       this in a formal tone", "paraphrase this sentence". Takes existing
@@ -317,7 +317,7 @@ endpoints:
   - path: /research-synthesis
     external_path: /research-synthesis
     method: GET
-    intents: [RESEARCH_SYNTHESIS]
+    intents: [RESEARCH_SYNTHESIS_GENERAL]
     description: >
       RESEARCH_SYNTHESIS. Answers broader research questions such as "what
       are the main approaches to carbon capture" or "summarize the current
@@ -328,7 +328,7 @@ endpoints:
   - path: /cross-chain-state
     external_path: /cross-chain-state
     method: GET
-    intents: [CROSS_CHAIN_STATE_VERIFY]
+    intents: [CROSS_CHAIN_STATE_VERIFY_GENERAL]
     description: >
       CROSS_CHAIN_STATE_VERIFY. Answers "which chains is this address
       active on", "does this wallet exist on Base and Arbitrum", "is this a
@@ -343,7 +343,7 @@ endpoints:
   - path: /event-outcome
     external_path: /event-outcome
     method: GET
-    intents: [EVENT_OUTCOME_RESOLUTION]
+    intents: [EVENT_OUTCOME_RESOLUTION_GENERAL]
     description: >
       EVENT_OUTCOME_RESOLUTION. Answers "did the merger go through", "who
       won the election", "was the proposal approved". Resolves a question
@@ -356,7 +356,7 @@ endpoints:
   - path: /weather-check
     external_path: /weather-check
     method: GET
-    intents: [WEATHER_CHECK]
+    intents: [WEATHER_CHECK_TEMPERATURE]
     description: >
       WEATHER_CHECK. Answers "what's the weather like in Tokyo right now",
       "current temperature in London", "is it raining in Cape Town at the
@@ -370,7 +370,7 @@ endpoints:
   - path: /language-translate
     external_path: /language-translate
     method: GET
-    intents: [LANGUAGE_TRANSLATION]
+    intents: [LANGUAGE_TRANSLATION_GENERAL]
     description: >
       LANGUAGE_TRANSLATION. Answers "translate 'good morning' into Japanese",
       "how do you say thank you in French". Takes text and a target language
@@ -382,7 +382,7 @@ endpoints:
   - path: /chat-complete
     external_path: /chat-complete
     method: GET
-    intents: [CHAT_COMPLETION]
+    intents: [CHAT_COMPLETION_GENERAL]
     description: >
       CHAT_COMPLETION. Answers a message directly and conversationally, the
       way a chat assistant would, with no preamble. A "will X happen"
@@ -393,7 +393,7 @@ endpoints:
   - path: /news-search
     external_path: /news-search
     method: GET
-    intents: [NEWS_SEARCH]
+    intents: [NEWS_SEARCH_GENERAL]
     description: >
       NEWS_SEARCH. Answers "what's the latest on the trade talks", "has the
       company announced results yet" from a live news-focused web search at
@@ -404,7 +404,7 @@ endpoints:
   - path: /news-headlines
     external_path: /news-headlines
     method: GET
-    intents: [NEWS_HEADLINES]
+    intents: [NEWS_HEADLINES_GENERAL]
     description: >
       NEWS_HEADLINES. Answers "what are today's headlines on the election",
       "top news about the central bank". Returns a short list of current
@@ -417,7 +417,7 @@ endpoints:
   - path: /fact-check
     external_path: /fact-check
     method: GET
-    intents: [FACT_CHECK]
+    intents: [FACT_CHECK_GENERAL]
     description: >
       FACT_CHECK. Answers "is it true that X", "fact check this claim: ...".
       Checks a stated claim against live web sources and returns a
@@ -428,7 +428,7 @@ endpoints:
   - path: /sentiment-analyze
     external_path: /sentiment-analyze
     method: GET
-    intents: [SENTIMENT_ANALYSIS]
+    intents: [SENTIMENT_ANALYSIS_GENERAL]
     description: >
       SENTIMENT_ANALYSIS. Answers "is this review positive or negative",
       "what's the sentiment of this message". Classifies text as exactly one
@@ -439,7 +439,7 @@ endpoints:
   - path: /content-moderate
     external_path: /content-moderate
     method: GET
-    intents: [CONTENT_MODERATION]
+    intents: [CONTENT_MODERATION_GENERAL]
     description: >
       CONTENT_MODERATION. Answers "does this text violate policy", "is this
       message safe to post". Judges text as Safe or Flagged against common
@@ -449,7 +449,7 @@ endpoints:
   - path: /cve-lookup
     external_path: /cve-lookup
     method: GET
-    intents: [CVE_LOOKUP]
+    intents: [CVE_LOOKUP_CVSS]
     description: >
       CVE_LOOKUP. Answers "what is CVE-2021-44228", "known vulnerabilities in
       log4j". Takes a CVE id or a keyword and returns matching vulnerability
@@ -461,7 +461,7 @@ endpoints:
   - path: /telegraph-knowledge
     external_path: /telegraph-knowledge
     method: GET
-    intents: [TELEGRAPH_KNOWLEDGE]
+    intents: [TELEGRAPH_KNOWLEDGE_GENERAL]
     description: >
       TELEGRAPH_KNOWLEDGE. Answers general-knowledge questions and questions
       about Telegraph Protocol itself, grounded against telegraphprotocol.com
@@ -471,7 +471,7 @@ endpoints:
   - path: /text-summarize
     external_path: /text-summarize
     method: GET
-    intents: [TEXT_SUMMARIZATION]
+    intents: [TEXT_SUMMARIZATION_GENERAL]
     description: >
       TEXT_SUMMARIZATION. Summarizes supplied text to a given length or
       style, or a sensible default when none is named. Params: text
@@ -479,7 +479,7 @@ endpoints:
   - path: /chatbot-conversation
     external_path: /chatbot-conversation
     method: GET
-    intents: [CHATBOT_CONVERSATION]
+    intents: [CHATBOT_CONVERSATION_GENERAL]
     description: >
       CHATBOT_CONVERSATION. Replies to a chat message, using a supplied
       messages/history array as context when given. Params: message
@@ -488,7 +488,7 @@ endpoints:
   - path: /semantic-similarity
     external_path: /semantic-similarity
     method: GET
-    intents: [SEMANTIC_SIMILARITY]
+    intents: [SEMANTIC_SIMILARITY_GENERAL]
     description: >
       SEMANTIC_SIMILARITY. Returns a 0-1 semantic similarity score and a
       short reason for two supplied texts. Params: text1, text2 (required,
@@ -496,14 +496,14 @@ endpoints:
   - path: /grammar-spell-check
     external_path: /grammar-spell-check
     method: GET
-    intents: [GRAMMAR_SPELL_CHECK]
+    intents: [GRAMMAR_SPELL_CHECK_GENERAL]
     description: >
       GRAMMAR_SPELL_CHECK. Returns corrected text plus a count and list of
       the grammar and spelling fixes made. Params: text (required).
   - path: /ai-text-detect
     external_path: /ai-text-detect
     method: GET
-    intents: [AI_TEXT_DETECTION]
+    intents: [AI_TEXT_DETECTION_GENERAL]
     description: >
       AI_TEXT_DETECTION. Returns an approximate self-assessment of how
       likely supplied text is AI-generated, with named cues and an honest
@@ -512,7 +512,7 @@ endpoints:
   - path: /research-query
     external_path: /research-query
     method: GET
-    intents: [RESEARCH_QUERY]
+    intents: [RESEARCH_QUERY_GENERAL]
     description: >
       RESEARCH_QUERY. Answers an open research question from live web
       sources in one well-sourced paragraph. Params: query (required, also
@@ -521,7 +521,7 @@ endpoints:
   - path: /threat-intelligence
     external_path: /threat-intelligence
     method: GET
-    intents: [THREAT_INTELLIGENCE]
+    intents: [THREAT_INTELLIGENCE_INDICATOR]
     description: >
       THREAT_INTELLIGENCE. Given an IP, domain, file hash, CVE id, or threat
       actor/malware family name, reports whether it is a known threat:
@@ -533,7 +533,7 @@ endpoints:
   - path: /package-status
     external_path: /package-status
     method: GET
-    intents: [PACKAGE_STATUS]
+    intents: [PACKAGE_STATUS_GENERAL]
     description: >
       PACKAGE_STATUS. Given a shipment tracking number, reports its current
       status via live web search, since no free universal carrier API
@@ -544,7 +544,7 @@ endpoints:
   - path: /url-scan
     external_path: /url-scan
     method: GET
-    intents: [URL_SCAN]
+    intents: [URL_SCAN_VERDICT]
     description: >
       URL_SCAN. Given a URL, returns a Safe/Suspicious/Unknown verdict
       combining live reachability and redirect-chain checking, TLS
@@ -554,7 +554,7 @@ endpoints:
   - path: /currency-exchange
     external_path: /currency-exchange
     method: GET
-    intents: [CURRENCY_EXCHANGE]
+    intents: [CURRENCY_EXCHANGE_CONVERT]
     description: >
       CURRENCY_EXCHANGE. Answers "how much is 100 dollars in euros",
       "convert 50 GBP to JPY", using live ECB reference rates. Params: from,
@@ -563,7 +563,7 @@ endpoints:
   - path: /fx-now
     external_path: /fx-now
     method: GET
-    intents: [FX_NOW]
+    intents: [FX_NOW_CAD, FX_NOW_EUR, FX_NOW_SEK]
     description: >
       FX_NOW. Answers "what is the USD to EUR rate right now", "current GBP
       JPY exchange rate", "how much is 250 dollars in naira today" with the
@@ -575,7 +575,7 @@ endpoints:
   - path: /sanctions-screening
     external_path: /sanctions-screening
     method: GET
-    intents: [SANCTIONS_SCREENING_MATCH]
+    intents: [SANCTIONS_SCREENING_MATCH_GENERAL]
     description: >
       SANCTIONS_SCREENING_MATCH. Answers "is John Doe sanctioned", "check
       this company against the OFAC list". Screens a name against the US
@@ -584,7 +584,7 @@ endpoints:
   - path: /vulnerability-triage
     external_path: /vulnerability-triage
     method: GET
-    intents: [VULNERABILITY_TRIAGE]
+    intents: [VULNERABILITY_TRIAGE_GENERAL]
     description: >
       VULNERABILITY_TRIAGE. Answers "how urgent is CVE-2021-44228", "should
       I patch log4j now". Same CIRCL/NVD CVE data as CVE_LOOKUP, framed as a
@@ -594,7 +594,7 @@ endpoints:
   - path: /sports-score
     external_path: /sports-score
     method: GET
-    intents: [SPORTS_SCORE]
+    intents: [SPORTS_SCORE_GENERAL]
     description: >
       SPORTS_SCORE. Answers "what is the score of the Lakers game". Most
       recent or in-progress score for a named team, via TheSportsDB, with a
@@ -603,7 +603,7 @@ endpoints:
   - path: /game-result
     external_path: /game-result
     method: GET
-    intents: [GAME_RESULT]
+    intents: [GAME_RESULT_GENERAL]
     description: >
       GAME_RESULT. Answers "who won the Knicks game". Winner of a named
       team's most recently completed match, via TheSportsDB, with a live
@@ -612,7 +612,7 @@ endpoints:
   - path: /route-eta
     external_path: /route-eta
     method: GET
-    intents: [ROUTE_ETA]
+    intents: [ROUTE_ETA_GENERAL]
     description: >
       ROUTE_ETA. Answers "how long to drive from London to Paris", "what is
       the distance between Miami and Orlando". Driving distance and
@@ -624,7 +624,7 @@ endpoints:
   - path: /regulatory-filing-monitor
     external_path: /regulatory-filing-monitor
     method: GET
-    intents: [REGULATORY_FILING_MONITOR]
+    intents: [REGULATORY_FILING_MONITOR_GENERAL]
     description: >
       REGULATORY_FILING_MONITOR. Answers "will the FDA fine this company",
       "has this drug had a warning filed against it". Searches the US
@@ -639,7 +639,7 @@ endpoints:
   - path: /credit-score-verify
     external_path: /credit-score-verify
     method: GET
-    intents: [CREDIT_SCORE_VERIFY]
+    intents: [CREDIT_SCORE_VERIFY_GENERAL]
     description: >
       CREDIT_SCORE_VERIFY. Answers "is this a registered business",
       "verify this company's legal entity status". Checks a company name
@@ -650,7 +650,7 @@ endpoints:
   - path: /macro-economic-indicator
     external_path: /macro-economic-indicator
     method: GET
-    intents: [MACRO_ECONOMIC_INDICATOR]
+    intents: [MACRO_ECONOMIC_INDICATOR_GENERAL]
     description: >
       MACRO_ECONOMIC_INDICATOR. Answers "what is Japan's inflation rate",
       "how fast is the US economy growing", "what is the ECB interest rate".
@@ -664,7 +664,7 @@ endpoints:
   - path: /weather-forecast-verify
     external_path: /weather-forecast-verify
     method: GET
-    intents: [WEATHER_FORECAST_VERIFY]
+    intents: [WEATHER_FORECAST_VERIFY_GENERAL]
     description: >
       WEATHER_FORECAST_VERIFY. Answers "what was the actual weather in
       London on August 1st". Reports what actually happened at a named
@@ -675,7 +675,7 @@ endpoints:
   - path: /customer-ticket-resolution
     external_path: /customer-ticket-resolution
     method: GET
-    intents: [CUSTOMER_TICKET_RESOLUTION]
+    intents: [CUSTOMER_TICKET_RESOLUTION_GENERAL]
     description: >
       CUSTOMER_TICKET_RESOLUTION. Answers "how do I fix this error", given a
       described technical problem. Searches live web sources for a known
@@ -685,7 +685,7 @@ endpoints:
   - path: /return-policy-verify
     external_path: /return-policy-verify
     method: GET
-    intents: [RETURN_POLICY_VERIFY]
+    intents: [RETURN_POLICY_VERIFY_GENERAL]
     description: >
       RETURN_POLICY_VERIFY. Answers "what is Costco's return policy". Given
       a retailer name, finds and reports that retailer's actual return
@@ -695,7 +695,7 @@ endpoints:
   - path: /task-execution-quality
     external_path: /task-execution-quality
     method: GET
-    intents: [TASK_EXECUTION_QUALITY]
+    intents: [TASK_EXECUTION_QUALITY_GENERAL]
     description: >
       TASK_EXECUTION_QUALITY. Given a task description and a produced
       result, judges whether the result actually satisfies the task
@@ -705,7 +705,7 @@ endpoints:
   - path: /carrier-serviceability
     external_path: /carrier-serviceability
     method: GET
-    intents: [CARRIER_SERVICEABILITY]
+    intents: [CARRIER_SERVICEABILITY_GENERAL]
     description: >
       CARRIER_SERVICEABILITY. Answers "does UPS deliver to this ZIP code".
       Given an address or ZIP code and optionally a carrier name, reports
@@ -714,7 +714,7 @@ endpoints:
   - path: /delivery-window-verify
     external_path: /delivery-window-verify
     method: GET
-    intents: [DELIVERY_WINDOW_VERIFY]
+    intents: [DELIVERY_WINDOW_VERIFY_GENERAL]
     description: >
       DELIVERY_WINDOW_VERIFY. Answers "how long does FedEx ground take from
       New York to LA". Given an origin, destination, and carrier/service
@@ -725,7 +725,7 @@ endpoints:
   - path: /payment-method-verify
     external_path: /payment-method-verify
     method: GET
-    intents: [PAYMENT_METHOD_VERIFY]
+    intents: [PAYMENT_METHOD_VERIFY_GENERAL]
     description: >
       PAYMENT_METHOD_VERIFY. Answers "what card network is this BIN",
       "is this a Visa or Mastercard number". Identifies the card network
@@ -737,7 +737,7 @@ endpoints:
   - path: /invoice-ledger-reconcile
     external_path: /invoice-ledger-reconcile
     method: GET
-    intents: [INVOICE_LEDGER_RECONCILE]
+    intents: [INVOICE_LEDGER_RECONCILE_GENERAL]
     description: >
       INVOICE_LEDGER_RECONCILE. Given two described figures or a described
       invoice/ledger discrepancy, reconciles what can be reconciled from
@@ -747,7 +747,7 @@ endpoints:
   - path: /fraud-query
     external_path: /fraud-query
     method: POST
-    intents: [FRAUD_DETECTION]
+    intents: [FRAUD_DETECTION_GENERAL]
     description: >
       FRAUD_DETECTION. Answers "was BitConnect a scam", "is this scheme
       fraudulent", "what happened in the FTX fraud". Assesses how likely a
@@ -758,7 +758,7 @@ endpoints:
   - path: /assess-wallet
     external_path: /assess-wallet
     method: GET
-    intents: [FRAUD_DETECTION]
+    intents: [FRAUD_DETECTION_GENERAL]
     description: >
       FRAUD_DETECTION for a specific address. Answers "is 0xabc... a scam
       wallet", "how risky is this address", "is it safe to receive funds
@@ -773,7 +773,7 @@ endpoints:
   - path: /assess-wallet
     external_path: /assess-wallet
     method: POST
-    intents: [FRAUD_DETECTION]
+    intents: [FRAUD_DETECTION_GENERAL]
     description: >
       FRAUD_DETECTION for a specific address, identical to the GET form
       above and accepting the address in a JSON body instead of the query
@@ -781,7 +781,7 @@ endpoints:
   - path: /url-safe
     external_path: /url-safe
     method: GET
-    intents: [URL_SAFE]
+    intents: [URL_SAFE_GENERAL]
     description: >
       URL_SAFE. Given a URL, checks it against URLhaus, VirusTotal, and
       reputation services, returning Safe/Suspicious/Unknown with detection count.
@@ -792,7 +792,7 @@ endpoints:
   - path: /malware-detection
     external_path: /malware-detection
     method: GET
-    intents: [MALWARE_DETECTION]
+    intents: [MALWARE_DETECTION_HASH]
     description: >
       MALWARE_DETECTION. Given a domain, IP address, or file hash, checks it
       against VirusTotal, AbuseIPDB, and AlienVault OTX reputation databases,
@@ -805,7 +805,7 @@ endpoints:
   - path: /dns-check
     external_path: /dns-check
     method: GET
-    intents: [DNS_RECORD_LOOKUP]
+    intents: [DNS_RECORD_LOOKUP_GENERAL]
     description: >
       DNS_RECORD_LOOKUP. Answers "what are the DNS records for example.com",
       "what DNS entries does this domain have". Takes a hostname and returns
@@ -816,7 +816,7 @@ endpoints:
   - path: /threat-ip-reputation
     external_path: /threat-ip-reputation
     method: GET
-    intents: [THREAT_IP_REPUTATION]
+    intents: [THREAT_IP_REPUTATION_GENERAL]
     description: >
       THREAT_IP_REPUTATION. Answers "is this IP address malicious",
       "is example.com a known threat domain", "what is the reputation of
@@ -829,7 +829,7 @@ endpoints:
   - path: /crypto-transfer-verify
     external_path: /crypto-transfer-verify
     method: GET
-    intents: [CRYPTO_TRANSFER_VERIFY]
+    intents: [CRYPTO_TRANSFER_VERIFY_GENERAL]
     description: >
       CRYPTO_TRANSFER_VERIFY. Answers "did this transfer succeed, who sent it
       and who received it, how much moved, what was the fee and how many
@@ -848,7 +848,7 @@ endpoints:
   - path: /onchain-metric-verify
     external_path: /onchain-metric-verify
     method: GET
-    intents: [ONCHAIN_METRIC_VERIFY]
+    intents: [ONCHAIN_METRIC_VERIFY_GENERAL]
     description: >
       ONCHAIN_METRIC_VERIFY. Answers "what did owner() return on contract X
       at block N", "what was totalAssets() of this vault", "which wallet held
@@ -863,7 +863,7 @@ endpoints:
   - path: /question-answering
     external_path: /question-answering
     method: GET
-    intents: [QUESTION_ANSWERING]
+    intents: [QUESTION_ANSWERING_GENERAL]
     description: >
       QUESTION_ANSWERING. Answers an open factual question such as "who wrote
       Things Fall Apart" or "when was the Eiffel Tower built" in one to three
@@ -874,7 +874,7 @@ endpoints:
   - path: /token-total-supply
     external_path: /token-total-supply
     method: GET
-    intents: [TOKEN_TOTAL_SUPPLY_VERIFY]
+    intents: [TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL]
     description: >
       TOKEN_TOTAL_SUPPLY_VERIFY. Answers "what is the total supply of USDC
       on Ethereum", "verify the supply of token 0xA0b8... at block
@@ -888,7 +888,7 @@ endpoints:
   - path: /corporate-registry
     external_path: /corporate-registry
     method: GET
-    intents: [CORPORATE_REGISTRY_LOOKUP]
+    intents: [CORPORATE_REGISTRY_LOOKUP_GENERAL]
     description: >
       CORPORATE_REGISTRY_LOOKUP. Answers "what is the registered address
       and incorporation status of Acme Inc. in Delaware", "is SpaceX an
@@ -905,7 +905,7 @@ endpoints:
   - path: /email-security
     external_path: /email-security
     method: GET
-    intents: [EMAIL_SECURITY]
+    intents: [EMAIL_SECURITY_GENERAL]
     description: >
       EMAIL_SECURITY. Answers "is gmail.com protected against email
       spoofing", "check SPF, DKIM and DMARC for example.com". Reads the
@@ -917,7 +917,7 @@ endpoints:
   - path: /mining-hashprice
     external_path: /mining-hashprice
     method: GET
-    intents: [MINING_HASHPRICE_VERIFY]
+    intents: [MINING_HASHPRICE_VERIFY_GENERAL]
     description: >
       MINING_HASHPRICE_VERIFY. Answers "what is the Bitcoin hashprice at
       block 800000", "current hashprice". Computes hashprice in sats per
@@ -928,7 +928,7 @@ endpoints:
   - path: /security-review
     external_path: /security-review
     method: GET
-    intents: [SECURITY_REVIEW]
+    intents: [SECURITY_REVIEW_GENERAL]
     description: >
       SECURITY_REVIEW. Reviews supplied code, configuration or a system
       description for security weaknesses. The answer leads with a verdict
@@ -938,7 +938,7 @@ endpoints:
   - path: /llm-output-evaluation
     external_path: /llm-output-evaluation
     method: GET
-    intents: [LLM_OUTPUT_EVALUATION]
+    intents: [LLM_OUTPUT_EVALUATION_GENERAL]
     description: >
       LLM_OUTPUT_EVALUATION. Grades a language model's answer for accuracy,
       completeness, relevance and clarity. The answer leads with a rating
@@ -950,7 +950,7 @@ endpoints:
   - path: /contract-obligation-audit
     external_path: /contract-obligation-audit
     method: GET
-    intents: [CONTRACT_OBLIGATION_AUDIT]
+    intents: [CONTRACT_OBLIGATION_AUDIT_GENERAL]
     description: >
       CONTRACT_OBLIGATION_AUDIT. Audits contract obligations: who owes what
       by when, and, given performance facts, whether each was met. The
@@ -961,7 +961,7 @@ endpoints:
   - path: /code-generation
     external_path: /code-generation
     method: GET
-    intents: [CODE_GENERATION]
+    intents: [CODE_GENERATION_GENERAL]
     description: >
       CODE_GENERATION. Writes complete, runnable code for an instruction, in
       the requested language (Python by default), as one fenced code block
@@ -970,7 +970,7 @@ endpoints:
   - path: /code-review
     external_path: /code-review
     method: GET
-    intents: [CODE_REVIEW]
+    intents: [CODE_REVIEW_GENERAL]
     description: >
       CODE_REVIEW. Reviews supplied code or a diff for correctness bugs,
       security, performance and readability. The answer leads with a
@@ -981,7 +981,7 @@ endpoints:
   - path: /text-authenticity
     external_path: /text-authenticity
     method: GET
-    intents: [TEXT_AUTHENTICITY_CHECK]
+    intents: [TEXT_AUTHENTICITY_CHECK_GENERAL]
     description: >
       TEXT_AUTHENTICITY_CHECK. Judges whether a text is authentic, genuinely
       from its attributed source and not fabricated, altered or
@@ -993,7 +993,7 @@ endpoints:
   - path: /financial-data
     external_path: /financial-data
     method: GET
-    intents: [FINANCIAL_DATA]
+    intents: [FINANCIAL_DATA_GENERAL]
     description: >
       FINANCIAL_DATA. Answers "what was Apple's revenue", "Tesla's net
       income", "Microsoft's total assets", "Amazon's latest quarterly
@@ -1009,7 +1009,7 @@ endpoints:
   - path: /loan-interest-rate-quote
     external_path: /loan-interest-rate-quote
     method: GET
-    intents: [LOAN_INTEREST_RATE_QUOTE]
+    intents: [LOAN_INTEREST_RATE_QUOTE_GENERAL]
     description: >
       LOAN_INTEREST_RATE_QUOTE. Answers "what is the 30-year mortgage rate",
       "current prime rate", "15-year fixed rate today". Returns the latest
@@ -2204,83 +2204,85 @@ semantics:
     reason_field: summary
     confidence_field: confidence
   supported_intents:
-    - ONCHAIN_TX_LOOKUP
-    - GAS_PRICE
-    - WALLET_BALANCE_CHECK
-    - TOKEN_HOLDER_COUNT
-    - TVL_LOOKUP
-    - CRYPTO_PRICE
-    - STOCK_PRICE
-    - SSL_VERIFICATION
-    - WEATHER_FORECAST
-    - STORM_ALERT
-    - IP_GEOLOCATION
-    - ACADEMIC_SEARCH
-    - WEB_SEARCH
-    - FRAUD_DETECTION
-    - CONTENT_EXTRACTION
-    - TEXT_CLASSIFICATION
-    - TEXT_GENERATION
-    - LANGUAGE_GENERATION
-    - RESEARCH_SYNTHESIS
-    - CROSS_CHAIN_STATE_VERIFY
-    - EVENT_OUTCOME_RESOLUTION
-    - WEATHER_CHECK
-    - LANGUAGE_TRANSLATION
-    - CHAT_COMPLETION
-    - NEWS_SEARCH
-    - NEWS_HEADLINES
-    - FACT_CHECK
-    - SENTIMENT_ANALYSIS
-    - CONTENT_MODERATION
-    - CVE_LOOKUP
-    - TELEGRAPH_KNOWLEDGE
-    - TEXT_SUMMARIZATION
-    - CHATBOT_CONVERSATION
-    - SEMANTIC_SIMILARITY
-    - GRAMMAR_SPELL_CHECK
-    - AI_TEXT_DETECTION
-    - RESEARCH_QUERY
-    - THREAT_INTELLIGENCE
-    - PACKAGE_STATUS
-    - URL_SCAN
-    - CURRENCY_EXCHANGE
-    - SANCTIONS_SCREENING_MATCH
-    - VULNERABILITY_TRIAGE
-    - SPORTS_SCORE
-    - GAME_RESULT
-    - ROUTE_ETA
-    - REGULATORY_FILING_MONITOR
-    - CREDIT_SCORE_VERIFY
-    - MACRO_ECONOMIC_INDICATOR
-    - WEATHER_FORECAST_VERIFY
-    - CUSTOMER_TICKET_RESOLUTION
-    - RETURN_POLICY_VERIFY
-    - TASK_EXECUTION_QUALITY
-    - CARRIER_SERVICEABILITY
-    - DELIVERY_WINDOW_VERIFY
-    - PAYMENT_METHOD_VERIFY
-    - INVOICE_LEDGER_RECONCILE
-    - URL_SAFE
-    - MALWARE_DETECTION
-    - DNS_RECORD_LOOKUP
-    - THREAT_IP_REPUTATION
-    - FX_NOW
-    - TOKEN_TOTAL_SUPPLY_VERIFY
-    - CORPORATE_REGISTRY_LOOKUP
-    - EMAIL_SECURITY
-    - MINING_HASHPRICE_VERIFY
-    - SECURITY_REVIEW
-    - LLM_OUTPUT_EVALUATION
-    - CONTRACT_OBLIGATION_AUDIT
-    - CODE_GENERATION
-    - CODE_REVIEW
-    - TEXT_AUTHENTICITY_CHECK
-    - CRYPTO_TRANSFER_VERIFY
-    - ONCHAIN_METRIC_VERIFY
-    - QUESTION_ANSWERING
-    - FINANCIAL_DATA
-    - LOAN_INTEREST_RATE_QUOTE
+    - ONCHAIN_TX_LOOKUP_GENERAL
+    - GAS_PRICE_GENERAL
+    - WALLET_BALANCE_CHECK_GENERAL
+    - TOKEN_HOLDER_COUNT_GENERAL
+    - TVL_LOOKUP_GENERAL
+    - CRYPTO_PRICE_USD
+    - STOCK_PRICE_US_EQUITY
+    - SSL_VERIFICATION_CERT
+    - WEATHER_FORECAST_GENERAL
+    - STORM_ALERT_GENERAL
+    - IP_GEOLOCATION_GENERAL
+    - ACADEMIC_SEARCH_GENERAL
+    - FRAUD_DETECTION_GENERAL
+    - WEB_SEARCH_GENERAL
+    - CONTENT_EXTRACTION_GENERAL
+    - TEXT_CLASSIFICATION_GENERAL
+    - TEXT_GENERATION_GENERAL
+    - LANGUAGE_GENERATION_GENERAL
+    - RESEARCH_SYNTHESIS_GENERAL
+    - CROSS_CHAIN_STATE_VERIFY_GENERAL
+    - EVENT_OUTCOME_RESOLUTION_GENERAL
+    - WEATHER_CHECK_TEMPERATURE
+    - LANGUAGE_TRANSLATION_GENERAL
+    - CHAT_COMPLETION_GENERAL
+    - NEWS_SEARCH_GENERAL
+    - NEWS_HEADLINES_GENERAL
+    - FACT_CHECK_GENERAL
+    - SENTIMENT_ANALYSIS_GENERAL
+    - CONTENT_MODERATION_GENERAL
+    - CVE_LOOKUP_CVSS
+    - TELEGRAPH_KNOWLEDGE_GENERAL
+    - TEXT_SUMMARIZATION_GENERAL
+    - CHATBOT_CONVERSATION_GENERAL
+    - SEMANTIC_SIMILARITY_GENERAL
+    - GRAMMAR_SPELL_CHECK_GENERAL
+    - AI_TEXT_DETECTION_GENERAL
+    - RESEARCH_QUERY_GENERAL
+    - THREAT_INTELLIGENCE_INDICATOR
+    - PACKAGE_STATUS_GENERAL
+    - URL_SCAN_VERDICT
+    - CURRENCY_EXCHANGE_CONVERT
+    - SANCTIONS_SCREENING_MATCH_GENERAL
+    - VULNERABILITY_TRIAGE_GENERAL
+    - SPORTS_SCORE_GENERAL
+    - GAME_RESULT_GENERAL
+    - ROUTE_ETA_GENERAL
+    - REGULATORY_FILING_MONITOR_GENERAL
+    - CREDIT_SCORE_VERIFY_GENERAL
+    - MACRO_ECONOMIC_INDICATOR_GENERAL
+    - WEATHER_FORECAST_VERIFY_GENERAL
+    - CUSTOMER_TICKET_RESOLUTION_GENERAL
+    - RETURN_POLICY_VERIFY_GENERAL
+    - TASK_EXECUTION_QUALITY_GENERAL
+    - CARRIER_SERVICEABILITY_GENERAL
+    - DELIVERY_WINDOW_VERIFY_GENERAL
+    - PAYMENT_METHOD_VERIFY_GENERAL
+    - INVOICE_LEDGER_RECONCILE_GENERAL
+    - URL_SAFE_GENERAL
+    - MALWARE_DETECTION_HASH
+    - DNS_RECORD_LOOKUP_GENERAL
+    - THREAT_IP_REPUTATION_GENERAL
+    - FX_NOW_CAD
+    - FX_NOW_EUR
+    - FX_NOW_SEK
+    - TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL
+    - CORPORATE_REGISTRY_LOOKUP_GENERAL
+    - EMAIL_SECURITY_GENERAL
+    - MINING_HASHPRICE_VERIFY_GENERAL
+    - SECURITY_REVIEW_GENERAL
+    - LLM_OUTPUT_EVALUATION_GENERAL
+    - CONTRACT_OBLIGATION_AUDIT_GENERAL
+    - CODE_GENERATION_GENERAL
+    - CODE_REVIEW_GENERAL
+    - TEXT_AUTHENTICITY_CHECK_GENERAL
+    - CRYPTO_TRANSFER_VERIFY_GENERAL
+    - ONCHAIN_METRIC_VERIFY_GENERAL
+    - QUESTION_ANSWERING_GENERAL
+    - FINANCIAL_DATA_GENERAL
+    - LOAN_INTEREST_RATE_QUOTE_GENERAL
 
 docs:
   repository: https://github.com/Sireadell/onchain-tx
