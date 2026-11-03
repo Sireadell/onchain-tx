@@ -33,7 +33,7 @@ protocol: generic
 name: TxLens
 description: >
   TxLens provides live, verifiable answers to on-chain and market questions
-  from authoritative sources. Covering 79 intents across blockchain, finance,
+  from authoritative sources. Covering 80 intents across blockchain, finance,
   weather, content, security, and general intelligence domains—each answer
   includes source attribution and fetch timestamps for transparency.
 base_url: https://telegraph-onchain-tx-lookup-miner.onrender.com
@@ -1020,6 +1020,21 @@ endpoints:
       card loan rates are not covered and are said so, not guessed. Params:
       loan_type (optional; 30-year, 15-year, prime), or the whole question
       as query.
+  - path: /smart-contract-audit
+    external_path: /smart-contract-audit
+    method: GET
+    intents: [SMART_CONTRACT_AUDIT_GENERAL]
+    description: >
+      SMART_CONTRACT_AUDIT. Answers "audit this contract", "is 0xabc... safe",
+      "does this contract have reentrancy or access control problems". Reads
+      the contract's verified source code (Sourcify, then Blockscout) or, when
+      none is published, its deployed bytecode, and reports reentrancy,
+      missing access control, integer overflow, tx.origin checks, delegatecall,
+      selfdestruct and unchecked low-level calls, each with a severity and a
+      location, plus an overall risk rating. It is an automated pattern check,
+      not a manual audit, and says so. Params: contract (the 0x address) and
+      chain (eth, base, arbitrum, optimism, polygon, avalanche; default eth),
+      or pasted Solidity as source, or the whole question as query.
 
 # input_schema/output_schema are top-level-only fields, documentation
 # surfaced to callers rather than a per-endpoint validator (confirmed
@@ -1034,6 +1049,13 @@ input_schema:
       type: string
       pattern: "^0x[0-9a-fA-F]{64}$"
       description: EVM transaction hash to look up. Used by /check-tx and /crypto-transfer-verify.
+    contract:
+      type: string
+      pattern: "^0x[0-9a-fA-F]{40}$"
+      description: Contract address to audit. Used by /smart-contract-audit only (with chain).
+    source:
+      type: string
+      description: Solidity source code to review, instead of an address. Used by /smart-contract-audit only.
     address:
       type: string
       pattern: "^0x[0-9a-fA-F]{40}$"
@@ -2283,6 +2305,7 @@ semantics:
     - QUESTION_ANSWERING_GENERAL
     - FINANCIAL_DATA_GENERAL
     - LOAN_INTEREST_RATE_QUOTE_GENERAL
+    - SMART_CONTRACT_AUDIT_GENERAL
 
 docs:
   repository: https://github.com/Sireadell/onchain-tx
