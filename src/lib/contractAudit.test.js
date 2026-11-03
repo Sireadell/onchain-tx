@@ -84,3 +84,11 @@ test('source responses from Sourcify and Blockscout are read', () => {
   assert.equal(filesFromBlockscout({ source_code: 'x', name: 'B', file_path: 'B.sol', additional_sources: [{ file_path: 'C.sol', source_code: 'y' }] }).files.length, 2);
   assert.equal(filesFromBlockscout({ is_verified: false }), null);
 });
+
+test('compiler metadata at the end of the bytecode is not read as opcodes', () => {
+  // 6000 (push 0), 00 (stop), then a CBOR map (a2...) whose bytes include f4 and ff, then its 2-byte length (0004)
+  const meta = 'a2f4ff00' + '0004';
+  const scan = scanBytecode('0x600000' + meta);
+  assert.equal(scan.delegatecall, false);
+  assert.equal(scan.selfdestruct, false);
+});

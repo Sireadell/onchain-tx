@@ -208,7 +208,7 @@ function sourceFindings(files) {
   }
 
   if (preChecked && !usesSafeMath) {
-    add({ severity: 'high', category: 'integer-overflow', title: `Solidity ${pragmaText} without SafeMath`, detail: 'Before Solidity 0.8, arithmetic wraps around silently on overflow and underflow, and this code does not use SafeMath, so balances or counters can be pushed past their limits.', location: 'pragma' });
+    add({ severity: 'medium', category: 'integer-overflow', title: `Solidity ${pragmaText} without SafeMath`, detail: 'Before Solidity 0.8, arithmetic wraps around silently on overflow and underflow, and this code does not use SafeMath, so any arithmetic without its own range check can be pushed past its limits.', location: 'pragma' });
   } else if (preChecked && usesSafeMath) {
     add({ severity: 'info', category: 'integer-overflow', title: 'Pre-0.8 Solidity with SafeMath', detail: 'Overflow is handled by SafeMath, but any arithmetic written without it would still wrap.', location: 'pragma' });
   }
@@ -223,7 +223,13 @@ function sourceFindings(files) {
 // Walks opcodes properly so bytes inside PUSH data are not read as opcodes.
 export function scanBytecode(hex) {
   const code = String(hex ?? '').replace(/^0x/, '');
-  const bytes = code.match(/../g)?.map((b) => parseInt(b, 16)) ?? [];
+  let bytes = code.match(/../g)?.map((b) => parseInt(b, 16)) ?? [];
+  // Solidity appends a CBOR metadata blob (compiler hash) to the code; its bytes are data, not opcodes.
+  if (bytes.length > 4) {
+    const metaLen = bytes[bytes.length - 2] * 256 + bytes[bytes.length - 1];
+    const cut = bytes.length - 2 - metaLen;
+    if (metaLen > 0 && cut > 0 && bytes[cut] >= 0xa1 && bytes[cut] <= 0xa5) bytes = bytes.slice(0, cut);
+  }
   const seen = { delegatecall: false, selfdestruct: false, callvalue: false, create2: false };
   let calls = 0;
   for (let i = 0; i < bytes.length; i += 1) {
@@ -277,7 +283,8 @@ export function buildAudit({ target, chainLabel, source, bytecode, unverified })
     findings = scanned.findings;
     meta = { pragma: scanned.pragma, uses_safemath: scanned.safeMath, solidity_0_8_or_later: scanned.solidity08 };
   }
-  if (bytecode) findings = findings.concat(bytecodeFindings(bytecode));
+  // Verified source is the better evidence; the raw opcode scan only fills in when there is none.
+  if (bytecode && !source) findings = findings.concat(bytecodeFindings(bytecode));
   if (!source && unverified) {
     findings.push({ severity: 'medium', category: 'transparency', title: 'Source code is not verified', detail: 'No published, verified source code was found, so the logic cannot be reviewed line by line. Only the raw bytecode could be checked.', location: 'n/a' });
   }
