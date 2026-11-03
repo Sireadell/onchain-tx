@@ -148,3 +148,40 @@ test('return-policy-verify: no search provider configured answers 503', async (t
   const res = await fetch(`${base}/return-policy-verify?retailer=Nike`);
   assert.equal(res.status, 503);
 });
+
+test('return-policy-verify: a question with no retailer is searched as asked', async (t) => {
+  withKey(t);
+  let sent = '';
+  stubFetch(t, (url, init) => {
+    if (url.startsWith('https://api.tavily.com')) {
+      sent = String(init?.body ?? '');
+      return new Response(JSON.stringify({ answer: 'Opened headphones can usually be returned within 30 days.', results: [] }), { status: 200 });
+    }
+    return undefined;
+  });
+  const base = startServer(t);
+  const res = await fetch(`${base}/return-policy-verify?question=${encodeURIComponent('Can I return opened headphones within 30 days?')}`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.match(sent, /return-policy question/);
+  assert.equal(body.confidence, 0.55);
+});
+
+test('return-policy-verify: confidence rises when independent voters agree', async (t) => {
+  withKey(t);
+  process.env.GROQ_API_KEY = 'g';
+  process.env.GEMINI_API_KEY = 'm';
+  t.after(() => { delete process.env.GROQ_API_KEY; delete process.env.GEMINI_API_KEY; });
+  const reply = JSON.stringify({ short: '90 days', full: 'Target allows returns within 90 days.' });
+  stubFetch(t, (url) => {
+    if (url.startsWith('https://api.tavily.com')) {
+      return new Response(JSON.stringify({ answer: 'Target allows returns within 90 days.', results: [{ title: 'Target', url: 'https://example.com/t', content: 'x', score: 0.9 }] }), { status: 200 });
+    }
+    if (url.includes('groq.com')) return new Response(JSON.stringify({ choices: [{ message: { content: reply } }] }), { status: 200 });
+    if (url.includes('googleapis.com')) return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: reply }] } }] }), { status: 200 });
+    return undefined;
+  });
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/return-policy-verify?retailer=Target`)).json();
+  assert.equal(body.confidence, 0.85);
+});

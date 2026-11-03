@@ -88,7 +88,8 @@ async function handleCustomerTicketResolution(req, res) {
     status: 'ok',
     summary: result.answer,
     source_note: cited ? `Checked against live sources at request time, the most relevant being: ${cited}.` : 'Checked against a live web search at request time.',
-    confidence: 0.55,
+    // Several independent voters agreeing is what earns the higher figure.
+    confidence: result.votes?.agree >= 2 ? 0.85 : 0.55,
     canonical: ['customer-ticket-resolution', text.slice(0, 120)].join(':'),
     resolved: true,
     sources: result.results,

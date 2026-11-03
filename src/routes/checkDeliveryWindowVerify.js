@@ -98,7 +98,8 @@ async function handleDeliveryWindowVerify(req, res) {
     status: 'ok',
     summary,
     source_note: cited ? `Checked against live sources at request time, the most relevant being: ${cited}.` : 'Checked against a live web search at request time.',
-    confidence: 0.45,
+    // Several independent voters agreeing is what earns the higher figure.
+    confidence: result.votes?.agree >= 2 ? 0.85 : 0.45,
     canonical: ['delivery-window-verify', carrier ?? 'unknown-carrier', text.slice(0, 100)].join(':'),
     source: 'web search',
     is_estimate: true,
