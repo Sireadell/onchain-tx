@@ -33,7 +33,7 @@ protocol: generic
 name: TxLens
 description: >
   TxLens provides live, verifiable answers to on-chain and market questions
-  from authoritative sources. Covering 75 intents across blockchain, finance,
+  from authoritative sources. Covering 77 intents across blockchain, finance,
   weather, content, security, and general intelligence domains—each answer
   includes source attribution and fetch timestamps for transparency.
 base_url: https://telegraph-onchain-tx-lookup-miner.onrender.com
@@ -980,6 +980,36 @@ endpoints:
       Unverifiable) and the strongest reasons. Params: text (also content,
       passage, quote), source or author (optional attribution), or the whole
       request as query.
+  - path: /financial-data
+    external_path: /financial-data
+    method: GET
+    intents: [FINANCIAL_DATA]
+    description: >
+      FINANCIAL_DATA. Answers "what was Apple's revenue", "Tesla's net
+      income", "Microsoft's total assets", "Amazon's latest quarterly
+      earnings". Reads the figures a US-listed company itself filed with the
+      SEC (annual 10-K, or quarterly 10-Q when the question says quarter):
+      revenue, net income, operating income, diluted earnings per share,
+      total assets, total liabilities, shareholders' equity, cash,
+      long-term debt and shares outstanding, with the period and filing date.
+      With no metric named it returns a short snapshot. Params: company
+      (required; name or ticker, also accepted as ticker or symbol), metric
+      (optional), or the whole question as query. Companies that do not file
+      with the SEC are reported as not found, never guessed.
+  - path: /loan-interest-rate-quote
+    external_path: /loan-interest-rate-quote
+    method: GET
+    intents: [LOAN_INTEREST_RATE_QUOTE]
+    description: >
+      LOAN_INTEREST_RATE_QUOTE. Answers "what is the 30-year mortgage rate",
+      "current prime rate", "15-year fixed rate today". Returns the latest
+      weekly US average mortgage rate (30-year fixed, 15-year fixed) from
+      Freddie Mac's survey with the change from the previous week, and the
+      bank prime rate derived from the Fed's published target range. With no
+      type named it answers the 30-year mortgage. Personal, auto and credit
+      card loan rates are not covered and are said so, not guessed. Params:
+      loan_type (optional; 30-year, 15-year, prime), or the whole question
+      as query.
 
 # input_schema/output_schema are top-level-only fields, documentation
 # surfaced to callers rather than a per-endpoint validator (confirmed
@@ -2239,6 +2269,8 @@ semantics:
     - CRYPTO_TRANSFER_VERIFY
     - ONCHAIN_METRIC_VERIFY
     - QUESTION_ANSWERING
+    - FINANCIAL_DATA
+    - LOAN_INTEREST_RATE_QUOTE
 
 docs:
   repository: https://github.com/Sireadell/onchain-tx
@@ -2664,3 +2696,12 @@ on_chain:
       method: GET
       query_params:
         text: { source: strings.0 }
+    - endpoint: financial-data
+      method: GET
+      query_params:
+        company: { source: strings.0 }
+        metric: { source: strings.1, optional: true }
+    - endpoint: loan-interest-rate-quote
+      method: GET
+      query_params:
+        loan_type: { source: strings.0, optional: true }
