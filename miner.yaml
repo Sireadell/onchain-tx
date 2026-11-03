@@ -631,8 +631,11 @@ endpoints:
       Federal Register for real, published filings and notices matching a
       named company, product, drug, device, or industry concern, reporting
       what has actually been filed rather than predicting future action.
-      Params: company (required, also accepted as product, drug, device,
-      or concern).
+      For a US-listed company it also returns that company's latest SEC
+      filings (10-K, 10-Q, 8-K and others, with dates and links), and leads
+      with them when the question is about 10-K, 10-Q or 8-K filings or
+      disclosures. Params: company (required, also accepted as product,
+      drug, device, or concern), or the whole question as query.
   - path: /credit-score-verify
     external_path: /credit-score-verify
     method: GET
@@ -650,8 +653,12 @@ endpoints:
     intents: [MACRO_ECONOMIC_INDICATOR]
     description: >
       MACRO_ECONOMIC_INDICATOR. Answers "what is Japan's inflation rate",
-      "how fast is the US economy growing". Reads GDP growth, inflation, or
-      unemployment for a named country from World Bank data. Params:
+      "how fast is the US economy growing", "what is the ECB interest rate".
+      Reads GDP growth, inflation, or unemployment for a named country from
+      World Bank data, and central bank policy interest rates (Federal
+      Reserve target range, ECB deposit and refinancing rates, Bank of
+      Canada overnight rate, Bank of England Bank Rate) from the central
+      banks themselves. Params:
       country (required, name or ISO code), economic_indicator (required,
       also accepted as indicator; GDP growth, inflation, or unemployment).
   - path: /weather-forecast-verify
@@ -888,7 +895,10 @@ endpoints:
       active company". Looks the company up in GLEIF, the global Legal
       Entity Identifier register: legal name, LEI, active status
       (status_active 1 or 0), jurisdiction, registered and headquarters
-      address, creation date. Says plainly when no record exists. Params:
+      address, creation date. When GLEIF has no record but the company is
+      a US SEC registrant, answers from its SEC record instead: state of
+      incorporation, business address, line of business, former names and
+      latest filing. Says plainly when no record exists. Params:
       name (also company, entity, legal_name; the company name),
       jurisdiction (optional, a state or country), or the whole question as
       query.

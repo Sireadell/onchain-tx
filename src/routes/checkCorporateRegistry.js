@@ -5,12 +5,15 @@
 // current directors for 'Globex Corporation' in Delaware, USA?" and name
 // both real and made-up companies, so "no record found" is stated plainly
 // rather than guessed at, and directors, which no LEI record carries, are
-// said to be outside this register instead of invented.
+// said to be outside this register instead of invented. A company with no LEI
+// record that is a US SEC registrant gets its SEC record instead (state of
+// incorporation, business address, former names, latest filing).
 
 import { Router } from 'express';
 import { lookupEntity, EntityRegistryUpstreamError, EntityRegistryLookupError } from '../lib/entityRegistry.js';
 import { firstUsableValue, freeTextParam } from '../lib/entityExtract.js';
 import { respondUnusableInput } from '../lib/unusableInput.js';
+import { findSecCompany, companyProfile } from '../lib/financialData.js';
 
 const router = Router();
 
@@ -91,6 +94,49 @@ function pickRecord(matches, name, code) {
 
 const DIRECTORS_NOTE = 'Directors and officers are not part of an LEI record, so they are not stated here.';
 
+const STILL_FILING_MS = 540 * 86_400_000;
+
+// An exact-name match in the SEC company list, then that company's record.
+async function secRecord(legalName) {
+  const company = await findSecCompany(legalName, { strict: true });
+  if (!company) return null;
+  try {
+    return await companyProfile(company);
+  } catch {
+    return null;
+  }
+}
+
+function secAnswer(name, jurisdiction, code, p, checkedAt) {
+  const stillFiling = p.last_filing_date ? Date.now() - Date.parse(p.last_filing_date) < STILL_FILING_MS : false;
+  const parts = [`No LEI record for "${name}" was found in the GLEIF register, but ${p.name} is a US SEC registrant (CIK ${p.cik}${p.tickers.length ? `, ticker ${p.tickers[0]}` : ''}).`];
+  if (p.state_of_incorporation) parts.push(`It is incorporated in ${p.state_of_incorporation}.`);
+  if (p.business_address) parts.push(`Its business address is ${p.business_address}.`);
+  if (p.sic_description) parts.push(`Its line of business is ${p.sic_description}.`);
+  if (p.former_names.length) parts.push(`It was formerly named ${p.former_names.slice(0, 3).join(', ')}.`);
+  if (p.last_filing_date) parts.push(`Its most recent SEC filing was on ${p.last_filing_date}${stillFiling ? ', so it is still filing reports' : ', so it may no longer be active'}.`);
+  if (code && !code.startsWith('US')) parts.push(`No record is registered in ${jurisdiction}; this is a US filer.`);
+  parts.push('Directors and officers are named in its SEC proxy statement, not in this record.');
+  return {
+    status: 'ok',
+    summary: parts.join(' '),
+    confidence: 0.8,
+    canonical: ['corporate-registry', 'sec', String(p.cik)].join(':'),
+    name,
+    found: true,
+    status_active: stillFiling ? 1 : 0,
+    legal_name: p.name,
+    entity_status: stillFiling ? 'ACTIVE' : 'UNKNOWN',
+    jurisdiction: p.state_of_incorporation ? `US, ${p.state_of_incorporation}` : 'US',
+    legal_address: p.business_address,
+    headquarters_address: p.mailing_address,
+    registered_as: `SEC CIK ${p.cik}`,
+    sec_profile: p,
+    source: 'SEC EDGAR (data.sec.gov submissions)',
+    checked_at: checkedAt,
+  };
+}
+
 async function handleCorporateRegistry(req, res) {
   const params = (req.method === 'GET' ? req.query : req.body) ?? {};
   const text = freeTextParam(params) ?? '';
@@ -121,6 +167,8 @@ async function handleCorporateRegistry(req, res) {
 
   const checkedAt = new Date().toISOString();
   if (!found.matches.length) {
+    const sec = await secRecord(legalName);
+    if (sec) return res.json(secAnswer(name, jurisdiction, code, sec, checkedAt));
     const where = jurisdiction ? ` in ${jurisdiction}` : '';
     return res.json({
       status: 'ok',

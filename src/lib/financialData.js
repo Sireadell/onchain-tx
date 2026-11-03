@@ -9,6 +9,7 @@ const TICKERS_URL = process.env.SEC_TICKERS_URL || 'https://www.sec.gov/files/co
 const CONCEPT_BASE = process.env.SEC_CONCEPT_BASE || 'https://data.sec.gov/api/xbrl/companyconcept';
 // The SEC asks every automated caller to identify itself.
 const USER_AGENT = process.env.SEC_USER_AGENT || 'TxLens Miner sireadell@gmail.com';
+const SUBMISSIONS_BASE = process.env.SEC_SUBMISSIONS_BASE || 'https://data.sec.gov/submissions';
 const REQUEST_TIMEOUT_MS = Number(process.env.FINANCIAL_TIMEOUT_MS) || 8_000;
 const TICKERS_TTL_MS = 6 * 3_600_000;
 const CONCEPT_TTL_MS = Number(process.env.FINANCIAL_CACHE_TTL_MS) || 30 * 60_000;
@@ -90,12 +91,15 @@ const NOT_TICKERS = new Set(['US', 'USA', 'CEO', 'CFO', 'EPS', 'GDP', 'USD', 'SE
 
 // A company from a name, ticker or whole question. Returns null when the SEC
 // has no such filer.
-const ORDINARY_WORDS = new Set(['what', 'when', 'which', 'where', 'total', 'income', 'revenue', 'sales', 'profit', 'share', 'shares', 'assets', 'cash', 'annual', 'quarter', 'quarterly', 'latest', 'current', 'company', 'price', 'value', 'stock', 'report', 'financial', 'earnings', 'equity', 'debt', 'this', 'that', 'last', 'with', 'from', 'about', 'tell', 'show', 'give', 'fiscal', 'year', 'liabilities', 'operating', 'diluted']);
+const ORDINARY_WORDS = new Set(['what', 'when', 'which', 'where', 'total', 'income', 'revenue', 'sales', 'profit', 'share', 'shares', 'assets', 'cash', 'annual', 'quarter', 'quarterly', 'latest', 'current', 'company', 'price', 'value', 'stock', 'report', 'financial', 'earnings', 'equity', 'debt', 'this', 'that', 'last', 'with', 'from', 'about', 'tell', 'show', 'give', 'fiscal', 'year', 'liabilities', 'operating', 'diluted', 'will', 'does', 'should', 'would', 'could', 'have', 'has', 'were', 'there', 'their', 'these', 'those', 'many', 'much', 'more', 'most', 'recent', 'filing', 'filings']);
 
-export async function resolveCompany(raw) {
+// strict: only an exact company name counts (no first-word or ticker guesses),
+// for callers where a wrong company is worse than no company.
+export async function resolveCompany(raw, { strict = false } = {}) {
   const text = String(raw ?? '').trim();
   if (!text) return null;
   const { byTicker, byName, byFirst } = await loadCompanies();
+  if (strict) return byName.get(coreName(text)) ?? null;
   // A short value from a `company` param is a name; a long one is a question.
   const explicit = text.split(/\s+/).length <= 4;
 
@@ -224,4 +228,87 @@ export function formatValue(value, unit) {
   if (abs >= 1e9) return `${sign}$${scaled(abs / 1e9, 'billion')}`;
   if (abs >= 1e6) return `${sign}$${scaled(abs / 1e6, 'million')}`;
   return `${sign}$${abs.toLocaleString('en-US')}`;
+}
+
+// ---- Filings and company profile ---------------------------------------------
+
+export const KEY_FORMS = ['10-K', '10-Q', '8-K', '20-F', '40-F', '6-K', 'S-1', '424B4', 'DEF 14A', 'SC 13D', 'SC 13G', 'SCHEDULE 13D', 'SCHEDULE 13G'];
+
+// Which filing types a question is asking about; the key forms when none.
+export function formsFromText(raw) {
+  const t = String(raw ?? '').toLowerCase();
+  const forms = [];
+  const add = (...f) => f.forEach((x) => { if (!forms.includes(x)) forms.push(x); });
+  if (/10-?k|annual report/.test(t)) add('10-K', '20-F', '40-F');
+  if (/10-?q|quarterly report|quarterly filing/.test(t)) add('10-Q');
+  if (/8-?k|current report|material event/.test(t)) add('8-K', '6-K');
+  if (/20-?f/.test(t)) add('20-F');
+  if (/s-1|prospectus|ipo/.test(t)) add('S-1', '424B4');
+  if (/proxy/.test(t)) add('DEF 14A');
+  return forms.length ? forms : KEY_FORMS;
+}
+
+const formMatches = (form, wanted) => wanted.some((f) => form === f || form === `${f}/A`);
+
+export async function fetchSubmissions(cik) {
+  const url = `${SUBMISSIONS_BASE}/CIK${String(cik).padStart(10, '0')}.json`;
+  return cached(url, CONCEPT_TTL_MS, () => getJson(url));
+}
+
+// The newest filings of the wanted types, newest first.
+export async function recentFilings(company, { forms = KEY_FORMS, limit = 5 } = {}) {
+  const sub = await fetchSubmissions(company.cik);
+  const r = sub?.filings?.recent;
+  if (!Array.isArray(r?.form)) return [];
+  const rows = [];
+  for (let i = 0; i < r.form.length && rows.length < limit; i += 1) {
+    if (!formMatches(r.form[i], forms)) continue;
+    const accession = String(r.accessionNumber?.[i] ?? '').replace(/-/g, '');
+    const doc = r.primaryDocument?.[i];
+    rows.push({
+      form: r.form[i],
+      filed: r.filingDate?.[i] ?? null,
+      period: r.reportDate?.[i] || null,
+      description: r.primaryDocDescription?.[i] || null,
+      items: r.items?.[i] || null,
+      url: accession && doc ? `https://www.sec.gov/Archives/edgar/data/${company.cik}/${accession}/${doc}` : null,
+    });
+  }
+  return rows;
+}
+
+const formatAddress = (a) => (a ? [a.street1, a.street2, a.city, a.stateOrCountry, a.zipCode].filter(Boolean).join(', ') || null : null);
+
+// A company's own registration facts from its SEC record.
+export async function companyProfile(company) {
+  const sub = await fetchSubmissions(company.cik);
+  if (!sub?.name) return null;
+  return {
+    name: sub.name,
+    cik: company.cik,
+    tickers: sub.tickers ?? [],
+    exchanges: (sub.exchanges ?? []).filter(Boolean),
+    entity_type: sub.entityType || null,
+    sic: sub.sic || null,
+    sic_description: sub.sicDescription || null,
+    state_of_incorporation: sub.stateOfIncorporationDescription || sub.stateOfIncorporation || null,
+    business_address: formatAddress(sub.addresses?.business),
+    mailing_address: formatAddress(sub.addresses?.mailing),
+    former_names: (sub.formerNames ?? []).map((f) => f.name).filter(Boolean),
+    fiscal_year_end: sub.fiscalYearEnd || null,
+    lei: sub.lei || null,
+    last_filing_date: sub.filings?.recent?.filingDate?.[0] ?? null,
+  };
+}
+
+// Route-facing lookup: never throws and stays off under `node --test` unless a
+// test opts in, so routes that merely add SEC detail do not reach the network
+// from unrelated tests.
+export async function findSecCompany(text, options) {
+  if (process.env.NODE_TEST_CONTEXT && !process.env.SEC_LOOKUP_FORCE) return null;
+  try {
+    return await resolveCompany(text, options);
+  } catch {
+    return null;
+  }
 }

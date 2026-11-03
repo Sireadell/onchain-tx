@@ -9,6 +9,9 @@ import {
   fetchMacroIndicator, resolveCountryCode, resolveIndicatorCode,
   MacroUpstreamError, MacroLookupError, WORLD_BANK_ATTRIBUTION,
 } from '../lib/macroData.js';
+import {
+  fetchPolicyRate, resolvePolicyRegion, policyRateSummary, POLICY_RATE_RE, POLICY_REGIONS, PolicyRateUpstreamError,
+} from '../lib/policyRates.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { firstUsableValue } from '../lib/entityExtract.js';
 
@@ -42,6 +45,47 @@ async function handleMacroEconomicIndicator(req, res) {
       res,
       'I cannot look up a macroeconomic indicator because no country or indicator was supplied. Pass a country (e.g. Japan) and an indicator (GDP growth, inflation, or unemployment).',
     );
+  }
+
+  // Central bank interest rates are not a World Bank indicator. A question about
+  // one (and not also about an indicator named in its own param) is answered
+  // from the central bank itself.
+  const allText = [countryRaw, indicatorRaw, freeText].filter((v) => typeof v === 'string').join(' ').slice(0, MAX_INPUT_CHARS);
+  if (POLICY_RATE_RE.test(allText) && !(typeof indicatorRaw === 'string' && resolveIndicatorCode(indicatorRaw))) {
+    const region = resolvePolicyRegion(allText);
+    if (!region) {
+      return respondUnusableInput(
+        res,
+        `Central bank interest rates are covered for ${Object.values(POLICY_REGIONS).join(', ')}. Name one of them, for example "the Fed rate" or "the ECB deposit rate".`,
+      );
+    }
+    try {
+      const rate = await fetchPolicyRate(region);
+      return res.json({
+        status: 'ok',
+        summary: policyRateSummary(rate),
+        confidence: 0.9,
+        canonical: ['macro-economic-indicator', 'policy-rate', region.toLowerCase()].join(':'),
+        country: POLICY_REGIONS[region],
+        indicator: `${rate.bank} ${rate.rate_name}`,
+        value: rate.percent,
+        unit: 'percent',
+        as_of: rate.as_of,
+        policy_rate: rate,
+        source: rate.bank,
+        checked_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      if (err instanceof PolicyRateUpstreamError) {
+        return res.status(502).json({
+          status: 'error',
+          summary: 'The central bank data source is temporarily unavailable, so the rate could not be checked right now. Retry shortly.',
+          confidence: 0,
+          error: err.message,
+        });
+      }
+      throw err;
+    }
   }
 
   let countryCode = resolveCountryCode(String(countryRaw ?? '').slice(0, MAX_INPUT_CHARS));

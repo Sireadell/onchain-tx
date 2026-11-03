@@ -92,7 +92,7 @@ export function parseNyFed(body) {
   const top = row?.targetRateTo;
   const bottom = row?.targetRateFrom;
   if (!Number.isFinite(top) || !Number.isFinite(bottom)) throw new LoanRatesUpstreamError('the New York Fed answer had no target range');
-  return { as_of: row.effectiveDate, percent: top + 3, fed_target_from: bottom, fed_target_to: top };
+  return { as_of: row.effectiveDate, percent: top + 3, fed_target_from: bottom, fed_target_to: top, effr: Number.isFinite(row.percentRate) ? row.percentRate : null };
 }
 
 const wrap = (label, fn) => async () => {
