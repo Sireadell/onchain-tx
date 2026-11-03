@@ -5,8 +5,8 @@
 // consensus.js.
 //
 // Model names change often, so both are env settings with a working default:
-//   GROQ_MODEL    (default llama-3.3-70b-versatile)
-//   GEMINI_MODEL  (default gemini-3.8-flash)
+//   GROQ_MODEL    (default openai/gpt-oss-120b)
+//   GEMINI_MODEL  (default gemini-3-flash-preview)
 // A wrong model name shows up as a 404 whose reason is carried in the error.
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
@@ -21,6 +21,7 @@ export class ProviderError extends Error {
   }
 }
 
+const groqModel = () => process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 export const hasGroq = () => Boolean(process.env.GROQ_API_KEY);
 export const hasGemini = () => Boolean(process.env.GEMINI_API_KEY);
 
@@ -80,10 +81,11 @@ export async function groqComplete(system, user, { maxTokens = 400, temperature 
     budgetMs,
     headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
     body: {
-      model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+      model: groqModel(),
       messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
       max_tokens: maxTokens,
       temperature,
+      ...(/gpt-oss/i.test(groqModel()) ? { reasoning_effort: 'low' } : {}),
     },
   });
   const text = body?.choices?.[0]?.message?.content;
@@ -94,7 +96,7 @@ export async function groqComplete(system, user, { maxTokens = 400, temperature 
 export async function geminiComplete(system, user, { maxTokens = 400, temperature = 0.1, budgetMs = 9_000, grounded = process.env.GEMINI_GROUNDING === '1' } = {}) {
   if (!hasGemini()) throw new ProviderError('GEMINI_API_KEY is not set', { provider: 'gemini' });
   if (providerDisabled('gemini')) throw new ProviderError('gemini is paused after a refusal', { provider: 'gemini' });
-  const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+  const model = process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
   const body = await post(geminiUrl(model), {
     provider: 'gemini',
     budgetMs,
