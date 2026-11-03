@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  computeFee, confirmationsAt, formatDuration, decodeLogs, isUnlimited, withCommas,
+  computeFee, confirmationsAt, formatDuration, decodeLogs, isUnlimited, withCommas, internalTransfers,
   TRANSFER_TOPIC, APPROVAL_TOPIC,
 } from './transferVerify.js';
 
@@ -66,4 +66,20 @@ test('decodeLogs reads ERC-20, NFT and approval events', () => {
 
 test('withCommas groups digits', () => {
   assert.equal(withCommas(6959302739200098n), '6,959,302,739,200,098');
+});
+
+test('internalTransfers keeps value moves inside the call tree and skips failed branches', () => {
+  const trace = {
+    type: 'CALL', from: '0xa', to: '0xb', value: '0x10',
+    calls: [
+      { type: 'CALL', from: '0xb', to: '0xc', value: '0x5' },
+      { type: 'DELEGATECALL', from: '0xb', to: '0xd', value: '0x9' },
+      { type: 'CALL', from: '0xb', to: '0xe', value: '0x7', error: 'execution reverted', calls: [{ type: 'CALL', from: '0xe', to: '0xf', value: '0x7' }] },
+      { type: 'CALL', from: '0xb', to: '0xg', value: '0x0' },
+    ],
+  };
+  const out = internalTransfers(trace);
+  assert.equal(out.length, 1);
+  assert.deepEqual(out[0], { from: '0xb', to: '0xc', value: 5n });
+  assert.deepEqual(internalTransfers(null), []);
 });

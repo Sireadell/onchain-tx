@@ -99,3 +99,22 @@ export function decodeLogs(logs) {
 export function isUnlimited(amount) {
   return amount === MAX_UINT256;
 }
+
+// Native-currency moves made by contracts inside one transaction, read from
+// a callTracer call tree. The top-level call is the transaction's own value
+// and is skipped; calls that failed, and everything beneath a failed call,
+// moved nothing and are skipped too. Delegate and static calls carry no value.
+const VALUE_CALL_TYPES = new Set(['CALL', 'CREATE', 'CREATE2', 'SELFDESTRUCT']);
+export function internalTransfers(trace) {
+  const out = [];
+  const walk = (node, depth) => {
+    if (!node || node.error) return;
+    if (depth > 0 && VALUE_CALL_TYPES.has(String(node.type ?? 'CALL').toUpperCase())) {
+      const value = big(node.value);
+      if (value > 0n) out.push({ from: String(node.from ?? '').toLowerCase(), to: String(node.to ?? '').toLowerCase(), value });
+    }
+    for (const child of node.calls ?? []) walk(child, depth + 1);
+  };
+  walk(trace, 0);
+  return out;
+}

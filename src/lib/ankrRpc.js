@@ -141,7 +141,7 @@ export function resetRpcCache() {
   cache.clear();
 }
 
-// DWELLIR FIRST, ANKR AS BACKUP. Dwellir (free developer plan, 100 req/s) is
+// DWELLIR FIRST, ANKR AS BACKUP. Dwellir (pro plan) is
 // tried first on the chains it serves. Anything that goes wrong there, or an
 // empty answer for a transaction/receipt lookup (could be a block outside
 // Dwellir's kept history), falls through to the Ankr path below unchanged.
@@ -157,19 +157,19 @@ const DWELLIR_HOSTS = {
 const DWELLIR_CALL_TIMEOUT_MS = Number(process.env.DWELLIR_CALL_TIMEOUT_MS) || 3_000;
 const EMPTY_MEANS_FALLBACK = new Set(['eth_getTransactionByHash', 'eth_getTransactionReceipt']);
 
-async function tryDwellirRpc(chainSegment, method, params) {
+async function tryDwellirRpc(chainSegment, method, params, timeoutMs = DWELLIR_CALL_TIMEOUT_MS) {
   const key = process.env.DWELLIR_API_KEY;
   const host = DWELLIR_HOSTS[chainSegment];
   if (!key || !host) return { used: false };
   try {
     checkBudget();
     const budget = budgetContext.getStore();
-    const remaining = budget ? Math.max(1, budget.deadlineAt - Date.now()) : DWELLIR_CALL_TIMEOUT_MS;
+    const remaining = budget ? Math.max(1, budget.deadlineAt - Date.now()) : timeoutMs;
     const res = await fetch(`https://${host}/${key}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-      signal: AbortSignal.timeout(Math.min(DWELLIR_CALL_TIMEOUT_MS, remaining)),
+      signal: AbortSignal.timeout(Math.min(timeoutMs, remaining)),
     });
     if (!res.ok) return { used: false };
     const body = await res.json();
@@ -180,6 +180,16 @@ async function tryDwellirRpc(chainSegment, method, params) {
     if (err instanceof RpcBudgetExceededError) throw err;
     return { used: false };
   }
+}
+
+// Call tree of one transaction (every internal call and the value it moved),
+// from Dwellir's debug_traceTransaction with the built-in call tracer. Only
+// Dwellir serves this: Ankr's plan has no trace methods, so there is no
+// fallback and the answer is null when Dwellir is off or does not respond.
+const DWELLIR_TRACE_TIMEOUT_MS = Number(process.env.DWELLIR_TRACE_TIMEOUT_MS) || 5_000;
+export async function traceTransactionCalls(chainSegment, txHash) {
+  const out = await tryDwellirRpc(chainSegment, 'debug_traceTransaction', [txHash, { tracer: 'callTracer' }], DWELLIR_TRACE_TIMEOUT_MS);
+  return out.used ? out.result ?? null : null;
 }
 
 async function fetchAnkrRpc(chainSegment, method, params) {

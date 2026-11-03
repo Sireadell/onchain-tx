@@ -8,7 +8,7 @@
 
 import { Router } from 'express';
 import {
-  getTransactionByHash, getTransactionReceipt, getBlockNumber, getBlockByNumber, withRpcBudget,
+  getTransactionByHash, getTransactionReceipt, getBlockNumber, getBlockByNumber, withRpcBudget, traceTransactionCalls,
   RpcBudgetExceededError, ApiKeyMissingError,
 } from '../lib/ankrRpc.js';
 import { resolveRpcChainLoose, rpcChainNames, DEFAULT_CHAIN } from '../lib/chains.js';
@@ -17,7 +17,7 @@ import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { amountToDecimalString } from '../lib/formatAmount.js';
 import { readTokenMeta } from '../lib/knownTokens.js';
 import {
-  computeFee, confirmationsAt, formatDuration, decodeLogs, isUnlimited, withCommas,
+  computeFee, confirmationsAt, formatDuration, decodeLogs, isUnlimited, withCommas, internalTransfers,
 } from '../lib/transferVerify.js';
 
 const router = Router();
@@ -182,12 +182,18 @@ async function handleTransferVerify(req, res) {
     const fee = computeFee({ tx, receipt, block });
     const valueWei = BigInt(tx.value ?? '0x0');
     const confirmations = confirmationsAt(blockNumber, tipNumber);
-    const movementsText = describeMovements(decoded, metas);
+    const reverted = receipt.status === '0x0';
+    const internal = reverted ? [] : internalTransfers(await traceTransactionCalls(chain.segment, txHash).catch(() => null));
+    const internalTotal = internal.reduce((sum, m) => sum + m.value, 0n);
+    const largest = internal.reduce((top, m) => (!top || m.value > top.value ? m : top), null);
+    const internalText = largest
+      ? `Inside the transaction, contracts also moved ${amountToDecimalString(internalTotal, 18)} ${chain.nativeSymbol} across ${internal.length} internal transfer${internal.length === 1 ? '' : 's'} (largest: ${amountToDecimalString(largest.value, 18)} ${chain.nativeSymbol} from ${largest.from} to ${largest.to}).`
+      : '';
+    const movementsText = [describeMovements(decoded, metas), internalText].filter(Boolean).join(' ');
     const summary = buildTransferSummary({
       chain, txHash, tx, receipt, fee, valueWei, movementsText, confirmations,
       tip: { given: Boolean(tipText), number: tipNumber }, elapsedText, blockNumber,
     });
-    const reverted = receipt.status === '0x0';
 
     res.json({
       status: reverted ? 'reverted' : 'confirmed',
@@ -207,6 +213,8 @@ async function handleTransferVerify(req, res) {
       confirmations_counted_against: tipNumber.toString(),
       elapsed_seconds: elapsedSeconds,
       token_events: decoded.length,
+      internal_transfer_count: internal.length,
+      internal_value_wei: internalTotal.toString(),
       source: `${chain.label} RPC receipt and block header`,
       checked_at: new Date().toISOString(),
     });
