@@ -86,6 +86,24 @@ test('consensus needs Tavily plus one model key', () => {
   assert.ok(!consensusConfigured());
 });
 
+test('a Groq rate limit is retried once before moving on', async (t) => {
+  delete process.env.GEMINI_API_KEY;
+  process.env.LLM_RATE_LIMIT_WAIT_MS = '10';
+  const original = globalThis.fetch;
+  let groqCalls = 0;
+  globalThis.fetch = async (url) => {
+    if (!String(url).includes('groq.com')) return original(url);
+    groqCalls += 1;
+    return groqCalls === 1
+      ? new Response(JSON.stringify({ error: { message: 'slow down' } }), { status: 429 })
+      : new Response(JSON.stringify({ choices: [{ message: { content: 'Salut' } }] }), { status: 200 });
+  };
+  t.after(() => { globalThis.fetch = original; delete process.env.LLM_RATE_LIMIT_WAIT_MS; });
+  const out = await llmComplete('Translate to French.', 'hi retry', { disableSearch: true });
+  assert.equal(out.text, 'Salut');
+  assert.equal(groqCalls, 2);
+});
+
 test('text intents fall back to Groq when there is no Perplexity key', async (t) => {
   delete process.env.GEMINI_API_KEY;
   const original = globalThis.fetch;
