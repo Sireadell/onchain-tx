@@ -28,6 +28,8 @@
 //    WEB_SEARCH, so its upstream can match that miner's evidence but not
 //    beat it on data, only on wording.
 
+import { guarded, SpendCapError } from './spendGuard.js';
+
 const PERPLEXITY_URL = 'https://api.perplexity.ai/v1/agent';
 const TAVILY_URL = 'https://api.tavily.com/search';
 
@@ -114,7 +116,18 @@ async function postJson(url, { key, body, signal }) {
   return res;
 }
 
+// Every Perplexity search passes the spend guard (cache, daily and per-caller
+// caps). A cap hit reads like any other provider failure to searchWeb().
 async function callPerplexity(query, options) {
+  try {
+    return await guarded(JSON.stringify(['search', query]), () => callPerplexityRaw(query, options), { searches: true });
+  } catch (err) {
+    if (err instanceof SpendCapError) throw new WebSearchError(err.message);
+    throw err;
+  }
+}
+
+async function callPerplexityRaw(query, options) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.budgetMs);
   try {

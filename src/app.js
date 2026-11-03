@@ -84,6 +84,7 @@ import sentinelFraudRouter from './routes/sentinelFraud.js';
 import { misrouteWatchMiddleware, extractRequestText } from './lib/misrouteWatch.js';
 import { createMisrouteHandoffMiddleware } from './lib/misrouteHandoff.js';
 import { createRefusalFallbackMiddleware } from './lib/refusalFallback.js';
+import { spendCallerMiddleware } from './lib/spendGuard.js';
 
 // Each route has its own bucket. The default allows dispatcher bursts while
 // the provider-specific clients still enforce their own tighter quotas.
@@ -327,6 +328,7 @@ export function buildApp() {
   app.set('trust proxy', 1);
   app.use(corsMiddleware);
   app.use(express.json());
+  app.use(spendCallerMiddleware);
   app.use(requestLogMiddleware);
   app.use(placeholderParamMiddleware);
   app.use(answerFieldMiddleware);

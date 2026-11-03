@@ -29,6 +29,8 @@
 // site (true = do not search); this file is the only place that had to
 // change to keep that promise on the new API shape.
 
+import { guarded, SpendCapError } from './spendGuard.js';
+
 const PERPLEXITY_URL = 'https://api.perplexity.ai/v1/agent';
 
 // Same generosity as webSearch.js's TOTAL_BUDGET_MS: Telegraph cancels a
@@ -203,18 +205,27 @@ export async function llmComplete(systemPrompt, userContent, {
   if (!hasLlmProvider()) throw new LlmCompleteError('PERPLEXITY_API_KEY is not set');
 
   const deadline = Date.now() + budgetMs;
-  let lastError = null;
-  for (let i = 0; i < 2; i += 1) {
-    const left = deadline - Date.now();
-    if (i > 0 && left < MIN_RETRY_MS) break;
-    try {
-      return await attempt(systemPrompt, userContent, {
-        budgetMs: Math.min(left, ATTEMPT_CAP_MS), maxTokens, disableSearch, temperature, keepFormatting,
-      });
-    } catch (err) {
-      lastError = err;
-      if (!(err instanceof LlmCompleteError) || !err.retryable) throw err;
+  const run = async () => {
+    let lastError = null;
+    for (let i = 0; i < 2; i += 1) {
+      const left = deadline - Date.now();
+      if (i > 0 && left < MIN_RETRY_MS) break;
+      try {
+        return await attempt(systemPrompt, userContent, {
+          budgetMs: Math.min(left, ATTEMPT_CAP_MS), maxTokens, disableSearch, temperature, keepFormatting,
+        });
+      } catch (err) {
+        lastError = err;
+        if (!(err instanceof LlmCompleteError) || !err.retryable) throw err;
+      }
     }
+    throw lastError;
+  };
+  // Every paid call passes the spend guard: cache, daily and per-caller caps.
+  try {
+    return await guarded(JSON.stringify(['llm', systemPrompt, userContent, maxTokens, disableSearch, temperature, keepFormatting]), run, { searches: !disableSearch });
+  } catch (err) {
+    if (err instanceof SpendCapError) throw new LlmCompleteError(err.message, { status: 429, retryable: false });
+    throw err;
   }
-  throw lastError;
 }
