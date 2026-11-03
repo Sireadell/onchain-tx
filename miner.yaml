@@ -33,7 +33,7 @@ protocol: generic
 name: TxLens
 description: >
   TxLens provides live, verifiable answers to on-chain and market questions
-  from authoritative sources. Covering 72 intents across blockchain, finance,
+  from authoritative sources. Covering 75 intents across blockchain, finance,
   weather, content, security, and general intelligence domains—each answer
   includes source attribution and fetch timestamps for transparency.
 base_url: https://telegraph-onchain-tx-lookup-miner.onrender.com
@@ -819,6 +819,51 @@ endpoints:
       of sources that returned data. Params: ip or domain (required; also
       accepted as indicator, ioc, host, query, q, or question).
 
+  - path: /crypto-transfer-verify
+    external_path: /crypto-transfer-verify
+    method: GET
+    intents: [CRYPTO_TRANSFER_VERIFY]
+    description: >
+      CRYPTO_TRANSFER_VERIFY. Answers "did this transfer succeed, who sent it
+      and who received it, how much moved, what was the fee and how many
+      confirmations does it have". Reads the receipt and block header from
+      the chain and returns the outcome (confirmed or reverted), sender,
+      recipient, the native amount, every token Transfer and Approval event
+      with symbol and amount, the fee split into the burned base fee and the
+      priority tip, any layer-1 data fee or blob fee, and the confirmation
+      count. A block named in the question ("treat 280,000,000 as the chain
+      tip", "as of block 24,000,000") is used to count confirmations and the
+      elapsed time between the two blocks. Params: tx_hash (required,
+      0x-prefixed, 64 hex characters; also read out of a question), chain
+      (optional, one of eth, base, arbitrum, optimism, polygon; searched
+      across all when omitted), tip_block (optional block to count
+      confirmations against).
+  - path: /onchain-metric-verify
+    external_path: /onchain-metric-verify
+    method: GET
+    intents: [ONCHAIN_METRIC_VERIFY]
+    description: >
+      ONCHAIN_METRIC_VERIFY. Answers "what did owner() return on contract X
+      at block N", "what was totalAssets() of this vault", "which wallet held
+      NFT 100 at block N", "what is the 32-byte word at storage slot 0x8",
+      "what did this price feed report at block N", "how much gas did this
+      transaction use". Reads the value straight from the chain at the named
+      block (or the latest) and returns it in plain digits. Params: contract
+      (a 0x address; also read out of a question), the thing to read as a
+      call such as owner() or convertToShares(1e18) or as plain words, slot
+      (optional storage slot), block (optional, default latest), chain
+      (optional, one of eth, base, arbitrum, optimism, polygon).
+  - path: /question-answering
+    external_path: /question-answering
+    method: GET
+    intents: [QUESTION_ANSWERING]
+    description: >
+      QUESTION_ANSWERING. Answers an open factual question such as "who wrote
+      Things Fall Apart" or "when was the Eiffel Tower built" in one to three
+      plain sentences with the source named. Uses a language model with live
+      search when available and the matching Wikipedia article otherwise. A
+      question nothing reliable answers is said so, not guessed. Params:
+      question (required; also query, q, prompt, text).
   - path: /token-total-supply
     external_path: /token-total-supply
     method: GET
@@ -948,7 +993,7 @@ input_schema:
     tx_hash:
       type: string
       pattern: "^0x[0-9a-fA-F]{64}$"
-      description: EVM transaction hash to look up. Used by /check-tx only.
+      description: EVM transaction hash to look up. Used by /check-tx and /crypto-transfer-verify.
     address:
       type: string
       pattern: "^0x[0-9a-fA-F]{40}$"
@@ -1306,7 +1351,8 @@ input_schema:
     block:
       type: string
       description: >
-        Block number for /token-total-supply (default latest).
+        Block number for /token-total-supply and /onchain-metric-verify
+        (default latest).
     height:
       type: string
       description: >
@@ -2190,6 +2236,9 @@ semantics:
     - CODE_GENERATION
     - CODE_REVIEW
     - TEXT_AUTHENTICITY_CHECK
+    - CRYPTO_TRANSFER_VERIFY
+    - ONCHAIN_METRIC_VERIFY
+    - QUESTION_ANSWERING
 
 docs:
   repository: https://github.com/Sireadell/onchain-tx
@@ -2559,6 +2608,21 @@ on_chain:
         token: { source: strings.0 }
         chain: { source: strings.1, optional: true }
         block: { source: numbers.0, type: int, optional: true }
+    - endpoint: crypto-transfer-verify
+      method: GET
+      query_params:
+        tx_hash: { source: strings.0 }
+        chain: { source: strings.1, optional: true }
+    - endpoint: onchain-metric-verify
+      method: GET
+      query_params:
+        question: { source: strings.0 }
+        chain: { source: strings.1, optional: true }
+        block: { source: numbers.0, type: int, optional: true }
+    - endpoint: question-answering
+      method: GET
+      query_params:
+        question: { source: strings.0 }
     - endpoint: corporate-registry
       method: GET
       query_params:

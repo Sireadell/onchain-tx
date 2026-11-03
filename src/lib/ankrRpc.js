@@ -312,6 +312,33 @@ export async function getTokenBalance(chainSegment, tokenAddress, walletAddress)
   );
 }
 
+// A block with its header fields (base fee, gas used, timestamp). Finalized
+// blocks never change, so the shared 30s cache is safe; 'latest' is not
+// cached because it moves every block.
+export async function getBlockByNumber(chainSegment, block = 'latest') {
+  const tag = block === 'latest' ? 'latest' : `0x${BigInt(block).toString(16)}`;
+  if (tag === 'latest') return fetchAnkrRpc(chainSegment, 'eth_getBlockByNumber', [tag, false]);
+  return cachedFetch(chainSegment, 'eth_getBlockByNumber', [tag, false], () =>
+    fetchAnkrRpc(chainSegment, 'eth_getBlockByNumber', [tag, false])
+  );
+}
+
+// Raw storage word at `slot`, at `block`.
+export async function getStorageAt(chainSegment, address, slot, block = 'latest') {
+  const tag = block === 'latest' ? 'latest' : `0x${BigInt(block).toString(16)}`;
+  return cachedFetch(chainSegment, 'eth_getStorageAt', [address, slot, tag], () =>
+    fetchAnkrRpc(chainSegment, 'eth_getStorageAt', [address, slot, tag])
+  );
+}
+
+// Native balance at `block` (getBalance above is always the latest block).
+export async function getBalanceAt(chainSegment, address, block = 'latest') {
+  const tag = block === 'latest' ? 'latest' : `0x${BigInt(block).toString(16)}`;
+  return cachedFetch(chainSegment, 'eth_getBalance', [address, tag], () =>
+    fetchAnkrRpc(chainSegment, 'eth_getBalance', [address, tag])
+  );
+}
+
 // Generic read-only contract call (eth_call), at `block` (a hex or decimal
 // block number, or 'latest'). Used for totalSupply()/decimals()/symbol().
 export async function ethCall(chainSegment, to, data, block = 'latest') {

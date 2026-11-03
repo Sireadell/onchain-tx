@@ -15,7 +15,7 @@ import { respondUnusableInput } from '../lib/unusableInput.js';
 const router = Router();
 
 const QUOTED_RE = /['"‘’“”]([^'"‘’“”]{2,120})['"‘’“”]/;
-const FOR_RE = /\b(?:for|of|on|about|is)\s+((?:[A-Z0-9][\w&.,'-]*\s?){1,8}?)(?=\s+(?:in|as|registered|incorporated|located|based|a|an|the|still|currently|active)\b|[?.,]|$)/;
+const FOR_RE = /\b(?:for|of|on|about|[Ii]s|[Dd]oes|[Dd]id)\s+((?:[A-Z0-9][\w&.,'-]*\s?){1,8}?)(?=\s+(?:in|as|registered|incorporated|located|based|a|an|the|still|currently|active)\b|[?.,]|$)/;
 
 // Pulls the company name out of a whole question. A quoted name wins,
 // then a capitalised run after "for"/"of"/"about".
