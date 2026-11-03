@@ -10,12 +10,12 @@ import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 const router = Router();
 
 const OTX_BASE = 'https://otx.alienvault.com/api/v1/indicators';
-const OTX_TIMEOUT_MS = 10_000;
+const OTX_TIMEOUT_MS = 5_000;
 const ABUSEIPDB_BASE = 'https://api.abuseipdb.com/api/v2';
 const ABUSEIPDB_TIMEOUT_MS = 10_000;
 
 // OTX public endpoint is occasionally flaky on first connection
-const OTX_MAX_ATTEMPTS = 2;
+const OTX_MAX_ATTEMPTS = 1;
 const ABUSEIPDB_MAX_ATTEMPTS = 1;
 
 const MAX_INPUT_CHARS = 500;

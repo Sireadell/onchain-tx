@@ -165,6 +165,20 @@ function classifyUrlStructure(parsed) {
   return null;
 }
 
+// When the model does not open with Flagged or Clean, a reply that plainly says
+// the URL was flagged, identified or known as malicious still counts, unless it
+// is negated ("no reports", "not flagged"). Found live 2026-11-03: the eicar
+// test-malware URL came back "Safe" because the reply led with the URL itself.
+const POSITIVE_MALICIOUS_RE = /(flagged|identified|detected|classified|reported|known|listed|recognized|recognised)[^.]{0,40}(malicious|malware|phishing|scam)|(malware|phishing)s+(test|site|domain)|eicar/i;
+const NEGATED_RE = /(no|not|nothing|none|without)[^.]{0,30}(reports?|flagged|malicious|evidence|documented)/i;
+function answerNamesMaliciousUrl(answer) {
+  const text = String(answer ?? '');
+  return POSITIVE_MALICIOUS_RE.test(text) && !NEGATED_RE.test(text.split(/(?<=.)s/)[0] ?? '');
+}
+
+// Hosts that exist to serve test malware or test phishing pages.
+const KNOWN_TEST_MALWARE_HOST_RE = /(^|.)(wicar.org|eicar.org|eicar.com|amtso.org)$|^testsafebrowsing.appspot.com$/;
+
 function reputationPrompt(url) {
   const today = new Date().toISOString().slice(0, 10);
   return `Today is ${today}. Is the URL or domain below known to be associated with phishing, malware, scams, or other malicious activity? `
@@ -180,7 +194,7 @@ async function checkReputation(url) {
     const result = await searchWeb(reputationPrompt(url), { topic: 'general', maxResults: 5 });
     if (!result.answer) return { checked: true, flagged: false, answer: null, sources: result.results };
     const leading = result.answer.match(LEADING_VERDICT_RE);
-    const flagged = leading ? /flagged/i.test(leading[1]) : false;
+    const flagged = leading ? /flagged/i.test(leading[1]) : answerNamesMaliciousUrl(result.answer);
     return { checked: true, flagged, answer: result.answer, sources: result.results };
   } catch (err) {
     if (err instanceof WebSearchError) return { checked: false, reason: err.message };

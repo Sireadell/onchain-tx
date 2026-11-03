@@ -24,14 +24,14 @@ import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 const router = Router();
 
 const OTX_BASE = 'https://otx.alienvault.com/api/v1/indicators';
-const OTX_TIMEOUT_MS = 10_000;
+const OTX_TIMEOUT_MS = 5_000;
 
 // OTX's public (unauthenticated) endpoint is occasionally flaky on the
 // first connection (measured live 2026-09-17: a fresh TLS handshake
 // sometimes fails outright, then a retry a second later succeeds). One
 // retry costs little against Telegraph's 30s cutoff and avoids treating a
 // cold-connection blip as "OTX has no data".
-const OTX_MAX_ATTEMPTS = 2;
+const OTX_MAX_ATTEMPTS = 1;
 
 const HASH_RE = /\b([a-fA-F0-9]{32}|[a-fA-F0-9]{40}|[a-fA-F0-9]{64})\b/;
 

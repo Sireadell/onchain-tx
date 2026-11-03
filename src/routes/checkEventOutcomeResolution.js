@@ -23,6 +23,7 @@ import { Router } from 'express';
 import { searchWeb, hasWebSearchProvider, WebSearchError } from '../lib/webSearch.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { firstUsableValue } from '../lib/entityExtract.js';
+import { resolveCryptoUpDown } from '../lib/cryptoUpDown.js';
 
 const router = Router();
 
@@ -78,6 +79,26 @@ async function handleEventOutcomeResolution(req, res) {
   const query = String(rawQuery).trim().slice(0, MAX_QUERY_CHARS);
   if (!/[a-z0-9]/i.test(query)) {
     return respondUnusableInput(res, `No event was named in ${quoteParam(rawQuery)}, so no outcome could be resolved. Pass the question with the specific event named.`);
+  }
+
+  // "<Coin> Up or Down - <window>" questions are settled by real minute prices,
+  // which no article states, so they skip the web search when prices are readable.
+  const upDown = await resolveCryptoUpDown(query).catch(() => null);
+  if (upDown) {
+    return res.json({
+      query,
+      status: 'ok',
+      summary: upDown.summary,
+      outcome: upDown.outcome,
+      source_note: upDown.provider === 'time check' ? 'Checked against the clock at request time.' : `Resolved from ${upDown.provider} one-minute prices at request time.`,
+      confidence: upDown.confidence,
+      canonical: ['event-outcome-resolution', query.slice(0, 120), upDown.provider].join(':'),
+      open_price: upDown.open ?? null,
+      close_price: upDown.close ?? null,
+      change_percent: upDown.change_percent ?? null,
+      provider: upDown.provider,
+      checked_at: new Date().toISOString(),
+    });
   }
 
   if (!hasWebSearchProvider()) {
