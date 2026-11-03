@@ -6,7 +6,7 @@
 //
 // Model names change often, so both are env settings with a working default:
 //   GROQ_MODEL    (default llama-3.3-70b-versatile)
-//   GEMINI_MODEL  (default gemini-2.5-flash)
+//   GEMINI_MODEL  (default gemini-3.8-flash)
 // A wrong model name shows up as a 404 whose reason is carried in the error.
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
@@ -94,7 +94,7 @@ export async function groqComplete(system, user, { maxTokens = 400, temperature 
 export async function geminiComplete(system, user, { maxTokens = 400, temperature = 0.1, budgetMs = 9_000, grounded = process.env.GEMINI_GROUNDING === '1' } = {}) {
   if (!hasGemini()) throw new ProviderError('GEMINI_API_KEY is not set', { provider: 'gemini' });
   if (providerDisabled('gemini')) throw new ProviderError('gemini is paused after a refusal', { provider: 'gemini' });
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
   const body = await post(geminiUrl(model), {
     provider: 'gemini',
     budgetMs,
