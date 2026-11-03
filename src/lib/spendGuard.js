@@ -39,19 +39,38 @@ const limits = () => ({
   cacheMs: num('LLM_CACHE_MINUTES', 30) * 60_000,
 });
 
+// Who spent what today, so a cap hit can be traced to a caller and a route.
+function note(caller, route, usd) {
+  const key = `${caller} ${route}`;
+  const row = state.spenders.get(key) ?? { calls: 0, usd: 0 };
+  row.calls += 1;
+  row.usd += usd;
+  state.spenders.set(key, row);
+}
+
+function topSpenders() {
+  return [...state.spenders].sort((a, b) => b[1].usd - a[1].usd).slice(0, 5)
+    .map(([k, v]) => `${k}=${v.calls} calls $${v.usd.toFixed(3)}`).join('; ');
+}
+
+function capHit(message, caller, route) {
+  console.warn(`SPEND_CAP_HIT ${message} | blocked: ${caller} ${route} | today: $${state.dayUsd.toFixed(3)}, ${state.dayCalls} calls | top: ${topSpenders()}`);
+  throw new SpendCapError(message);
+}
+
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
 const MAX_CACHE_ENTRIES = 500;
 
 let state;
 export function resetSpendGuard() {
-  state = { dayStart: Date.now(), dayUsd: 0, dayCalls: 0, lifetimeUsd: 0, callers: new Map(), cache: new Map(), inflight: new Map() };
+  state = { dayStart: Date.now(), dayUsd: 0, dayCalls: 0, lifetimeUsd: 0, callers: new Map(), spenders: new Map(), cache: new Map(), inflight: new Map() };
 }
 resetSpendGuard();
 
 // Express middleware: remembers who is calling for the length of the request.
 export function spendCallerMiddleware(req, _res, next) {
-  callerStore.run({ caller: req.ip || 'unknown' }, next);
+  callerStore.run({ caller: req.ip || 'unknown', route: req.path }, next);
 }
 
 function rollDay(now) {
@@ -59,12 +78,13 @@ function rollDay(now) {
     state.dayStart = now;
     state.dayUsd = 0;
     state.dayCalls = 0;
+    state.spenders.clear();
   }
 }
 
-function checkCaller(now, caller, max) {
+function checkCaller(now, caller, max, route) {
   const recent = (state.callers.get(caller) ?? []).filter((t) => now - t < HOUR_MS);
-  if (recent.length >= max) throw new SpendCapError('this caller has reached the hourly limit for paid lookups');
+  if (recent.length >= max) capHit('this caller has reached the hourly limit for paid lookups', caller, route);
   recent.push(now);
   state.callers.set(caller, recent);
   if (state.callers.size > 5000) {
@@ -92,11 +112,12 @@ export async function guarded(key, fn, { searches = false, cache = true } = {}) 
 
   rollDay(now);
   const estimate = searches ? cfg.estimateSearchUsd : cfg.estimatePlainUsd;
-  if (state.lifetimeUsd + estimate > cfg.lifetimeUsd) throw new SpendCapError('the paid-lookup ceiling for this deployment has been reached');
-  if (state.dayUsd + estimate > cfg.dailyUsd) throw new SpendCapError('the daily paid-lookup budget has been used');
-  if (state.dayCalls >= cfg.dailyCalls) throw new SpendCapError('the daily paid-lookup call limit has been reached');
   const caller = callerStore.getStore()?.caller ?? 'internal';
-  checkCaller(now, caller, cfg.hourlyPerCaller);
+  const route = callerStore.getStore()?.route ?? '-';
+  if (state.lifetimeUsd + estimate > cfg.lifetimeUsd) capHit('the paid-lookup ceiling for this deployment has been reached', caller, route);
+  if (state.dayUsd + estimate > cfg.dailyUsd) capHit('the daily paid-lookup budget has been used', caller, route);
+  if (state.dayCalls >= cfg.dailyCalls) capHit('the daily paid-lookup call limit has been reached', caller, route);
+  checkCaller(now, caller, cfg.hourlyPerCaller, route);
 
   // Reserve the estimate now so concurrent calls cannot all slip under the cap.
   state.dayUsd += estimate;
@@ -107,6 +128,7 @@ export async function guarded(key, fn, { searches = false, cache = true } = {}) 
     try {
       const value = await fn();
       const actual = Number(value?.cost_usd);
+      note(caller, route, Number.isFinite(actual) ? actual : estimate);
       if (Number.isFinite(actual)) {
         state.dayUsd += actual - estimate;
         state.lifetimeUsd += actual - estimate;
