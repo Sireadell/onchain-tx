@@ -33,7 +33,7 @@ protocol: generic
 name: TxLens
 description: >
   TxLens provides live, verifiable answers to on-chain and market questions
-  from authoritative sources. Covering 80 intents across blockchain, finance,
+  from authoritative sources. Covering 79 intents across blockchain, finance,
   weather, content, security, and general intelligence domains—each answer
   includes source attribution and fetch timestamps for transparency.
 base_url: https://telegraph-onchain-tx-lookup-miner.onrender.com
@@ -914,17 +914,6 @@ endpoints:
       or Unprotected with the specific gaps. Params: domain (a bare domain,
       also email, name or host; an email address works too), or the whole
       question as query.
-  - path: /mining-hashprice
-    external_path: /mining-hashprice
-    method: GET
-    intents: [MINING_HASHPRICE_VERIFY_GENERAL]
-    description: >
-      MINING_HASHPRICE_VERIFY. Answers "what is the Bitcoin hashprice at
-      block 800000", "current hashprice". Computes hashprice in sats per
-      PH/s per day (hashprice_sats_per_ph_s_day) from the block's coinbase
-      reward and difficulty: reward x 144 / (difficulty x 2^32 / 600 /
-      1e15), plus the fee-free figure and implied network hashrate. Params:
-      height (a block height, or latest; also block).
   - path: /security-review
     external_path: /security-review
     method: GET
@@ -2293,7 +2282,6 @@ semantics:
     - TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL
     - CORPORATE_REGISTRY_LOOKUP_GENERAL
     - EMAIL_SECURITY_GENERAL
-    - MINING_HASHPRICE_VERIFY_GENERAL
     - SECURITY_REVIEW_GENERAL
     - LLM_OUTPUT_EVALUATION_GENERAL
     - CONTRACT_OBLIGATION_AUDIT_GENERAL
