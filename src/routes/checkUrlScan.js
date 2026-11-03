@@ -146,6 +146,14 @@ function classifyUrlStructure(parsed) {
   const host = parsed.hostname.toLowerCase();
   const path = parsed.pathname.toLowerCase();
 
+  if (KNOWN_TEST_MALWARE_HOST_RE.test(host) || /eicar/.test(path)) {
+    return {
+      verdict: 'Malicious',
+      confidence: 0.9,
+      note: 'This address serves the EICAR antivirus test file or a similar test-malware page, which security tools treat as malware.',
+    };
+  }
+
   if (EXECUTABLE_PATH_RE.test(path) && (EMBEDDED_IP_RE.test(host) || DECEPTIVE_HOST_KEYWORD_RE.test(host))) {
     return {
       verdict: 'Malicious',
@@ -169,15 +177,15 @@ function classifyUrlStructure(parsed) {
 // the URL was flagged, identified or known as malicious still counts, unless it
 // is negated ("no reports", "not flagged"). Found live 2026-11-03: the eicar
 // test-malware URL came back "Safe" because the reply led with the URL itself.
-const POSITIVE_MALICIOUS_RE = /(flagged|identified|detected|classified|reported|known|listed|recognized|recognised)[^.]{0,40}(malicious|malware|phishing|scam)|(malware|phishing)s+(test|site|domain)|eicar/i;
-const NEGATED_RE = /(no|not|nothing|none|without)[^.]{0,30}(reports?|flagged|malicious|evidence|documented)/i;
+const POSITIVE_MALICIOUS_RE = /\b(flagged|identified|detected|classified|reported|known|listed|recognized|recognised)\b[^.]{0,40}\b(malicious|malware|phishing|scam)\b|\b(malware|phishing)\s+(test|site|domain)\b|\beicar\b/i;
+const NEGATED_RE = /\b(no|not|nothing|none|without)\b[^.]{0,30}\b(reports?|flagged|malicious|evidence|documented)\b/i;
 function answerNamesMaliciousUrl(answer) {
   const text = String(answer ?? '');
-  return POSITIVE_MALICIOUS_RE.test(text) && !NEGATED_RE.test(text.split(/(?<=.)s/)[0] ?? '');
+  return POSITIVE_MALICIOUS_RE.test(text) && !NEGATED_RE.test(text.split(/(?<=\.)\s/)[0] ?? '');
 }
 
 // Hosts that exist to serve test malware or test phishing pages.
-const KNOWN_TEST_MALWARE_HOST_RE = /(^|.)(wicar.org|eicar.org|eicar.com|amtso.org)$|^testsafebrowsing.appspot.com$/;
+const KNOWN_TEST_MALWARE_HOST_RE = /(^|\.)(wicar\.org|eicar\.org|eicar\.com|amtso\.org)$|^testsafebrowsing\.appspot\.com$/;
 
 function reputationPrompt(url) {
   const today = new Date().toISOString().slice(0, 10);

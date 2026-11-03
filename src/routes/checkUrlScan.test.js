@@ -221,3 +221,10 @@ test('url-scan: a 12000+ character input does not crash the route', async (t) =>
   });
   assert.equal(res.status, 200);
 });
+
+test('url-scan: a known test-malware host is called Malicious without any network answer', async (t) => {
+  const base = startServer(t);
+  const res = await fetch(`${base}/url-scan?url=${encodeURIComponent('http://malware.wicar.org/data/eicar.com')}`);
+  const body = await res.json();
+  assert.equal(body.verdict, 'Malicious');
+});

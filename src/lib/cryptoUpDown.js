@@ -68,7 +68,7 @@ export function parseUpDownQuestion(text, now = Date.now()) {
   const year = dateMatch[3] ? Number(dateMatch[3]) : new Date(now).getUTCFullYear();
 
   // Time text is whatever follows the date, so "28" in "February 28" is not read as an hour.
-  const timeText = when.slice(dateMatch.index + dateMatch[0].length).replace(/E[SD]?T|Eastern/gi, '');
+  const timeText = when.slice(dateMatch.index + dateMatch[0].length).replace(/\bE[SD]?T\b|\bEastern\b/gi, '');
   const parsed = [...timeText.matchAll(TIME_RE)]
     .map((t) => ({ hour: Number(t[1]), minute: t[2] === undefined ? null : Number(t[2]), meridiem: t[3] ?? null }))
     .filter((t) => t.hour >= 1 && t.hour <= 24);
