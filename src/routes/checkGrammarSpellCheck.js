@@ -8,6 +8,7 @@ import {
 } from '../lib/llmComplete.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { firstUsableValue } from '../lib/entityExtract.js';
+import { correctWithLanguageTool } from '../lib/languageTool.js';
 
 const router = Router();
 
@@ -53,32 +54,45 @@ async function handleGrammarSpellCheck(req, res) {
     );
   }
 
-  if (!hasLlmProvider()) {
-    return res.status(503).json({
-      status: 'error',
-      summary: 'Grammar and spell checking is not configured on this deployment.',
-      confidence: 0,
-      error: 'PERPLEXITY_API_KEY is not set',
-    });
-  }
-
   const { text, truncated } = capInput(rawText);
 
-  let result;
-  try {
-    result = await llmComplete(SYSTEM_PROMPT, frameInput(text), { maxTokens: 700, disableSearch: true, temperature: 0 });
-  } catch (err) {
-    if (err instanceof LlmCompleteError) {
+  // The language models answer first. When none of them can (no key, or the
+  // free allowance is used up) LanguageTool, which needs no key, takes over so
+  // the caller still gets a real correction instead of an error.
+  let result = null;
+  let llmError = null;
+  if (hasLlmProvider()) {
+    try {
+      result = await llmComplete(SYSTEM_PROMPT, frameInput(text), { maxTokens: 700, disableSearch: true, temperature: 0 });
+    } catch (err) {
+      llmError = err;
+    }
+  } else {
+    llmError = new Error('PERPLEXITY_API_KEY is not set');
+  }
+
+  if (llmError) {
+    try {
+      const fixed = await correctWithLanguageTool(text);
+      const list = fixed.fixes.length ? `: ${fixed.fixes.join('; ')}` : '';
+      result = { text: `${fixed.corrected}\nChanges: ${fixed.fixes.length}${list}`, cost_usd: 0 };
+    } catch (ltError) {
+      if (!hasLlmProvider()) {
+        return res.status(503).json({
+          status: 'error',
+          summary: 'Grammar and spell checking is not configured on this deployment.',
+          confidence: 0,
+          error: llmError.message,
+        });
+      }
       return res.status(502).json({
         status: 'error',
         summary: `Grammar and spell checking is temporarily unavailable for ${quoteParam(rawText)}. Retry shortly.`,
         confidence: 0,
-        error: err.message,
+        error: `${llmError.message}; ${ltError.message}`,
       });
     }
-    return res.status(502).json({ status: 'error', summary: 'grammar and spell check failed', confidence: 0, error: err.message });
   }
-
   if (!result) {
     return respondUnusableInput(res, `No corrected text could be produced for ${quoteParam(rawText)}. Try rephrasing or shortening the text.`);
   }

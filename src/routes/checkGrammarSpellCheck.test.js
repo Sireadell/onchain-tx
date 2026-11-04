@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import { forwardAsyncErrors, errorHandler } from '../app.js';
 import grammarSpellCheckRouter, { splitCorrection } from './checkGrammarSpellCheck.js';
+import { pickReplacement } from '../lib/languageTool.js';
+
+// LanguageTool is the fallback when the language models fail; point it at a closed port so no test reaches the real service.
+process.env.LANGUAGETOOL_URL = 'http://127.0.0.1:1/check';
 
 // app.js is not mounted here: this batch is not wired into app.js yet (the
 // coordinator does that by hand, per the shared build brief), so the route
@@ -171,4 +175,29 @@ test('grammar-spell-check: an upstream failure is a real error code, not a fabri
   const base = startServer(t);
   const res = await fetch(`${base}/grammar-spell-check?text=hello`);
   assert.equal(res.status, 502);
+});
+
+test('grammar-spell-check: with every language model unavailable, LanguageTool still corrects the text', async (t) => {
+  withKey(t, null);
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (!String(url).startsWith('http://127.0.0.1:1/')) return original(url, init);
+    return new Response(JSON.stringify({ matches: [
+      { offset: 0, length: 8, replacements: [{ value: 'To teem' }, { value: 'The team' }] },
+      { offset: 18, length: 6, replacements: [{ value: 'excited' }] },
+    ] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/grammar-spell-check?text=${encodeURIComponent('The teem was very exited today')}`)).json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.corrected_text, 'The team was very excited today');
+  assert.equal(body.fix_count, 2);
+  assert.deepEqual(body.fixes, ['The teem -> The team', 'exited -> excited']);
+});
+
+test('languageTool: picks the smallest change that keeps the capitalisation', () => {
+  assert.equal(pickReplacement('victorie', [{ value: 'Victoria' }, { value: 'victories' }]), 'victories');
+  assert.equal(pickReplacement('The teem', [{ value: 'To teem' }, { value: 'The team' }]), 'The team');
+  assert.equal(pickReplacement('x', []), null);
 });

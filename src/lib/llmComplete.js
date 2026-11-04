@@ -257,12 +257,15 @@ export async function llmComplete(systemPrompt, userContent, {
       if (lastError instanceof LlmCompleteError && /no credit|rejected our key|status 40[123]/.test(lastError.message)) disableProvider('perplexity');
     }
   }
+  const earlier = [];
   for (const [name, has, fn] of [['groq', hasGroq, groqComplete], ['gemini', hasGemini, geminiComplete]]) {
     if (!has() || providerDisabled(name)) continue;
     try {
       return await guarded(`${name}:${key}`, free(name, fn), { kind: 'free' });
     } catch (err) {
-      lastError = err instanceof SpendCapError ? new LlmCompleteError(err.message, { status: 429, retryable: false }) : new LlmCompleteError(err.message, { status: err.status ?? null, retryable: false });
+      // Keep every provider's reason, so a failed call shows why Groq failed as well as Gemini.
+      earlier.push(err.message);
+      lastError = err instanceof SpendCapError ? new LlmCompleteError(err.message, { status: 429, retryable: false }) : new LlmCompleteError(earlier.join('; '), { status: err.status ?? null, retryable: false });
     }
   }
   throw lastError ?? new LlmCompleteError('no language model provider is available right now');
