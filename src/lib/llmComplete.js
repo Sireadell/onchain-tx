@@ -46,9 +46,6 @@ const ATTEMPT_CAP_MS = 14_000;
 // first failure is reported instead of starting a call that will abort.
 const MIN_RETRY_MS = 5_000;
 
-// How long to wait before the one retry after Groq says "too many requests".
-const rateLimitWaitMs = () => Number(process.env.LLM_RATE_LIMIT_WAIT_MS) || 1_200;
-
 // Perplexity has no documented request-size ceiling that matters here, but
 // Telegraph's router never legitimately sends more than a few thousand
 // characters (longest real TEXT_GENERATION prompt seen in 11 days of
@@ -230,18 +227,9 @@ export async function llmComplete(systemPrompt, userContent, {
   // Free providers answer from the text alone (no live search), and strip the
   // same markup Perplexity output gets.
   const free = (name, fn) => async () => {
-    const run = () => fn(systemPrompt, userContent, { maxTokens, temperature: Number.isFinite(temperature) ? temperature : 0.2, budgetMs: Math.max(Math.min(deadline - Date.now(), ATTEMPT_CAP_MS), 2_000) });
-    let out;
-    try {
-      out = await run();
-    } catch (err) {
-      // Groq's per-minute limit clears within a second or two, so one short
-      // wait is worth it. Gemini's 429 usually means the day's allowance is
-      // gone, which waiting does not fix, so it moves on at once.
-      if (name !== 'groq' || err.status !== 429 || deadline - Date.now() < MIN_RETRY_MS) throw err;
-      await new Promise((resolve) => setTimeout(resolve, rateLimitWaitMs()));
-      out = await run();
-    }
+    // Each provider already moves through its own list of models, so a
+    // rate limit on one model does not need a wait and a second try here.
+    const out = await fn(systemPrompt, userContent, { maxTokens, temperature: Number.isFinite(temperature) ? temperature : 0.2, budgetMs: Math.max(Math.min(deadline - Date.now(), ATTEMPT_CAP_MS), 2_000) });
     return { text: keepFormatting ? out.text.replace(/<think>[\s\S]*?<\/think>/g, '').trim() : stripMarkup(out.text), cost_usd: 0, provider: name };
   };
 
