@@ -39,11 +39,12 @@ const limits = () => ({
   cacheMs: num('LLM_CACHE_MINUTES', 30) * 60_000,
   // Free-allowance providers (Groq, Gemini) and Tavily's monthly credits. They
   // cost no dollars, so they get call caps instead: Tavily's free plan is
-  // 1,000 searches a month, roughly 33 a day.
+  // 1,000 searches a month. The daily limit used to be 33 and is now the whole
+  // month, so the free credits are used as fast as the scorer asks for them.
   freeDailyCalls: num('LLM_FREE_DAILY_CALLS', 1200),
   freeHourlyPerCaller: num('LLM_FREE_HOURLY_CALLS_PER_CALLER', 120),
-  tavilyDailyCalls: num('TAVILY_DAILY_CALLS', 33),
-  tavilyHourlyPerCaller: num('TAVILY_HOURLY_CALLS_PER_CALLER', 20),
+  tavilyDailyCalls: num('TAVILY_DAILY_CALLS', 1000),
+  tavilyHourlyPerCaller: num('TAVILY_HOURLY_CALLS_PER_CALLER', 1000),
 });
 
 // Who spent what today, so a cap hit can be traced to a caller and a route.
