@@ -49,6 +49,7 @@ import checkPackageStatusRouter from './routes/checkPackageStatus.js';
 import checkUrlScanRouter from './routes/checkUrlScan.js';
 import checkCurrencyExchangeRouter from './routes/checkCurrencyExchange.js';
 import checkFxNowRouter from './routes/checkFxNow.js';
+import { NEW_INTENTS } from './routes/newIntentsIndex.js';
 import { isPlaceholder } from './lib/entityExtract.js';
 import checkTokenTotalSupplyRouter from './routes/checkTokenTotalSupply.js';
 import checkCorporateRegistryRouter from './routes/checkCorporateRegistry.js';
@@ -397,6 +398,7 @@ export function buildApp() {
   app.use('/code-generation', batch5RateLimit, forwardAsyncErrors(codeGenerationRouter));
   app.use('/code-review', batch5RateLimit, forwardAsyncErrors(codeReviewRouter));
   app.use('/text-authenticity', batch5RateLimit, forwardAsyncErrors(textAuthenticityRouter));
+  for (const [path, , router] of NEW_INTENTS) app.use(path, batch5RateLimit, forwardAsyncErrors(router));
   app.use('/sanctions-screening', checkSanctionsScreeningMatchRateLimit, forwardAsyncErrors(checkSanctionsScreeningMatchRouter));
   app.use('/vulnerability-triage', checkVulnerabilityTriageRateLimit, forwardAsyncErrors(checkVulnerabilityTriageRouter));
   app.use('/sports-score', checkSportsScoreRateLimit, forwardAsyncErrors(checkSportsScoreRouter));

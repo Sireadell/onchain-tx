@@ -33,7 +33,7 @@ protocol: generic
 name: TxLens
 description: >
   TxLens provides live, verifiable answers to on-chain and market questions
-  from authoritative sources. Covering 79 intents across blockchain, finance,
+  from authoritative sources. Covering 123 intents across blockchain, finance,
   weather, content, security, and general intelligence domains—each answer
   includes source attribution and fetch timestamps for transparency.
 base_url: https://telegraph-onchain-tx-lookup-miner.onrender.com
@@ -1024,6 +1024,313 @@ endpoints:
       not a manual audit, and says so. Params: contract (the 0x address) and
       chain (eth, base, arbitrum, optimism, polygon, avalanche; default eth),
       or pasted Solidity as source, or the whole question as query.
+
+  - path: /entity-extraction
+    external_path: /entity-extraction
+    method: GET
+    intents: [ENTITY_EXTRACTION_GENERAL]
+    description: >
+      ENTITY_EXTRACTION. Extracts people, organizations, places, dates, amounts and products
+      named in a text. Params: text, or the whole request as query.
+  - path: /keyword-extraction
+    external_path: /keyword-extraction
+    method: GET
+    intents: [KEYWORD_EXTRACTION_GENERAL]
+    description: >
+      KEYWORD_EXTRACTION. Returns the main keywords and keyphrases of a text, most important
+      first. Params: text, or query.
+  - path: /b2b-identity
+    external_path: /b2b-identity
+    method: GET
+    intents: [B2B_IDENTITY_ENRICHMENT_GENERAL]
+    description: >
+      B2B_IDENTITY_ENRICHMENT. Enriches a company, domain or person with name, business, industry,
+      headquarters and official website. Params: company, or query.
+  - path: /social-bot-detection
+    external_path: /social-bot-detection
+    method: GET
+    intents: [SOCIAL_BOT_DETECTION_GENERAL]
+    description: >
+      SOCIAL_BOT_DETECTION. Judges whether a social account or its posts look automated. Leads with
+      a verdict (Likely bot, Possibly automated, Likely human, Insufficient
+      data). Params: account, posts, or query.
+  - path: /travel-disruption
+    external_path: /travel-disruption
+    method: GET
+    intents: [TRAVEL_DISRUPTION_GENERAL]
+    description: >
+      TRAVEL_DISRUPTION. Rates disruption risk for a flight, route or airport and names the
+      drivers. Params: flight, route, or query.
+  - path: /content-verification
+    external_path: /content-verification
+    method: GET
+    intents: [CONTENT_VERIFICATION_GENERAL]
+    description: >
+      CONTENT_VERIFICATION. Verifies whether a claim, article or post is genuine and correctly
+      attributed. Verdict first. Params: content, claim, or query.
+  - path: /product-authenticity
+    external_path: /product-authenticity
+    method: GET
+    intents: [PRODUCT_AUTHENTICITY_GENERAL]
+    description: >
+      PRODUCT_AUTHENTICITY. Judges whether a product or listing is genuine or counterfeit. Params:
+      product, listing, or query.
+  - path: /plagiarism-detection
+    external_path: /plagiarism-detection
+    method: GET
+    intents: [PLAGIARISM_DETECTION_GENERAL]
+    description: >
+      PLAGIARISM_DETECTION. Checks a text for plagiarism against an optional source and gives an
+      overlap estimate. Params: text, source.
+  - path: /document-authenticity
+    external_path: /document-authenticity
+    method: GET
+    intents: [DOCUMENT_AUTHENTICITY_GENERAL]
+    description: >
+      DOCUMENT_AUTHENTICITY. Judges whether a document looks authentic or forged. Params: document,
+      or query.
+  - path: /sla-compliance
+    external_path: /sla-compliance
+    method: GET
+    intents: [SLA_COMPLIANCE_GENERAL]
+    description: >
+      SLA_COMPLIANCE. Checks measured service data against SLA terms and states whether each
+      target was met. Params: sla, metrics, or query.
+  - path: /media-forensic
+    external_path: /media-forensic
+    method: GET
+    intents: [MEDIA_FORENSIC_VERIFY_GENERAL]
+    description: >
+      MEDIA_FORENSIC_VERIFY. Judges whether an image, video or audio item was manipulated, from its
+      description, metadata and context. Params: media, or query.
+  - path: /media-authenticity
+    external_path: /media-authenticity
+    method: GET
+    intents: [MEDIA_AUTHENTICITY_CHECK_GENERAL]
+    description: >
+      MEDIA_AUTHENTICITY_CHECK. Checks whether media is original and correctly captioned. Params: media,
+      claim, or query.
+  - path: /image-verification
+    external_path: /image-verification
+    method: GET
+    intents: [IMAGE_VERIFICATION_GENERAL]
+    description: >
+      IMAGE_VERIFICATION. Verifies the claim made about an image. Params: image, claim, or query.
+  - path: /video-verification
+    external_path: /video-verification
+    method: GET
+    intents: [VIDEO_VERIFICATION_GENERAL]
+    description: >
+      VIDEO_VERIFICATION. Verifies the claim made about a video. Params: video, claim, or query.
+  - path: /deepfake-detection
+    external_path: /deepfake-detection
+    method: GET
+    intents: [DEEPFAKE_DETECTION_GENERAL]
+    description: >
+      DEEPFAKE_DETECTION. Rates the likelihood that media is a deepfake from its source and
+      description. Params: media, or query.
+  - path: /image-captioning
+    external_path: /image-captioning
+    method: GET
+    intents: [IMAGE_CAPTIONING_GENERAL]
+    description: >
+      IMAGE_CAPTIONING. Writes a caption and alt text for an image from its description or link.
+      Params: image, description, or query.
+  - path: /agent-task
+    external_path: /agent-task
+    method: GET
+    intents: [AGENT_TASK_GENERAL]
+    description: >
+      AGENT_TASK. Carries out a described task and returns the finished result. Params:
+      task, or query.
+  - path: /task-completion
+    external_path: /task-completion
+    method: GET
+    intents: [TASK_COMPLETION_GENERAL]
+    description: >
+      TASK_COMPLETION. Judges whether a task was fully completed from the delivered result.
+      Params: task, result.
+  - path: /wash-trading
+    external_path: /wash-trading
+    method: GET
+    intents: [WASH_TRADING_DETECTION_GENERAL]
+    description: >
+      WASH_TRADING_DETECTION. Looks for wash trading patterns in trade data or a token. Params:
+      trades, token, or query.
+  - path: /fraud-risk
+    external_path: /fraud-risk
+    method: GET
+    intents: [FRAUD_RISK_GENERAL]
+    description: >
+      FRAUD_RISK. Scores the fraud risk of a transaction, account, merchant or offer from
+      0 to 100. Params: transaction, or query.
+  - path: /transaction-risk
+    external_path: /transaction-risk
+    method: GET
+    intents: [TRANSACTION_RISK_GENERAL]
+    description: >
+      TRANSACTION_RISK. Scores the risk of a payment or on-chain transaction from 0 to 100.
+      Params: transaction, or query.
+  - path: /vendor-verify
+    external_path: /vendor-verify
+    method: GET
+    intents: [VENDOR_VERIFY_GENERAL]
+    description: >
+      VENDOR_VERIFY. Checks a vendor before payment for mismatches and fraud patterns.
+      Params: vendor, or query.
+  - path: /purchase-order-verify
+    external_path: /purchase-order-verify
+    method: GET
+    intents: [PURCHASE_ORDER_VERIFY_GENERAL]
+    description: >
+      PURCHASE_ORDER_VERIFY. Checks a purchase order against an invoice or delivery and lists
+      mismatches. Params: purchase_order, or query.
+  - path: /commerce-purchase-verify
+    external_path: /commerce-purchase-verify
+    method: GET
+    intents: [COMMERCE_PURCHASE_VERIFY_GENERAL]
+    description: >
+      COMMERCE_PURCHASE_VERIFY. Checks that a purchase happened as claimed from the order and receipt
+      details. Params: order, or query.
+  - path: /fare-rule-verify
+    external_path: /fare-rule-verify
+    method: GET
+    intents: [FARE_RULE_VERIFY_GENERAL]
+    description: >
+      FARE_RULE_VERIFY. States the change, cancel and refund rules for a fare class and checks a
+      claim against them. Params: fare, carrier, claim.
+  - path: /code-patch-verify
+    external_path: /code-patch-verify
+    method: GET
+    intents: [CODE_PATCH_VERIFY_GENERAL]
+    description: >
+      CODE_PATCH_VERIFY. Judges whether a patch fixes the stated problem without a regression.
+      Params: patch, issue.
+  - path: /regression-verify
+    external_path: /regression-verify
+    method: GET
+    intents: [REGRESSION_VERIFY_GENERAL]
+    description: >
+      REGRESSION_VERIFY. Checks a change for regressions from the diff or test results. Params:
+      diff, results.
+  - path: /kyc-liveness
+    external_path: /kyc-liveness
+    method: GET
+    intents: [KYC_BIOMETRIC_LIVENESS_GENERAL]
+    description: >
+      KYC_BIOMETRIC_LIVENESS. Judges whether a liveness check shows a live person from the check
+      signals. Params: signals, or query.
+  - path: /shipment-delay-risk
+    external_path: /shipment-delay-risk
+    method: GET
+    intents: [SHIPMENT_DELAY_RISK_GENERAL]
+    description: >
+      SHIPMENT_DELAY_RISK. Rates the delay risk of a shipment or lane and names the drivers.
+      Params: shipment, or query.
+  - path: /ship-rate-eta
+    external_path: /ship-rate-eta
+    method: GET
+    intents: [SHIP_RATE_ETA_GENERAL]
+    description: >
+      SHIP_RATE_ETA. Estimates shipping price range and transit days between two places.
+      Params: origin, destination, weight.
+  - path: /optimal-execution-route
+    external_path: /optimal-execution-route
+    method: GET
+    intents: [OPTIMAL_EXECUTION_ROUTE_GENERAL]
+    description: >
+      OPTIMAL_EXECUTION_ROUTE. Advises how best to execute a token swap: venue, price impact, slippage.
+      Params: pair, amount, chain.
+  - path: /warehouse-inventory
+    external_path: /warehouse-inventory
+    method: GET
+    intents: [WAREHOUSE_INVENTORY_GENERAL]
+    description: >
+      WAREHOUSE_INVENTORY. Reconciles supplied warehouse stock figures and flags discrepancies.
+      Params: inventory, or query.
+  - path: /sku-in-stock
+    external_path: /sku-in-stock
+    method: GET
+    intents: [SKU_IN_STOCK_GENERAL]
+    description: >
+      SKU_IN_STOCK. Says whether an item is in stock from supplied stock data. Params: sku,
+      or query.
+  - path: /live-shelf-price
+    external_path: /live-shelf-price
+    method: GET
+    intents: [LIVE_SHELF_PRICE_GENERAL]
+    description: >
+      LIVE_SHELF_PRICE. Gives the shelf price of a retail product from supplied page text or a
+      typical range. Params: product, store.
+  - path: /hotel-availability
+    external_path: /hotel-availability
+    method: GET
+    intents: [HOTEL_AVAILABILITY_GENERAL]
+    description: >
+      HOTEL_AVAILABILITY. Gives typical availability and nightly price range for a hotel or city
+      and dates. Params: hotel, dates.
+  - path: /flight-availability
+    external_path: /flight-availability
+    method: GET
+    intents: [FLIGHT_AVAILABILITY_GENERAL]
+    description: >
+      FLIGHT_AVAILABILITY. Gives typical airlines, frequency and fare range for a route and date.
+      Params: route, date.
+  - path: /air-quality
+    external_path: /air-quality
+    method: GET
+    intents: [AIR_QUALITY_INDEX_GENERAL]
+    description: >
+      AIR_QUALITY_INDEX. Live air quality index and pollutant levels for a city from Open-Meteo.
+      Params: city, or query.
+  - path: /crypto-yield-rate
+    external_path: /crypto-yield-rate
+    method: GET
+    intents: [CRYPTO_YIELD_RATE_GENERAL]
+    description: >
+      CRYPTO_YIELD_RATE. Live APY of the largest DeFi yield pools for a token or protocol from
+      DefiLlama. Params: asset, chain, or query.
+  - path: /asset-reserve-attestation
+    external_path: /asset-reserve-attestation
+    method: GET
+    intents: [ASSET_RESERVE_ATTESTATION_GENERAL]
+    description: >
+      ASSET_RESERVE_ATTESTATION. Stablecoin circulating supply, peg and chain split from DefiLlama (the
+      supply reserves must cover). Params: asset, or query.
+  - path: /liquidity-depth
+    external_path: /liquidity-depth
+    method: GET
+    intents: [LIQUIDITY_DEPTH_VERIFY_GENERAL]
+    description: >
+      LIQUIDITY_DEPTH_VERIFY. DEX liquidity depth and volume for a token or pair from DexScreener.
+      Params: pair, or query.
+  - path: /api-health-check
+    external_path: /api-health-check
+    method: GET
+    intents: [API_HEALTH_CHECK_GENERAL]
+    description: >
+      API_HEALTH_CHECK. Probes a public URL three times and reports healthy, degraded or down
+      with latency. Params: url.
+  - path: /server-uptime
+    external_path: /server-uptime
+    method: GET
+    intents: [SERVER_UPTIME_MONITOR_GENERAL]
+    description: >
+      SERVER_UPTIME_MONITOR. Probes a public host three times and reports uptime state with latency.
+      Params: url.
+  - path: /twitter-search
+    external_path: /twitter-search
+    method: GET
+    intents: [TWITTER_SEARCH_GENERAL]
+    description: >
+      TWITTER_SEARCH. Finds public X posts about a topic, hashtag or account. Params: query.
+  - path: /embedding
+    external_path: /embedding
+    method: GET
+    intents: [EMBEDDING_GENERATION_GENERAL]
+    description: >
+      EMBEDDING_GENERATION. Returns a deterministic 256-dimension unit text embedding. Params: text,
+      or query.
 
 # input_schema/output_schema are top-level-only fields, documentation
 # surfaced to callers rather than a per-endpoint validator (confirmed
@@ -2287,6 +2594,50 @@ semantics:
     - FINANCIAL_DATA_GENERAL
     - LOAN_INTEREST_RATE_QUOTE_GENERAL
     - SMART_CONTRACT_AUDIT_GENERAL
+    - ENTITY_EXTRACTION_GENERAL
+    - KEYWORD_EXTRACTION_GENERAL
+    - B2B_IDENTITY_ENRICHMENT_GENERAL
+    - SOCIAL_BOT_DETECTION_GENERAL
+    - TRAVEL_DISRUPTION_GENERAL
+    - CONTENT_VERIFICATION_GENERAL
+    - PRODUCT_AUTHENTICITY_GENERAL
+    - PLAGIARISM_DETECTION_GENERAL
+    - DOCUMENT_AUTHENTICITY_GENERAL
+    - SLA_COMPLIANCE_GENERAL
+    - MEDIA_FORENSIC_VERIFY_GENERAL
+    - MEDIA_AUTHENTICITY_CHECK_GENERAL
+    - IMAGE_VERIFICATION_GENERAL
+    - VIDEO_VERIFICATION_GENERAL
+    - DEEPFAKE_DETECTION_GENERAL
+    - IMAGE_CAPTIONING_GENERAL
+    - AGENT_TASK_GENERAL
+    - TASK_COMPLETION_GENERAL
+    - WASH_TRADING_DETECTION_GENERAL
+    - FRAUD_RISK_GENERAL
+    - TRANSACTION_RISK_GENERAL
+    - VENDOR_VERIFY_GENERAL
+    - PURCHASE_ORDER_VERIFY_GENERAL
+    - COMMERCE_PURCHASE_VERIFY_GENERAL
+    - FARE_RULE_VERIFY_GENERAL
+    - CODE_PATCH_VERIFY_GENERAL
+    - REGRESSION_VERIFY_GENERAL
+    - KYC_BIOMETRIC_LIVENESS_GENERAL
+    - SHIPMENT_DELAY_RISK_GENERAL
+    - SHIP_RATE_ETA_GENERAL
+    - OPTIMAL_EXECUTION_ROUTE_GENERAL
+    - WAREHOUSE_INVENTORY_GENERAL
+    - SKU_IN_STOCK_GENERAL
+    - LIVE_SHELF_PRICE_GENERAL
+    - HOTEL_AVAILABILITY_GENERAL
+    - FLIGHT_AVAILABILITY_GENERAL
+    - AIR_QUALITY_INDEX_GENERAL
+    - CRYPTO_YIELD_RATE_GENERAL
+    - ASSET_RESERVE_ATTESTATION_GENERAL
+    - LIQUIDITY_DEPTH_VERIFY_GENERAL
+    - API_HEALTH_CHECK_GENERAL
+    - SERVER_UPTIME_MONITOR_GENERAL
+    - TWITTER_SEARCH_GENERAL
+    - EMBEDDING_GENERATION_GENERAL
 
 docs:
   repository: https://github.com/Sireadell/onchain-tx
