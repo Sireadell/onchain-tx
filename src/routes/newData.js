@@ -182,7 +182,7 @@ export const twitterSearchRouter = both(Router(), async (req, res) => {
     }
     const summary = posts.length
       ? `Public posts on X about ${quoteParam(term)}: ${posts.map((x) => `${(x.title || x.content || '').replace(/\s+/g, ' ').slice(0, 140)} (${x.url})`).join(' | ')}`
-      : (r.answer ? String(r.answer) : `No public X posts were found for ${quoteParam(term)}.`);
+      : (r.answer ? `No X posts could be indexed directly; current public discussion: ${String(r.answer)}` : `No public X posts were found for ${quoteParam(term)}.`);
     res.json({ status: 'ok', summary, answer: summary, result_count: posts.length, results: posts, source: 'web index of x.com', confidence: posts.length ? 0.75 : 0.3, canonical: ['twitter-search', term.toLowerCase()].join(':'), checked_at: now() });
   } catch (e) { fail(res, 'TWITTER_SEARCH', e); }
 });
