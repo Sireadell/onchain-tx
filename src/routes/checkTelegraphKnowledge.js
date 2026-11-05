@@ -174,7 +174,7 @@ async function handleTelegraphKnowledge(req, res) {
 
   let result;
   try {
-    result = await llmComplete(systemPrompt, question, { maxTokens: MAX_TOKENS, disableSearch: !searching, temperature: 0.2 });
+    result = await llmComplete(systemPrompt, question, { maxTokens: MAX_TOKENS, disableSearch: !searching, temperature: 0.2, rejectRefusal: true });
   } catch (err) {
     if (err instanceof LlmCompleteError) {
       return res.status(502).json({

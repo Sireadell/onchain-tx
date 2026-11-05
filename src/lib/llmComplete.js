@@ -202,7 +202,7 @@ async function attempt(systemPrompt, userContent, { budgetMs, maxTokens, disable
 // second answer would be the same) and a timeout is not retried (there is
 // no budget left by definition).
 export async function llmComplete(systemPrompt, userContent, {
-  budgetMs = DEFAULT_BUDGET_MS, maxTokens = 600, disableSearch = false, temperature, keepFormatting = false,
+  budgetMs = DEFAULT_BUDGET_MS, maxTokens = 600, disableSearch = false, temperature, keepFormatting = false, rejectRefusal = false,
 } = {}) {
   if (!hasLlmProvider()) throw new LlmCompleteError('no language model key is set (PERPLEXITY_API_KEY, GROQ_API_KEY or GEMINI_API_KEY)');
 
@@ -230,7 +230,12 @@ export async function llmComplete(systemPrompt, userContent, {
     // Each provider already moves through its own list of models, so a
     // rate limit on one model does not need a wait and a second try here.
     const out = await fn(systemPrompt, userContent, { maxTokens, temperature: Number.isFinite(temperature) ? temperature : 0.2, budgetMs: Math.max(Math.min(deadline - Date.now(), ATTEMPT_CAP_MS), 2_000) });
-    return { text: keepFormatting ? out.text.replace(/<think>[\s\S]*?<\/think>/g, '').trim() : stripMarkup(out.text), cost_usd: 0, provider: name };
+    const text = keepFormatting ? out.text.replace(/<think>[\s\S]*?<\/think>/g, '').trim() : stripMarkup(out.text);
+    // A bare "I'm sorry, but I can't answer that" scores as nothing; let the next provider try.
+    if (rejectRefusal && /^\s*(?:i['’]?m sorry|sorry|i['’]?m unable|i am unable|i can['’]?t|i cannot|i can not)\b/i.test(text) && text.length < 200) {
+      throw new LlmCompleteError(`${name} refused to answer`, { status: 422, retryable: false });
+    }
+    return { text, cost_usd: 0, provider: name };
   };
 
   const key = JSON.stringify(['llm', systemPrompt, userContent, maxTokens, disableSearch, temperature, keepFormatting]);
