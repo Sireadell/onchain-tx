@@ -2,6 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildApp } from '../app.js';
 
+// The keyless fallback has its own test at the bottom. Everywhere else the
+// tests are about the paid providers, so it is switched off.
+process.env.WEB_SEARCH_FREE_FALLBACK = 'off';
+
 function startServer(t) {
   const server = buildApp().listen(0);
   t.after(() => {
@@ -381,4 +385,31 @@ test('web-search: a POST body is accepted the same as a query string', async (t)
 
   assert.equal(res.status, 200);
   assert.equal(calls[0].body.query, 'who won the 2026 world cup');
+});
+
+test('web-search: with every paid provider failing, the keyless search still answers with real sources', async (t) => {
+  withKeys(t, { tavily: 'tvly-test-key' });
+  process.env.WEB_SEARCH_FREE_FALLBACK = 'on';
+  t.after(() => { process.env.WEB_SEARCH_FREE_FALLBACK = 'off'; });
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.startsWith('https://api.tavily.com')) return new Response('{}', { status: 432 });
+    if (u.includes('en.wikipedia.org/w/api.php')) {
+      return new Response(JSON.stringify({ query: { search: [{ title: 'Paris', snippet: 'capital of <b>France</b>' }] } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (u.includes('en.wikipedia.org/api/rest_v1')) {
+      return new Response(JSON.stringify({ extract: 'Paris is the capital of France. It is on the Seine.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (u.includes('hn.algolia.com')) return new Response(JSON.stringify({ hits: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    return original(url, init);
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+  const res = await fetch(`${base}/web-search?query=${encodeURIComponent('capital of France')}`);
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.match(body.summary, /Paris is the capital of France/);
+  assert.equal(body.provider, 'free-search');
+  assert.ok(body.sources.length >= 1 && body.sources[0].url.startsWith('https://en.wikipedia.org/wiki/'));
 });

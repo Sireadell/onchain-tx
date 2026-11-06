@@ -71,7 +71,7 @@ async function handleWebSearch(req, res) {
 
   let result;
   try {
-    result = await searchWeb(searchQuery, { topic, maxResults });
+    result = await searchWeb(searchQuery, { topic, maxResults, allowFree: true });
   } catch (err) {
     if (err instanceof WebSearchError) {
       return res.status(502).json({

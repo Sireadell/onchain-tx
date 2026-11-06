@@ -268,6 +268,65 @@ async function callTavily(query, options) {
   }
 }
 
+
+// Keyless last resort. Perplexity and Tavily both run on paid plans that can
+// run dry (both did, 2026-11), and the model-only vote has no sources, so a
+// search with no paid provider left used to answer with an unsourced guess or
+// not at all. Wikipedia and Hacker News Algolia are free, need no key and
+// return real pages with real URLs, so the answer always names its sources.
+async function getJsonFree(url, ms) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    const res = await fetch(url, { signal: controller.signal, headers: { 'User-Agent': 'txlens-miner/1.0 (web search fallback)', Accept: 'application/json' } });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function firstSentences(text, max) {
+  const parts = String(text || '').replace(/\s+/g, ' ').trim().match(/[^.!?]+[.!?]+(?:\s|$)/g) || [];
+  return parts.slice(0, max).join('').trim() || String(text || '').trim().slice(0, 300);
+}
+
+export async function freeSearch(query, options = {}) {
+  // Opt-in per caller. Most routes wrap the user's text in a task prompt, and
+  // a Wikipedia extract is the wrong answer to a wrapped prompt.
+  if (options.enabled !== true || process.env.WEB_SEARCH_FREE_FALLBACK === 'off') return null;
+  const budget = Math.max(options.budgetMs ?? 8000, 2500);
+  const q = encodeURIComponent(query);
+  const [wiki, hn] = await Promise.all([
+    getJsonFree(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${q}&format=json&srlimit=3&origin=*`, budget),
+    getJsonFree(`https://hn.algolia.com/api/v1/search_by_date?query=${q}&tags=story&hitsPerPage=5`, budget),
+  ]);
+  const results = [];
+  let answer = null;
+  const wikiHits = wiki?.query?.search ?? [];
+  if (wikiHits.length) {
+    const title = wikiHits[0].title;
+    const sum = await getJsonFree(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, '_'))}`, Math.min(budget, 5000));
+    const extract = sum?.extract ? firstSentences(sum.extract, 2) : null;
+    for (const h of wikiHits) {
+      results.push({ title: h.title, url: `https://en.wikipedia.org/wiki/${encodeURIComponent(h.title.replace(/ /g, '_'))}`, snippet: String(h.snippet || '').replace(/<[^>]+>/g, ''), score: null });
+    }
+    if (extract) answer = extract;
+  }
+  const hnHits = (hn?.hits ?? []).filter((h) => h?.title);
+  for (const h of hnHits) {
+    results.push({ title: h.title, url: h.url || `https://news.ycombinator.com/item?id=${h.objectID}`, snippet: `Hacker News story from ${String(h.created_at || '').slice(0, 10)}, ${h.points ?? 0} points`, score: null });
+  }
+  if (!answer && hnHits.length) {
+    const top = hnHits[0];
+    answer = `The most recent relevant story found for "${query}" is "${top.title}", posted ${String(top.created_at || '').slice(0, 10)}.`;
+  }
+  if (!answer) return null;
+  return { answer, results, provider: 'free-search', cost_usd: 0 };
+}
+
 export async function searchWeb(query, options = {}) {
   const topic = options.topic === 'news' || options.topic === 'finance' ? options.topic : 'general';
   const maxResults = Math.min(Math.max(Number(options.maxResults) || 5, 1), 20);
@@ -297,12 +356,21 @@ export async function searchWeb(query, options = {}) {
   if (consensusConfigured()) {
     const outcome = await consensusSearch(query, { topic, maxResults, budgetMs: remainingMs({ deadline }, 15_000), tavily: callTavily }).catch(() => null);
     if (outcome?.status === 'consensus') {
+      // The voters are models with no pages behind them, so attach real
+      // sources from the keyless search when the vote came back without any.
+      let results = outcome.results ?? [];
+      if (!results.length) {
+        const free = await freeSearch(query, { enabled: options.allowFree === true, budgetMs: Math.min(Math.max(remainingMs({ deadline }), 2500), 6000) }).catch(() => null);
+        if (free) results = free.results;
+      }
       return {
-        answer: outcome.answer, results: outcome.results, provider: 'consensus', cost_usd: 0, topic,
+        answer: outcome.answer, results, provider: 'consensus', cost_usd: 0, topic,
         votes: { agree: outcome.agree, total: outcome.total, voters: outcome.voters },
       };
     }
     if (outcome?.status === 'inconclusive') {
+      const free = await freeSearch(query, { enabled: options.allowFree === true, budgetMs: Math.min(Math.max(remainingMs({ deadline }), 2500), 8000) }).catch(() => null);
+      if (free) return { ...free, topic };
       return { answer: null, results: outcome.results, provider: 'consensus', cost_usd: 0, topic, inconclusive: true, votes: { total: outcome.voters.length, positions: outcome.voters } };
     }
   }
@@ -345,6 +413,10 @@ export async function searchWeb(query, options = {}) {
     lastError = new WebSearchError(`${outcome.provider} returned nothing usable`);
   }
 
+  if (lastError || !attempted) {
+    const free = await freeSearch(query, { enabled: options.allowFree === true, budgetMs: 8000 }).catch(() => null);
+    if (free) return { ...free, topic };
+  }
   if (lastError) throw lastError;
   // Running out of budget before any provider could even be called is our
   // failure and keeps a real failure code. Returning it as an empty result
