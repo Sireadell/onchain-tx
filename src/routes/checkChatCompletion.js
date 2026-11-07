@@ -152,7 +152,7 @@ async function handleChatCompletion(req, res) {
   let result;
   let failure = null;
   try {
-    result = await llmComplete(prediction ? PREDICTION_PROMPT : BASE_PROMPT, message, { maxTokens: MAX_TOKENS, temperature: 0.2 });
+    result = await llmComplete(prediction ? PREDICTION_PROMPT : BASE_PROMPT, message, { maxTokens: MAX_TOKENS, temperature: 0.2, rejectRefusal: true });
   } catch (err) {
     if (!(err instanceof LlmCompleteError)) {
       return res.status(502).json({ status: 'error', summary: 'chat completion failed', confidence: 0, error: err.message });
