@@ -55,6 +55,14 @@ import checkTokenTotalSupplyRouter from './routes/checkTokenTotalSupply.js';
 import checkCorporateRegistryRouter from './routes/checkCorporateRegistry.js';
 import checkEmailSecurityRouter from './routes/checkEmailSecurity.js';
 import checkMiningHashpriceRouter from './routes/checkMiningHashprice.js';
+import checkGridPowerPriceRouter from './routes/checkGridPowerPrice.js';
+import checkValidatorPerformanceRouter from './routes/checkValidatorPerformance.js';
+import checkCloudResourceUsageRouter from './routes/checkCloudResourceUsage.js';
+import checkDatacenterTelemetryRouter from './routes/checkDatacenterTelemetry.js';
+import checkSensorTelemetryRouter from './routes/checkSensorTelemetry.js';
+import checkPortCongestionRouter from './routes/checkPortCongestion.js';
+import checkVesselTelemetryRouter from './routes/checkVesselTelemetry.js';
+import checkSatelliteImageryRouter from './routes/checkSatelliteImagery.js';
 import {
   securityReviewRouter, llmOutputEvaluationRouter, contractObligationAuditRouter,
   codeGenerationRouter, codeReviewRouter, textAuthenticityRouter,
@@ -392,6 +400,14 @@ export function buildApp() {
   app.use('/corporate-registry', batch5RateLimit, forwardAsyncErrors(checkCorporateRegistryRouter));
   app.use('/email-security', batch5RateLimit, forwardAsyncErrors(checkEmailSecurityRouter));
   app.use('/mining-hashprice', batch5RateLimit, forwardAsyncErrors(checkMiningHashpriceRouter));
+  app.use('/grid-power-price', batch5RateLimit, forwardAsyncErrors(checkGridPowerPriceRouter));
+  app.use('/validator-performance', batch5RateLimit, forwardAsyncErrors(checkValidatorPerformanceRouter));
+  app.use('/cloud-resource-usage', batch5RateLimit, forwardAsyncErrors(checkCloudResourceUsageRouter));
+  app.use('/datacenter-telemetry', batch5RateLimit, forwardAsyncErrors(checkDatacenterTelemetryRouter));
+  app.use('/sensor-telemetry', batch5RateLimit, forwardAsyncErrors(checkSensorTelemetryRouter));
+  app.use('/port-congestion', batch5RateLimit, forwardAsyncErrors(checkPortCongestionRouter));
+  app.use('/vessel-telemetry', batch5RateLimit, forwardAsyncErrors(checkVesselTelemetryRouter));
+  app.use('/satellite-imagery', batch5RateLimit, forwardAsyncErrors(checkSatelliteImageryRouter));
   app.use('/security-review', batch5RateLimit, forwardAsyncErrors(securityReviewRouter));
   app.use('/llm-output-evaluation', batch5RateLimit, forwardAsyncErrors(llmOutputEvaluationRouter));
   app.use('/contract-obligation-audit', batch5RateLimit, forwardAsyncErrors(contractObligationAuditRouter));

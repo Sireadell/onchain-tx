@@ -1338,6 +1338,61 @@ endpoints:
 # object across all four endpoints below — fields not relevant to a given
 # endpoint (e.g. tx_hash on /gas-price) are simply absent from that
 # endpoint's actual response, not present-but-null.
+  - path: /grid-power-price
+    external_path: /grid-power-price
+    method: GET
+    intents: [GRID_POWER_PRICE_GENERAL]
+    description: >
+      GRID_POWER_PRICE. Answers "what is the electricity price in Germany right now", "day-ahead power price in France". Returns the current day-ahead wholesale price in EUR/MWh for a European bidding zone plus the day minimum, maximum and average. Params: zone (required, a zone code such as DE-LU, FR, NL, ES or a country name). US operators are not covered.
+  - path: /validator-performance
+    external_path: /validator-performance
+    method: GET
+    intents: [VALIDATOR_PERFORMANCE_VERIFY_GENERAL]
+    description: >
+      VALIDATOR_PERFORMANCE_VERIFY. Answers "is Ethereum validator 12345 active", "has this validator been slashed", "what is the balance of validator 1". Returns status, slashing, balance, effective balance and activation and exit epochs from a beacon node. Params: validator (required, a validator index or a 0x public key of 96 hex characters).
+  - path: /cloud-resource-usage
+    external_path: /cloud-resource-usage
+    method: GET
+    intents: [CLOUD_RESOURCE_USAGE_GENERAL]
+    description: >
+      CLOUD_RESOURCE_USAGE. Answers "what is the CPU utilisation", "memory pressure", "network throughput" of a monitored host. Reads live node_exporter metrics from Prometheus and returns CPU percent, memory used percent and network receive and transmit bytes per second. Params: metric (optional: cpu, memory or network; all three when omitted).
+  - path: /datacenter-telemetry
+    external_path: /datacenter-telemetry
+    method: GET
+    intents: [DATACENTER_TELEMETRY_VERIFY_GENERAL]
+    description: >
+      DATACENTER_TELEMETRY_VERIFY. Audits datacenter readings you supply: PUE from total facility kW and IT kW, inlet temperature against the ASHRAE 18 to 27 C range, and generator readiness from fuel percent and days since last test. Params: total_kw, it_kw, inlet_c, generator_fuel_pct, generator_test_days (any subset), or the same numbers written in the question.
+  - path: /sensor-telemetry
+    external_path: /sensor-telemetry
+    method: GET
+    intents: [SENSOR_TELEMETRY_VERIFY_GENERAL]
+    description: >
+      SENSOR_TELEMETRY_VERIFY. Validates one edge sensor reading: heartbeat freshness, calibration bounds and HMAC-SHA256 payload integrity. Params: sensor_id, value, timestamp (required); min, max, max_age_seconds, signature, secret (optional). The signed text is sensor_id|value|timestamp.
+  - path: /port-congestion
+    external_path: /port-congestion
+    method: GET
+    intents: [LIVE_PORT_CONGESTION_GENERAL]
+    description: >
+      LIVE_PORT_CONGESTION. Answers "how congested is the port of Helsinki", "how many ships are in Turku port". Returns vessels currently in port, arrivals expected in 24 hours and average stay so far, from live port calls. Covers Finnish ports. Params: port (required, a name such as Helsinki or a UN/LOCODE such as FIHEL).
+  - path: /vessel-telemetry
+    external_path: /vessel-telemetry
+    method: GET
+    intents: [VESSEL_TELEMETRY_VERIFY_GENERAL]
+    description: >
+      VESSEL_TELEMETRY_VERIFY. Answers "where is vessel 230629000", "what is the speed and draught of this ship". Returns live AIS position, speed over ground, course, heading, draught in metres and destination for a ship. Coverage is the AIS network around Finland and the Baltic. Params: mmsi (required, 9 digits).
+  - path: /satellite-imagery
+    external_path: /satellite-imagery
+    method: GET
+    intents: [SATELLITE_IMAGERY_ANALYSIS_GENERAL]
+    description: >
+      SATELLITE_IMAGERY_ANALYSIS. Answers "any wildfires, storms or floods near 34.05, -118.24". Returns open natural events detected from satellites within a radius of a point from NASA EONET, and the date of the latest NASA GIBS imagery. It does not classify image pixels. Params: lat, lon (required), radius_km (optional, default 300).
+  - path: /mining-hashprice
+    external_path: /mining-hashprice
+    method: GET
+    intents: [MINING_HASHPRICE_VERIFY_GENERAL]
+    description: >
+      MINING_HASHPRICE_VERIFY. Answers "what is the Bitcoin hashprice", "mining revenue per PH/s per day at block 800000". Computes expected revenue per unit of hashrate per day from the block reward and network difficulty of one block. Params: height (optional, a block number or latest).
+
 input_schema:
   type: object
   properties:
@@ -2522,6 +2577,15 @@ semantics:
     - TVL_LOOKUP_GENERAL
     - CRYPTO_PRICE_USD
     - STOCK_PRICE_US_EQUITY
+    - GRID_POWER_PRICE_GENERAL
+    - VALIDATOR_PERFORMANCE_VERIFY_GENERAL
+    - CLOUD_RESOURCE_USAGE_GENERAL
+    - DATACENTER_TELEMETRY_VERIFY_GENERAL
+    - SENSOR_TELEMETRY_VERIFY_GENERAL
+    - LIVE_PORT_CONGESTION_GENERAL
+    - VESSEL_TELEMETRY_VERIFY_GENERAL
+    - SATELLITE_IMAGERY_ANALYSIS_GENERAL
+    - MINING_HASHPRICE_VERIFY_GENERAL
     - SSL_VERIFICATION_CERT
     - WEATHER_FORECAST_GENERAL
     - STORM_ALERT_GENERAL
