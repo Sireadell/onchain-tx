@@ -188,17 +188,49 @@ export function prefetchSdnList() {
 // tolerant of a middle name, an alias suffix ("aka"), or extra whitespace,
 // without pulling in a fuzzy-string-distance dependency for a from-scratch
 // build.
+//
+// Words found in thousands of names prove nothing alone, so they count for
+// less and a match must hit at least one word outside this set. Without
+// this, "Abu Mohammed" flagged strangers (checked against the live list).
+const COMMON_WORDS = new Set(['BIN', 'BEN', 'BINT', 'ABU', 'AL', 'EL', 'IBN', 'ABD', 'ABDUL', 'ABDEL', 'MOHAMMED', 'MOHAMED', 'MUHAMMAD', 'MOHAMMAD', 'MUHAMMED', 'MOHD', 'AHMED', 'AHMAD', 'ALI', 'HASSAN', 'HUSSEIN', 'KHAN', 'DE', 'VAN', 'VON']);
+// Company suffixes never identify an entity.
+const NAME_NOISE = new Set(['PLC', 'LTD', 'LIMITED', 'INC', 'CORP', 'CORPORATION', 'LLC', 'CO', 'COMPANY', 'GROUP', 'SA', 'AG', 'GMBH', 'THE', 'OF', 'AND']);
+const PHONETIC_HIT = 0.85;
+
+// Spelling-tolerant key so transliteration variants (Sergei/Sergey,
+// Yusuf/Yousef) compare equal. Used only after an exact word match fails.
+function phoneticKey(word) {
+  return word
+    .replace(/KH/g, 'H').replace(/PH/g, 'F').replace(/CK/g, 'K')
+    .replace(/Q/g, 'K').replace(/W/g, 'V').replace(/OU|OO/g, 'U')
+    .replace(/EY|EI|AY|AI|Y/g, 'I')
+    .replace(/(.)\1+/g, '$1');
+}
+
 function nameSimilarity(queryNormalized, candidateNormalized) {
-  const queryWords = queryNormalized.split(' ').filter((w) => w.length > 1);
+  const queryWords = queryNormalized.split(' ').filter((w) => w.length > 1 && !NAME_NOISE.has(w));
   if (!queryWords.length) return 0;
   const candidateWords = new Set(candidateNormalized.split(' '));
   if (queryNormalized === candidateNormalized) return 1;
+  const candidateKeys = new Set([...candidateWords].map(phoneticKey));
+  let total = 0;
   let hits = 0;
+  let rareHit = false;
   for (const w of queryWords) {
-    if (candidateWords.has(w)) hits += 1;
-    else if ([...candidateWords].some((cw) => cw.length >= 4 && w.length >= 4 && (cw.startsWith(w) || w.startsWith(cw)))) hits += 0.6;
+    const common = COMMON_WORDS.has(w);
+    const weight = common ? 0.25 : 1;
+    total += weight;
+    let credit = 0;
+    if (candidateWords.has(w)) credit = 1;
+    else if (candidateKeys.has(phoneticKey(w))) credit = PHONETIC_HIT;
+    // Partial-word credit only when the shorter word is most of the longer
+    // one, so "MICRO" cannot vouch for "MICROSOFT".
+    else if ([...candidateWords].some((cw) => cw.length >= 4 && w.length >= 4 && (cw.startsWith(w) || w.startsWith(cw)) && Math.min(cw.length, w.length) / Math.max(cw.length, w.length) >= 0.7)) credit = 0.6;
+    hits += credit * weight;
+    if (credit > 0 && !common) rareHit = true;
   }
-  return hits / queryWords.length;
+  if (queryWords.some((w) => !COMMON_WORDS.has(w)) && !rareHit) return 0;
+  return hits / total;
 }
 
 const MATCH_THRESHOLD = 0.6;
