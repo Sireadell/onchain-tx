@@ -100,7 +100,12 @@ export async function consensusSearch(query, { topic, maxResults, budgetMs, tavi
   if (voters.length < 2) return { status: 'unavailable', voters: voters.map((v) => v.name), results };
 
   const group = findConsensus(voters);
-  if (!group) return { status: 'inconclusive', voters: voters.map((v) => ({ name: v.name, short: v.short })), results };
+  if (!group) {
+    // Kept for open-ended callers (research) that prefer the fullest model
+    // answer over no answer. Fact checks ignore this and report the split.
+    const best = [...voters].sort((a, b) => (a.name === 'tavily') - (b.name === 'tavily') || b.full.length - a.full.length)[0];
+    return { status: 'inconclusive', voters: voters.map((v) => ({ name: v.name, short: v.short })), results, bestEffort: best.full };
+  }
 
   // The cleanest wording wins: a model's sentence over Tavily's, then the longest.
   const preferred = [...group].sort((a, b) => (a.name === 'tavily') - (b.name === 'tavily') || b.full.length - a.full.length)[0];

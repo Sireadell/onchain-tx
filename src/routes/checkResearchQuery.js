@@ -74,7 +74,7 @@ async function handleResearchQuery(req, res) {
 
   let result;
   try {
-    result = await searchWeb(researchQueryPrompt(query), { topic: 'general', maxResults: readMaxResults(params) });
+    result = await searchWeb(researchQueryPrompt(query), { topic: 'general', maxResults: readMaxResults(params), bestEffort: true });
   } catch (err) {
     if (err instanceof WebSearchError) {
       return res.status(502).json({

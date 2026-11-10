@@ -368,6 +368,16 @@ export async function searchWeb(query, options = {}) {
         votes: { agree: outcome.agree, total: outcome.total, voters: outcome.voters },
       };
     }
+    if (outcome?.status === 'inconclusive' && options.bestEffort && outcome.bestEffort) {
+      // Open-ended research: models word a paragraph differently every time,
+      // so a split is normal. A real answer beats "No sources matched".
+      let results = outcome.results ?? [];
+      if (!results.length) {
+        const free = await freeSearch(query, { enabled: options.allowFree === true, budgetMs: Math.min(Math.max(remainingMs({ deadline }), 2500), 6000) }).catch(() => null);
+        if (free) results = free.results;
+      }
+      return { answer: outcome.bestEffort, results, provider: 'consensus-split', cost_usd: 0, topic, votes: { total: outcome.voters.length, positions: outcome.voters } };
+    }
     if (outcome?.status === 'inconclusive') {
       const free = await freeSearch(query, { enabled: options.allowFree === true, budgetMs: Math.min(Math.max(remainingMs({ deadline }), 2500), 8000) }).catch(() => null);
       if (free) return { ...free, topic };
