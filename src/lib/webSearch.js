@@ -211,14 +211,30 @@ function composeFromResults(query, results) {
   return `The most relevant source found for "${query}" is ${top.title} (${top.url}): ${top.snippet}`;
 }
 
+// TAVILY_API_KEY may hold several keys separated by commas. A key that runs
+// out of credit (432/433) or is refused (401) is set aside for a while and
+// the next key answers the same request, so topping up needs no redeploy.
+const TAVILY_KEY_REST_MS = 6 * 60 * 60 * 1000;
+const tavilyResting = new Map();
+
+async function postTavily(body, signal) {
+  const keys = String(process.env.TAVILY_API_KEY || '').split(',').map((k) => k.trim()).filter(Boolean);
+  const live = keys.filter((k) => (tavilyResting.get(k) ?? 0) <= Date.now());
+  let res = null;
+  // When every key is resting, try them all again rather than give up.
+  for (const key of live.length ? live : keys) {
+    res = await postJson(TAVILY_URL, { key, signal, body });
+    if (res.status !== 432 && res.status !== 433 && res.status !== 401) return res;
+    tavilyResting.set(key, Date.now() + TAVILY_KEY_REST_MS);
+  }
+  return res;
+}
+
 async function callTavily(query, options) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.budgetMs);
   try {
-    const res = await postJson(TAVILY_URL, {
-      key: process.env.TAVILY_API_KEY,
-      signal: controller.signal,
-      body: {
+    const res = await postTavily({
         query,
         topic: options.topic,
         search_depth: 'basic',
@@ -229,8 +245,7 @@ async function callTavily(query, options) {
         max_results: options.maxResults,
         include_raw_content: false,
         include_images: false,
-      },
-    });
+    }, controller.signal);
 
     if (!res.ok) {
       // 432/433 are Tavily's own plan and pay-as-you-go ceilings, named
