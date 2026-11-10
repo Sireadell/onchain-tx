@@ -26,6 +26,7 @@ function stubTavily(t, body, { status = 200 } = {}) {
   const original = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith('https://news.google.com')) return new Response('<rss><channel></channel></rss>', { status: 200 });
     if (!String(url).startsWith('https://api.tavily.com')) return original(url, init);
     calls.push({ url: String(url), body: JSON.parse(init.body) });
     return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -135,4 +136,39 @@ test('news-search: an oversized query is capped before it reaches the provider',
     body: JSON.stringify({ query: 'merger '.repeat(3000) }),
   });
   assert.ok(calls[0].body.query.length < 4700);
+});
+
+const RSS = `<rss><channel>
+<item><title>Starship completes seventh test flight - Reuters</title><link>https://news.google.com/a1</link><pubDate>Mon, 09 Nov 2026 10:00:00 GMT</pubDate><source url="https://reuters.com">Reuters</source></item>
+<item><title>SpaceX eyes next launch window - Space.com</title><link>https://news.google.com/a2</link><pubDate>Sun, 08 Nov 2026 08:00:00 GMT</pubDate><source url="https://space.com">Space.com</source></item>
+</channel></rss>`;
+
+test('news-search: a short topic is answered from real articles with publisher and date, no paid search', async (t) => {
+  withKey(t);
+  const original = globalThis.fetch;
+  const urls = [];
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith('https://news.google.com')) { urls.push(String(url)); return new Response(RSS, { status: 200 }); }
+    if (String(url).startsWith('https://api.tavily.com')) throw new Error('paid search must not run for a short topic');
+    return original(url, init);
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/news-search?query=latest+news+on+SpaceX+Starship`)).json();
+  assert.equal(body.status, 'ok');
+  assert.match(body.summary, /Starship completes seventh test flight/);
+  assert.match(body.summary, /Reuters, 9 November 2026/);
+  assert.equal(body.headline, 'Starship completes seventh test flight');
+  assert.equal(body.source, 'Reuters');
+  assert.equal(body.articles.length, 2);
+  assert.ok(decodeURIComponent(urls[0]).includes('SpaceX Starship when:7d'));
+});
+
+test('news-search: when the news feed is down the AI search still answers', async (t) => {
+  withKey(t);
+  stubTavily(t, TAVILY_OK);
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/news-search?query=${encodeURIComponent('has the merger been approved by the regulators yet?')}`)).json();
+  assert.equal(body.status, 'ok');
+  assert.match(body.summary, /approved by regulators/);
 });

@@ -9,6 +9,7 @@ import { Router } from 'express';
 import { searchWeb, hasWebSearchProvider, WebSearchError } from '../lib/webSearch.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { firstUsableValue, looksLikeSentence } from '../lib/entityExtract.js';
+import { searchGoogleNews, cleanNewsQuery } from '../lib/googleNews.js';
 
 const router = Router();
 
@@ -65,6 +66,46 @@ function shortHint(value) {
   return text && text.length <= 40 && !/[\n"]/.test(text) ? text : null;
 }
 
+function dateLabel(iso) {
+  if (!iso) return null;
+  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
+
+function describe(a) {
+  const who = [a.source, dateLabel(a.published_at)].filter(Boolean).join(', ');
+  return who ? `"${a.title}" (${who})` : `"${a.title}"`;
+}
+
+// Answer built from real articles: the top story first, then the next ones,
+// each with publisher and date. `ai` (optional) is the AI search result,
+// whose written answer leads when there is one.
+function articlesAnswer(query, articles, ai) {
+  const top = articles[0];
+  const others = articles.slice(1, 4).map(describe);
+  const lead = ai?.answer ? ai.answer.trim() : `The latest reported story on ${query.length > 80 ? 'this topic' : `"${query}"`} is ${describe(top)}.`;
+  const more = ai?.answer
+    ? ` Latest coverage: ${[describe(top), ...others].join('; ')}.`
+    : (others.length ? ` Other recent coverage: ${others.join('; ')}.` : '');
+  return {
+    query,
+    status: 'ok',
+    summary: `${lead}${more}`,
+    headline: top.title,
+    source: top.source,
+    published_at: top.published_at,
+    published_unix: top.published_unix,
+    articles,
+    source_note: `Read live from Google News at request time, ${articles.length} ${articles.length === 1 ? 'article' : 'articles'}, the top one from ${top.source ?? 'an unnamed publisher'}.`,
+    confidence: ai?.answer ? 0.92 : 0.9,
+    canonical: ['news-search', query.slice(0, 120), top.url ?? ''].join(':'),
+    result_count: articles.length,
+    sources: articles.map((a) => ({ title: a.title, url: a.url, snippet: '', score: null })),
+    provider: ai?.answer ? `google-news+${ai.provider}` : 'google-news',
+    cost_usd: ai?.cost_usd ?? 0,
+    checked_at: new Date().toISOString(),
+  };
+}
+
 async function handleNewsSearch(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
   const rawQuery = firstUsableValue(
@@ -98,10 +139,26 @@ async function handleNewsSearch(req, res) {
   const country = shortHint(params?.country);
   const language = shortHint(firstUsableValue(params?.language, params?.lang));
 
+  // Real articles first. A short topic ("SpaceX Starship launch") is answered
+  // from the live Google News feed alone: named publisher, date and link, and
+  // no paid search call. A full question also asks the AI search, since it
+  // may need a judgement ("has X been announced yet"), and the real articles
+  // are attached to that answer.
+  const recentDays = Number((window.match(/d+/) || [7])[0]);
+  const topicQuery = cleanNewsQuery(query);
+  const isTopic = topicQuery.split(' ').length <= 8 && !looksLikeSentence(topicQuery);
+  const articlesPromise = searchGoogleNews(query, { recentDays, limit: Math.max(maxResults, 5) });
+  if (isTopic) {
+    const articles = await articlesPromise;
+    if (articles.length) return res.json(articlesAnswer(query, articles, null));
+  }
+
   let result;
   try {
     result = await searchWeb(newsQuery(query, { window, country, language }), { topic: 'news', maxResults });
   } catch (err) {
+    const articles = await articlesPromise;
+    if (articles.length) return res.json(articlesAnswer(query, articles, null));
     if (err instanceof WebSearchError) {
       return res.status(502).json({
         status: 'error',
@@ -112,6 +169,10 @@ async function handleNewsSearch(req, res) {
     }
     return res.status(502).json({ status: 'error', summary: 'news search failed', confidence: 0, error: err.message });
   }
+
+  const articles = await articlesPromise;
+  if (!result.answer && articles.length) return res.json(articlesAnswer(query, articles, null));
+  if (result.answer && articles.length) return res.json(articlesAnswer(query, articles, result));
 
   if (!result.answer) {
     return respondUnusableInput(res, `No news sources matched ${quoteParam(rawQuery)}. Try rephrasing the question.`);
