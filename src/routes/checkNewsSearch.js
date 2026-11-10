@@ -82,7 +82,7 @@ function describe(a) {
 function articlesAnswer(query, articles, ai) {
   const top = articles[0];
   const others = articles.slice(1, 4).map(describe);
-  const lead = ai?.answer ? ai.answer.trim() : `The latest reported story on ${query.length > 80 ? 'this topic' : `"${query}"`} is ${describe(top)}.`;
+  const lead = ai?.answer ? ai.answer.trim() : `The latest reported story on ${cleanNewsQuery(query).length > 80 ? 'this topic' : `"${cleanNewsQuery(query)}"`} is ${describe(top)}.`;
   const more = ai?.answer
     ? ` Latest coverage: ${[describe(top), ...others].join('; ')}.`
     : (others.length ? ` Other recent coverage: ${others.join('; ')}.` : '');
