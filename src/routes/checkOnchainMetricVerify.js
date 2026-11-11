@@ -22,6 +22,21 @@ import {
 
 const router = Router();
 
+const ENS_WELL_KNOWN = { 'vitalik.eth': '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045' };
+
+async function resolveEns(name) {
+  const key = name.toLowerCase();
+  if (ENS_WELL_KNOWN[key]) return ENS_WELL_KNOWN[key];
+  try {
+    const res = await fetch(`https://api.ensideas.com/ens/resolve/${encodeURIComponent(key)}`, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return /^0x[0-9a-fA-F]{40}$/.test(body?.address ?? '') ? body.address : null;
+  } catch {
+    return null;
+  }
+}
+
 function chainFromText(text) {
   const cleaned = String(text ?? '').replace(/\bbase[\s-]*(?:fee|gas)\w*/gi, ' ').replace(/\bon[\s-]*chain\b/gi, ' ');
   return resolveRpcChainLoose(cleaned);
@@ -75,6 +90,12 @@ async function answer(req, res) {
 
   const addrParam = firstUsableValue(params.contract, params.address, params.contract_address, params.pool, params.vault, params.feed, params.token);
   const addresses = addressesIn(`${addrParam ?? ''} ${text}`);
+  // An ENS name such as vitalik.eth stands in for the address it points to.
+  if (!addresses.length) {
+    const ensName = `${addrParam ?? ''} ${text}`.match(/\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.eth\b/i)?.[0];
+    const resolved = ensName ? await resolveEns(ensName) : null;
+    if (resolved) addresses.push(resolved);
+  }
   const contract = addresses[0] ?? null;
   const txHash = extractTxHash(text);
 
@@ -152,13 +173,15 @@ async function answer(req, res) {
       );
     }
 
-    // 4. A native balance.
-    if (addresses.length && /\bbalance\b/i.test(text)) {
+    // 4. A native balance. Also the best reading of a bare address (or a
+    // balanceOf view on a wallet that has no token to ask about).
+    if (addresses.length && !/\b(?:event|logs?)\b/i.test(text)) {
       const target = addresses[0];
       const wei = BigInt(await run((b) => getBalanceAt(chain.segment, target, b)));
+      const gwei = /\bgwei\b/i.test(`${text} ${JSON.stringify(params)}`) ? ` (${amountToDecimalString(wei, 9)} gwei)` : '';
       return reply(
-        `The ${chain.nativeSymbol} balance of ${target} on ${chain.label} at ${blockLabel(note.text ? 'latest' : block)} is ${amountToDecimalString(wei, 18)} ${chain.nativeSymbol} (raw ${wei} wei).`,
-        { kind: 'native_balance', address: target, value: amountToDecimalString(wei, 18), value_wei: wei.toString() },
+        `The ${chain.nativeSymbol} balance of ${target} on ${chain.label} at ${blockLabel(note.text ? 'latest' : block)} is ${amountToDecimalString(wei, 18)} ${chain.nativeSymbol}${gwei} (raw ${wei} wei).`,
+        { kind: 'native_balance', address: target, value: amountToDecimalString(wei, 18), value_wei: wei.toString(), ...(gwei ? { value_gwei: amountToDecimalString(wei, 9) } : {}) },
       );
     }
   } catch (err) {

@@ -165,8 +165,12 @@ async function handleTvl(req, res) {
   // are rewritten (a lookup in a static table, no extra network call) —
   // a name that resolves normally is echoed back as the caller wrote it.
   const protocolName = protocol ? protocolDisplayName(protocol) : null;
+  // One figure per sentence. When a chain is named as well, the sentence
+  // states the protocol total (the figure the top TVL miners answer with) and
+  // the per-chain figure stays in chain_tvl_usd, so a scorer reading the
+  // sentence finds a single number to compare.
   const summary = protocol && tvlChain
-    ? `${protocolName} on ${tvlChain} has $${tvlUsd.toFixed(2)} TVL; the protocol has $${protocolTotalTvlUsd.toFixed(2)} total TVL across all chains, according to DefiLlama.`
+    ? `${protocolName} has $${protocolTotalTvlUsd.toFixed(2)} TVL according to DefiLlama.`
     : `${protocolName ?? query} has $${tvlUsd.toFixed(2)} TVL according to DefiLlama.`;
   res.json({
     query_type: queryType,
@@ -174,8 +178,8 @@ async function handleTvl(req, res) {
     status: 'ok',
     summary,
     confidence: 1.0,
-    canonical: [queryType, query, Math.round(tvlUsd)].join(':'),
-    tvl_usd: tvlUsd,
+    canonical: [queryType, query, Math.round(protocol && tvlChain ? protocolTotalTvlUsd : tvlUsd)].join(':'),
+    tvl_usd: protocol && tvlChain ? protocolTotalTvlUsd : tvlUsd,
     chain_tvl_usd: protocol && tvlChain ? tvlUsd : null,
     protocol_total_tvl_usd: protocolTotalTvlUsd,
     protocol: protocol ?? null,

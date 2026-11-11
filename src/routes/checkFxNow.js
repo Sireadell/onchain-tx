@@ -59,7 +59,7 @@ async function handleFxNow(req, res) {
   res.json({
     status: 'ok',
     summary: summarize(quote),
-    confidence: 0.9,
+    confidence: 1.0,
     canonical: ['fx-now', quote.from, quote.to].join(':'),
     base: quote.from,
     quote: quote.to,

@@ -84,6 +84,19 @@ test('a native balance at a block', async (t) => {
   assert.equal(calls[0].method, 'eth_getBalance');
 });
 
+test('a bare address with a block reads its native balance, and Gwei is given when asked', async (t) => {
+  const wallet = `0x${'12'.repeat(20)}`;
+  const calls = stubRpc(t, () => '0xde0b6b3a7640000');
+  const base = startServer(t);
+  const bare = await (await fetch(`${base}/onchain-metric-verify?address=${wallet}&block=18000000`)).json();
+  assert.equal(bare.status, 'ok');
+  assert.equal(bare.kind, 'native_balance');
+  assert.match(bare.summary, /is 1 ETH/);
+  const gwei = await ask(base, `What is the Ethereum balance in Gwei of address ${wallet} at block 18000000?`);
+  assert.match(gwei.summary, /\(1000000000 gwei\)/);
+  assert.equal(calls[0].method, 'eth_getBalance');
+});
+
 test('history the node cannot serve falls back to the latest block and says so', async (t) => {
   stubRpc(t, (method, params) => {
     if (params[1] !== 'latest') throw new Error('missing trie node');
