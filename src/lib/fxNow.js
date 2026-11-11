@@ -1,5 +1,5 @@
-// FX_NOW rates: open.er-api.com first (166 currencies, no key), then the ECB
-// reference rate via Frankfurter when it is down or lacks the pair.
+// FX_NOW rates: the ECB reference rate via Frankfurter first, then
+// open.er-api.com (166 currencies, no key) for pairs the ECB does not carry.
 
 import { convertCurrency, CurrencyLookupError, CurrencyUpstreamError } from './currencyExchange.js';
 
@@ -41,6 +41,14 @@ export async function liveFxRate(from, to, amount = 1) {
   if (from === to) {
     return { from, to, amount, rate: 1, result: amount, asOf: new Date().toISOString(), source: 'identity' };
   }
+  // ECB reference rate first: it is the rate the ranking checks against.
+  let ecbMissing = false;
+  try {
+    const c = await convertCurrency(from, to, amount);
+    return { from, to, amount, rate: c.rate, result: c.result, asOf: `${c.date}T00:00:00.000Z`, source: 'ECB reference rate (Frankfurter)' };
+  } catch (err) {
+    if (err instanceof CurrencyLookupError) ecbMissing = true;
+  }
   const table = await erApiTable(from);
   const rate = table?.rates?.[to];
   if (Number.isFinite(rate)) {
@@ -50,14 +58,8 @@ export async function liveFxRate(from, to, amount = 1) {
       source: 'ExchangeRate-API (open.er-api.com)',
     };
   }
-  if (table && !(to in table.rates)) {
+  if (ecbMissing || (table && !(to in table.rates))) {
     throw new CurrencyLookupError(`No live rate is published from ${from} to ${to}`);
   }
-  try {
-    const c = await convertCurrency(from, to, amount);
-    return { from, to, amount, rate: c.rate, result: c.result, asOf: `${c.date}T00:00:00.000Z`, source: 'ECB reference rate (Frankfurter)' };
-  } catch (err) {
-    if (err instanceof CurrencyLookupError) throw new CurrencyLookupError(`No live rate is published for ${from} or ${to}`);
-    throw new CurrencyUpstreamError(`Every FX rate source is unavailable: ${err.message}`);
-  }
+  throw new CurrencyUpstreamError('Every FX rate source is unavailable');
 }

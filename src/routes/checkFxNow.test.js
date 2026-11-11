@@ -122,3 +122,13 @@ test('FX_NOW reads market notation such as AUD/USD, the exact question the grade
   assert.equal(json.rate, 0.702542);
   assert.equal(calls.erapi[0], 'https://open.er-api.com/v6/latest/AUD');
 });
+
+test('FX_NOW answers with the ECB reference rate first when it carries the pair', async (t) => {
+  const calls = stubFeeds(t, { erapi: ER_USD, frankfurter: { date: '2026-09-25', rates: { EUR: 0.89871 } } });
+  const base = startServer(t);
+  const json = await (await fetch(`${base}/fx-now?from=USD&to=EUR`)).json();
+  assert.equal(json.status, 'ok');
+  assert.equal(json.rate, 0.89871);
+  assert.match(json.source, /ECB/);
+  assert.equal(calls.erapi.length, 0);
+});
