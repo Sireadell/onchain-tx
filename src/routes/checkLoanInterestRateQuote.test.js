@@ -94,13 +94,14 @@ test('LOAN_INTEREST_RATE_QUOTE still answers a mortgage question when the prime 
   assert.equal(json.rates.prime_percent, null);
 });
 
-test('LOAN_INTEREST_RATE_QUOTE reports an error when the source it needs is down', async (t) => {
+test('LOAN_INTEREST_RATE_QUOTE says unavailable, never a 5xx, when the source it needs is down', async (t) => {
   const base = startServer(t);
   stubSources(t, { pmms: { status: 503, body: 'down' } });
   const res = await fetch(`${base}/loan-interest-rate-quote`);
   const json = await res.json();
-  assert.equal(res.status, 502);
-  assert.equal(json.status, 'error');
+  assert.equal(res.status, 200);
+  assert.equal(json.status, 'unavailable');
+  assert.equal(json.rate_percent, null);
 });
 
 test('loan type words are read from natural questions', () => {
@@ -116,4 +117,24 @@ test('parsePmms reads the latest week and the change from the week before', () =
   assert.equal(out.mortgage_30y.percent, 6.23);
   assert.equal(out.mortgage_15y.week_change, 0.05);
   assert.equal(out.arm_5_1, null);
+});
+
+test('LOAN_INTEREST_RATE_QUOTE answers the survey week of a named past date and gives year context', async (t) => {
+  const base = startServer(t);
+  const rows = ['date,pmms30,pmms30p,pmms15,pmms15p,pmms51,pmms51p,pmms51m,pmms51spread'];
+  let d = Date.UTC(2023, 9, 5);
+  for (let i = 0; i < 160; i += 1) {
+    const dt = new Date(d + i * 7 * 86_400_000);
+    rows.push(`${dt.getUTCMonth() + 1}/${dt.getUTCDate()}/${dt.getUTCFullYear()},${(6 + i / 100).toFixed(2)}, ,5.40, ,,,,`);
+  }
+  stubSources(t, { pmms: { status: 200, body: rows.join('\n') } });
+  const q = 'What is the current average APR for a 30-year fixed-rate mortgage in California as of today, October 26, 2023?';
+  const json = await (await fetch(`${base}/loan-interest-rate-quote?query=${encodeURIComponent(q)}`)).json();
+  assert.equal(json.status, 'ok');
+  assert.equal(json.requested_week.week, '2023-10-26');
+  assert.equal(json.requested_week.percent, 6.03);
+  assert.match(json.summary, /^For the survey week of 2023-10-26/);
+  assert.match(json.summary, /A year earlier, in the week of/);
+  assert.match(json.summary, /no separate California figure/);
+  assert.match(json.summary, /not an APR/);
 });

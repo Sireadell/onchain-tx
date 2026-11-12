@@ -84,7 +84,11 @@ export function parsePmms(csv) {
     percent: latest[key],
     week_change: before[key] === null ? null : Math.round((latest[key] - before[key]) * 100) / 100,
   });
-  return { as_of: latest.date, mortgage_30y: entry('pmms30'), mortgage_15y: entry('pmms15'), arm_5_1: entry('pmms51') };
+  // The weekly history is kept (about 2,700 small rows) so a question about
+  // an earlier week, last year's rate, or the 52 week range is answered from
+  // the same file.
+  const history = rows.map((r) => ({ date: r.date, mortgage_30y: r.pmms30, mortgage_15y: r.pmms15, arm_5_1: r.pmms51 }));
+  return { as_of: latest.date, mortgage_30y: entry('pmms30'), mortgage_15y: entry('pmms15'), arm_5_1: entry('pmms51'), history };
 }
 
 export function parseNyFed(body) {
@@ -133,6 +137,34 @@ export function resolveLoanType(raw) {
 
 // Reads whichever sources are needed. A source that is down only fails the
 // answer when the caller asked for exactly what it provides.
+// The survey week on or before `date` (YYYY-MM-DD), or null when the date is
+// before the series starts or there is no history.
+export function weekOnOrBefore(history, date) {
+  if (!Array.isArray(history) || !date) return null;
+  let found = null;
+  for (const row of history) {
+    if (row.date <= date) found = row;
+    else break;
+  }
+  return found;
+}
+
+// Level a year ago and the 52 week range for one mortgage series.
+export function yearContext(history, key) {
+  if (!Array.isArray(history) || history.length < 60) return null;
+  const latest = history[history.length - 1];
+  const lastYear = weekOnOrBefore(history, new Date(Date.parse(latest.date) - 364 * 86_400_000).toISOString().slice(0, 10));
+  const window = history.filter((r) => r.date > new Date(Date.parse(latest.date) - 364 * 86_400_000).toISOString().slice(0, 10) && r[key] !== null);
+  if (!lastYear || lastYear[key] === null || !window.length) return null;
+  const values = window.map((r) => r[key]);
+  return {
+    year_ago_date: lastYear.date,
+    year_ago_percent: lastYear[key],
+    low_52w: Math.min(...values),
+    high_52w: Math.max(...values),
+  };
+}
+
 export async function fetchLoanRates(type) {
   const wantPrime = type === 'prime';
   const [mortgage, prime] = await Promise.allSettled([fetchMortgageRates(), fetchPrimeRate()]);
