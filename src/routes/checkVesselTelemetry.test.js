@@ -31,7 +31,7 @@ function stubAis(t, routes) {
   return hits;
 }
 
-const MARVEL = { mmsi: 636017190, name: 'MARVEL', imo: 9225524, callSign: 'ELZE8', shipType: 70, draught: 87, destination: 'TR ISK', eta: Date.parse('2026-11-14T08:00:00Z') };
+const MARVEL = { mmsi: 636017190, name: 'MARVEL', imo: 9225524, callSign: 'ELZE8', shipType: 70, draught: 87, destination: 'TR ISK', eta: (11 << 16) | (14 << 11) | (8 << 6) };
 const get = async (base, query) => (await fetch(`${base}/vessel-telemetry?${new URLSearchParams(query)}`)).json();
 
 test('vessel: ids parse as MMSI (9 digits) or IMO (7 digits)', () => {
@@ -62,7 +62,7 @@ test('vessel: no AIS position but known metadata answers found with the details'
   assert.equal(body.ship_type, 'cargo ship');
   assert.equal(body.draught_m, 8.7);
   assert.equal(body.destination, 'TR ISK');
-  assert.equal(body.eta, '2026-11-14T08:00:00.000Z');
+  assert.equal(body.eta, '11-14 08:00');
   assert.equal(body.latitude, null);
   assert.equal(body.longitude, null);
 });

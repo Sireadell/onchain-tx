@@ -85,11 +85,18 @@ async function imoToMmsi(imo) {
   return imoCache.map.get(String(imo)) ?? null;
 }
 
-function isoOrNull(ms) {
-  const n = Number(ms);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  const d = new Date(n);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+// AIS packs the ETA into one integer: minute (6 bits), hour (5), day (5),
+// month (4). Month or day 0, hour 24 or minute 60 mean "not available".
+function isoOrNull(packed) {
+  const n = Number(packed);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  const minute = n & 63;
+  const hour = (n >> 6) & 31;
+  const day = (n >> 11) & 31;
+  const month = (n >> 16) & 15;
+  if (!month || month > 12 || !day || hour > 23 || minute > 59) return null;
+  const p = (v) => String(v).padStart(2, '0');
+  return `${p(month)}-${p(day)} ${p(hour)}:${p(minute)}`;
 }
 
 function metaFields(meta) {
@@ -122,7 +129,7 @@ function detailsSentence(m) {
   const extra = [];
   if (m.draught_m != null) extra.push(`reported draught ${m.draught_m} m`);
   if (m.destination) extra.push(`destination ${m.destination}`);
-  if (m.eta) extra.push(`ETA ${m.eta.slice(0, 16).replace('T', ' ')} UTC`);
+  if (m.eta) extra.push(`ETA (month-day hour:minute) ${m.eta} UTC`);
   return { parts, extra };
 }
 
