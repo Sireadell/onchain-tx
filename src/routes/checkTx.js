@@ -40,7 +40,7 @@ export async function handleCheckTx(req, res) {
 
   // A 0x string of the wrong length is not a hash any chain could hold. Say
   // that as the answer (no such transaction exists) rather than refusing.
-  const nearHash = typeof rawTxHash === 'string' ? /\b0x[0-9a-fA-F]{40,80}\b/.exec(rawTxHash)?.[0] : null;
+  const nearHash = typeof rawTxHash === 'string' ? /\b0x[0-9a-fA-F]{50,80}\b/.exec(rawTxHash)?.[0] : null;
   if (!txHash && nearHash) {
     const digits = nearHash.length - 2;
     const label = resolveChainLoose(chainParam)?.label ?? chainParam;
