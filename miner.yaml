@@ -46,6 +46,15 @@ endpoints:
     external_path: /check-tx
     method: GET
     intents: [ONCHAIN_TX_LOOKUP_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       ONCHAIN_TX_LOOKUP. Answers "is transaction 0xabc... confirmed or did
       it fail", "what did this tx hash do", "what is the status of this
@@ -60,6 +69,15 @@ endpoints:
     external_path: /gas-price
     method: GET
     intents: [GAS_PRICE_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       GAS_PRICE. Answers "what is gas right now on Ethereum", "how much does
       a transfer cost on Polygon", "are fees high on Base". Returns the
@@ -72,6 +90,15 @@ endpoints:
     external_path: /wallet-balance
     method: GET
     intents: [WALLET_BALANCE_CHECK_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       WALLET_BALANCE_CHECK. Answers "how much ETH does 0xabc... hold", "what
       is the USDC balance of this address on Arbitrum". Takes a specific
@@ -85,6 +112,15 @@ endpoints:
     external_path: /token-holders
     method: GET
     intents: [TOKEN_HOLDER_COUNT_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       TOKEN_HOLDER_COUNT. Answers "how many wallets hold this token", "how
       many distinct addresses own 0xabc...". Takes a specific token contract
@@ -96,6 +132,15 @@ endpoints:
     external_path: /tvl
     method: GET
     intents: [TVL_LOOKUP_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       TVL_LOOKUP. Answers "what is the TVL of Aave", "how much value is
       locked in Uniswap", "what is total value locked on Ethereum". Takes a
@@ -111,6 +156,15 @@ endpoints:
     external_path: /crypto-price
     method: GET
     intents: [CRYPTO_PRICE_USD]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       CRYPTO_PRICE. Answers "what is Bitcoin worth", "price of ETH in USD",
       "how much is the token at 0xabc... trading for". Names a
@@ -133,6 +187,15 @@ endpoints:
     external_path: /stock-price
     method: GET
     intents: [STOCK_PRICE_US_EQUITY]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       STOCK_PRICE. Answers "what is Apple trading at", "current share price
       of TSLA", "how much is NVDA stock". Names a listed equity or ticker
@@ -147,6 +210,15 @@ endpoints:
     external_path: /ssl-check
     method: GET
     intents: [SSL_VERIFICATION_CERT]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       SSL_VERIFICATION. Answers "is the SSL certificate for example.com
       valid", "when does this domain's TLS certificate expire", "who issued
@@ -167,6 +239,15 @@ endpoints:
     external_path: /weather-forecast
     method: GET
     intents: [WEATHER_FORECAST_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       WEATHER_FORECAST. Answers "what's the weather in Tokyo the next
       three days", "will it rain in London tomorrow", "how windy will it
@@ -191,6 +272,15 @@ endpoints:
     external_path: /storm-alert
     method: GET
     intents: [STORM_ALERT_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       STORM_ALERT. Reports storm risk at a location over a stated window,
       answering questions of the form "what is the storm risk at latitude
@@ -216,6 +306,15 @@ endpoints:
     external_path: /ip-geolocate
     method: GET
     intents: [IP_GEOLOCATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       IP_GEOLOCATION. Answers "where is 8.8.8.8 located", "what country is
       this IP address from", "is this IP a VPN or a datacenter". Takes an
@@ -233,6 +332,15 @@ endpoints:
     external_path: /academic-search
     method: GET
     intents: [ACADEMIC_SEARCH_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       ACADEMIC_SEARCH. Answers "find papers on federated learning",
       "peer-reviewed research on fraud detection since 2020". Takes a
@@ -250,6 +358,15 @@ endpoints:
     external_path: /web-search
     method: GET
     intents: [WEB_SEARCH_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       WEB_SEARCH. Answers an open question of any kind from a live web
       search performed at request time, for questions that have no single
@@ -274,6 +391,15 @@ endpoints:
     external_path: /content-extract
     method: GET
     intents: [CONTENT_EXTRACTION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       CONTENT_EXTRACTION. Answers "what does this page say", "extract the
       text from this URL", "summarize the content at this link". Fetches a
@@ -287,6 +413,15 @@ endpoints:
     external_path: /text-classify
     method: GET
     intents: [TEXT_CLASSIFICATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       TEXT_CLASSIFICATION. Answers "what category is this text", "is this
       email spam or not", "classify this review as positive or negative".
@@ -299,6 +434,15 @@ endpoints:
     external_path: /text-generate
     method: GET
     intents: [TEXT_GENERATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       TEXT_GENERATION. Answers "write a short bio for a software
       engineer", "draft a product description for a water bottle". Takes an
@@ -308,6 +452,15 @@ endpoints:
     external_path: /language-generate
     method: GET
     intents: [LANGUAGE_GENERATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       LANGUAGE_GENERATION. Answers "translate this into French", "rewrite
       this in a formal tone", "paraphrase this sentence". Takes existing
@@ -318,6 +471,15 @@ endpoints:
     external_path: /research-synthesis
     method: GET
     intents: [RESEARCH_SYNTHESIS_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       RESEARCH_SYNTHESIS. Answers broader research questions such as "what
       are the main approaches to carbon capture" or "summarize the current
@@ -329,6 +491,15 @@ endpoints:
     external_path: /cross-chain-state
     method: GET
     intents: [CROSS_CHAIN_STATE_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       CROSS_CHAIN_STATE_VERIFY. Answers "which chains is this address
       active on", "does this wallet exist on Base and Arbitrum", "is this a
@@ -344,6 +515,15 @@ endpoints:
     external_path: /event-outcome
     method: GET
     intents: [EVENT_OUTCOME_RESOLUTION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       EVENT_OUTCOME_RESOLUTION. Answers "did the merger go through", "who
       won the election", "was the proposal approved". Resolves a question
@@ -357,6 +537,15 @@ endpoints:
     external_path: /weather-check
     method: GET
     intents: [WEATHER_CHECK_TEMPERATURE]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       WEATHER_CHECK. Answers "what's the weather like in Tokyo right now",
       "current temperature in London", "is it raining in Cape Town at the
@@ -371,6 +560,15 @@ endpoints:
     external_path: /language-translate
     method: GET
     intents: [LANGUAGE_TRANSLATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       LANGUAGE_TRANSLATION. Answers "translate 'good morning' into Japanese",
       "how do you say thank you in French". Takes text and a target language
@@ -383,6 +581,15 @@ endpoints:
     external_path: /chat-complete
     method: GET
     intents: [CHAT_COMPLETION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       CHAT_COMPLETION. Answers a message directly and conversationally, the
       way a chat assistant would, with no preamble. A "will X happen"
@@ -394,6 +601,15 @@ endpoints:
     external_path: /news-search
     method: GET
     intents: [NEWS_SEARCH_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       NEWS_SEARCH. Answers "what's the latest on the trade talks", "has the
       company announced results yet" from a live news-focused web search at
@@ -405,6 +621,15 @@ endpoints:
     external_path: /news-headlines
     method: GET
     intents: [NEWS_HEADLINES_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       NEWS_HEADLINES. Answers "what are today's headlines on the election",
       "top news about the central bank". Returns a short list of current
@@ -418,6 +643,15 @@ endpoints:
     external_path: /fact-check
     method: GET
     intents: [FACT_CHECK_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       FACT_CHECK. Answers "is it true that X", "fact check this claim: ...".
       Checks a stated claim against live web sources and returns a
@@ -429,6 +663,15 @@ endpoints:
     external_path: /sentiment-analyze
     method: GET
     intents: [SENTIMENT_ANALYSIS_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       SENTIMENT_ANALYSIS. Answers "is this review positive or negative",
       "what's the sentiment of this message". Classifies text as exactly one
@@ -440,6 +683,15 @@ endpoints:
     external_path: /content-moderate
     method: GET
     intents: [CONTENT_MODERATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       CONTENT_MODERATION. Answers "does this text violate policy", "is this
       message safe to post". Judges text as Safe or Flagged against common
@@ -450,6 +702,15 @@ endpoints:
     external_path: /cve-lookup
     method: GET
     intents: [CVE_LOOKUP_CVSS]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       CVE_LOOKUP. Answers "what is CVE-2021-44228", "known vulnerabilities in
       log4j". Takes a CVE id or a keyword and returns matching vulnerability
@@ -462,6 +723,15 @@ endpoints:
     external_path: /telegraph-knowledge
     method: GET
     intents: [TELEGRAPH_KNOWLEDGE_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       TELEGRAPH_KNOWLEDGE. Answers general-knowledge questions and questions
       about Telegraph Protocol itself, grounded against telegraphprotocol.com
@@ -472,6 +742,15 @@ endpoints:
     external_path: /text-summarize
     method: GET
     intents: [TEXT_SUMMARIZATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       TEXT_SUMMARIZATION. Summarizes supplied text to a given length or
       style, or a sensible default when none is named. Params: text
@@ -480,6 +759,15 @@ endpoints:
     external_path: /chatbot-conversation
     method: GET
     intents: [CHATBOT_CONVERSATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       CHATBOT_CONVERSATION. Replies to a chat message, using a supplied
       messages/history array as context when given. Params: message
@@ -489,6 +777,15 @@ endpoints:
     external_path: /semantic-similarity
     method: GET
     intents: [SEMANTIC_SIMILARITY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       SEMANTIC_SIMILARITY. Returns a 0-1 semantic similarity score and a
       short reason for two supplied texts. Params: text1, text2 (required,
@@ -497,6 +794,15 @@ endpoints:
     external_path: /grammar-spell-check
     method: GET
     intents: [GRAMMAR_SPELL_CHECK_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       GRAMMAR_SPELL_CHECK. Returns corrected text plus a count and list of
       the grammar and spelling fixes made. Params: text (required).
@@ -504,6 +810,15 @@ endpoints:
     external_path: /ai-text-detect
     method: GET
     intents: [AI_TEXT_DETECTION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       AI_TEXT_DETECTION. Returns an approximate self-assessment of how
       likely supplied text is AI-generated, with named cues and an honest
@@ -513,6 +828,15 @@ endpoints:
     external_path: /research-query
     method: GET
     intents: [RESEARCH_QUERY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       RESEARCH_QUERY. Answers an open research question from live web
       sources in one well-sourced paragraph. Params: query (required, also
@@ -522,6 +846,15 @@ endpoints:
     external_path: /threat-intelligence
     method: GET
     intents: [THREAT_INTELLIGENCE_INDICATOR]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       THREAT_INTELLIGENCE. Given an IP, domain, file hash, CVE id, or threat
       actor/malware family name, reports whether it is a known threat:
@@ -534,6 +867,15 @@ endpoints:
     external_path: /package-status
     method: GET
     intents: [PACKAGE_STATUS_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       PACKAGE_STATUS. Given a shipment tracking number, reports its current
       status via live web search, since no free universal carrier API
@@ -545,6 +887,15 @@ endpoints:
     external_path: /url-scan
     method: GET
     intents: [URL_SCAN_VERDICT]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       URL_SCAN. Given a URL, returns a Safe/Suspicious/Unknown verdict
       combining live reachability and redirect-chain checking, TLS
@@ -555,6 +906,15 @@ endpoints:
     external_path: /currency-exchange
     method: GET
     intents: [CURRENCY_EXCHANGE_CONVERT]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       CURRENCY_EXCHANGE. Answers "how much is 100 dollars in euros",
       "convert 50 GBP to JPY", using live ECB reference rates. Params: from,
@@ -564,6 +924,15 @@ endpoints:
     external_path: /fx-now
     method: GET
     intents: [FX_NOW_CAD, FX_NOW_EUR, FX_NOW_SEK]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       FX_NOW. Answers "what is the USD to EUR rate right now", "current GBP
       JPY exchange rate", "how much is 250 dollars in naira today" with the
@@ -576,6 +945,15 @@ endpoints:
     external_path: /sanctions-screening
     method: GET
     intents: [SANCTIONS_SCREENING_MATCH_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       SANCTIONS_SCREENING_MATCH. Answers "is John Doe sanctioned", "check
       this company against the OFAC list". Screens a name against the US
@@ -585,6 +963,15 @@ endpoints:
     external_path: /vulnerability-triage
     method: GET
     intents: [VULNERABILITY_TRIAGE_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       VULNERABILITY_TRIAGE. Answers "how urgent is CVE-2021-44228", "should
       I patch log4j now". Same CIRCL/NVD CVE data as CVE_LOOKUP, framed as a
@@ -595,6 +982,15 @@ endpoints:
     external_path: /sports-score
     method: GET
     intents: [SPORTS_SCORE_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       SPORTS_SCORE. Answers "what is the score of the Lakers game". Most
       recent or in-progress score for a named team, via TheSportsDB, with a
@@ -604,6 +1000,15 @@ endpoints:
     external_path: /game-result
     method: GET
     intents: [GAME_RESULT_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       GAME_RESULT. Answers "who won the Knicks game". Winner of a named
       team's most recently completed match, via TheSportsDB, with a live
@@ -613,6 +1018,15 @@ endpoints:
     external_path: /route-eta
     method: GET
     intents: [ROUTE_ETA_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       ROUTE_ETA. Answers "how long to drive from London to Paris", "what is
       the distance between Miami and Orlando". Driving distance and
@@ -625,6 +1039,15 @@ endpoints:
     external_path: /regulatory-filing-monitor
     method: GET
     intents: [REGULATORY_FILING_MONITOR_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       REGULATORY_FILING_MONITOR. Answers "will the FDA fine this company",
       "has this drug had a warning filed against it". Searches the US
@@ -640,6 +1063,15 @@ endpoints:
     external_path: /credit-score-verify
     method: GET
     intents: [CREDIT_SCORE_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       CREDIT_SCORE_VERIFY. Answers "is this a registered business",
       "verify this company's legal entity status". Checks a company name
@@ -651,6 +1083,15 @@ endpoints:
     external_path: /macro-economic-indicator
     method: GET
     intents: [MACRO_ECONOMIC_INDICATOR_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       MACRO_ECONOMIC_INDICATOR. Answers "what is Japan's inflation rate",
       "how fast is the US economy growing", "what is the ECB interest rate".
@@ -665,6 +1106,15 @@ endpoints:
     external_path: /weather-forecast-verify
     method: GET
     intents: [WEATHER_FORECAST_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       WEATHER_FORECAST_VERIFY. Answers "what was the actual weather in
       London on August 1st". Reports what actually happened at a named
@@ -676,6 +1126,15 @@ endpoints:
     external_path: /customer-ticket-resolution
     method: GET
     intents: [CUSTOMER_TICKET_RESOLUTION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       CUSTOMER_TICKET_RESOLUTION. Answers "how do I fix this error", given a
       described technical problem. Searches live web sources for a known
@@ -686,6 +1145,15 @@ endpoints:
     external_path: /return-policy-verify
     method: GET
     intents: [RETURN_POLICY_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       RETURN_POLICY_VERIFY. Answers "what is Costco's return policy". Given
       a retailer name, finds and reports that retailer's actual return
@@ -696,6 +1164,15 @@ endpoints:
     external_path: /task-execution-quality
     method: GET
     intents: [TASK_EXECUTION_QUALITY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       TASK_EXECUTION_QUALITY. Given a task description and a produced
       result, judges whether the result actually satisfies the task
@@ -706,6 +1183,15 @@ endpoints:
     external_path: /carrier-serviceability
     method: GET
     intents: [CARRIER_SERVICEABILITY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       CARRIER_SERVICEABILITY. Answers "does UPS deliver to this ZIP code".
       Given an address or ZIP code and optionally a carrier name, reports
@@ -715,6 +1201,15 @@ endpoints:
     external_path: /delivery-window-verify
     method: GET
     intents: [DELIVERY_WINDOW_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       DELIVERY_WINDOW_VERIFY. Answers "how long does FedEx ground take from
       New York to LA". Given an origin, destination, and carrier/service
@@ -726,6 +1221,15 @@ endpoints:
     external_path: /payment-method-verify
     method: GET
     intents: [PAYMENT_METHOD_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       PAYMENT_METHOD_VERIFY. Answers "what card network is this BIN",
       "is this a Visa or Mastercard number". Identifies the card network
@@ -738,6 +1242,15 @@ endpoints:
     external_path: /invoice-ledger-reconcile
     method: GET
     intents: [INVOICE_LEDGER_RECONCILE_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       INVOICE_LEDGER_RECONCILE. Given two described figures or a described
       invoice/ledger discrepancy, reconciles what can be reconciled from
@@ -748,6 +1261,15 @@ endpoints:
     external_path: /fraud-query
     method: POST
     intents: [FRAUD_DETECTION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       FRAUD_DETECTION. Answers "was BitConnect a scam", "is this scheme
       fraudulent", "what happened in the FTX fraud". Assesses how likely a
@@ -759,6 +1281,15 @@ endpoints:
     external_path: /assess-wallet
     method: GET
     intents: [FRAUD_DETECTION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       FRAUD_DETECTION for a specific address. Answers "is 0xabc... a scam
       wallet", "how risky is this address", "is it safe to receive funds
@@ -774,6 +1305,15 @@ endpoints:
     external_path: /assess-wallet
     method: POST
     intents: [FRAUD_DETECTION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       FRAUD_DETECTION for a specific address, identical to the GET form
       above and accepting the address in a JSON body instead of the query
@@ -782,6 +1322,15 @@ endpoints:
     external_path: /url-safe
     method: GET
     intents: [URL_SAFE_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       URL_SAFE. Given a URL, checks it against URLhaus, VirusTotal, and
       reputation services, returning Safe/Suspicious/Unknown with detection count.
@@ -793,6 +1342,15 @@ endpoints:
     external_path: /malware-detection
     method: GET
     intents: [MALWARE_DETECTION_HASH]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       MALWARE_DETECTION. Given a domain, IP address, or file hash, checks it
       against VirusTotal, AbuseIPDB, and AlienVault OTX reputation databases,
@@ -806,6 +1364,15 @@ endpoints:
     external_path: /dns-check
     method: GET
     intents: [DNS_RECORD_LOOKUP_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       DNS_RECORD_LOOKUP. Answers "what are the DNS records for example.com",
       "what DNS entries does this domain have". Takes a hostname and returns
@@ -817,6 +1384,15 @@ endpoints:
     external_path: /threat-ip-reputation
     method: GET
     intents: [THREAT_IP_REPUTATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       THREAT_IP_REPUTATION. Answers "is this IP address malicious",
       "is example.com a known threat domain", "what is the reputation of
@@ -830,6 +1406,15 @@ endpoints:
     external_path: /crypto-transfer-verify
     method: GET
     intents: [CRYPTO_TRANSFER_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       CRYPTO_TRANSFER_VERIFY. Answers "did this transfer succeed, who sent it
       and who received it, how much moved, what was the fee and how many
@@ -849,6 +1434,15 @@ endpoints:
     external_path: /onchain-metric-verify
     method: GET
     intents: [ONCHAIN_METRIC_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       ONCHAIN_METRIC_VERIFY. Answers "what did owner() return on contract X
       at block N", "what was totalAssets() of this vault", "which wallet held
@@ -864,6 +1458,15 @@ endpoints:
     external_path: /question-answering
     method: GET
     intents: [QUESTION_ANSWERING_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       QUESTION_ANSWERING. Answers an open factual question such as "who wrote
       Things Fall Apart" or "when was the Eiffel Tower built" in one to three
@@ -875,6 +1478,15 @@ endpoints:
     external_path: /token-total-supply
     method: GET
     intents: [TOKEN_TOTAL_SUPPLY_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       TOKEN_TOTAL_SUPPLY_VERIFY. Answers "what is the total supply of USDC
       on Ethereum", "verify the supply of token 0xA0b8... at block
@@ -889,6 +1501,15 @@ endpoints:
     external_path: /corporate-registry
     method: GET
     intents: [CORPORATE_REGISTRY_LOOKUP_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       CORPORATE_REGISTRY_LOOKUP. Answers "what is the registered address
       and incorporation status of Acme Inc. in Delaware", "is SpaceX an
@@ -906,6 +1527,15 @@ endpoints:
     external_path: /email-security
     method: GET
     intents: [EMAIL_SECURITY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       EMAIL_SECURITY. Answers "is gmail.com protected against email
       spoofing", "check SPF, DKIM and DMARC for example.com". Reads the
@@ -918,6 +1548,15 @@ endpoints:
     external_path: /security-review
     method: GET
     intents: [SECURITY_REVIEW_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       SECURITY_REVIEW. Reviews supplied code, configuration or a system
       description for security weaknesses. The answer leads with a verdict
@@ -928,6 +1567,15 @@ endpoints:
     external_path: /llm-output-evaluation
     method: GET
     intents: [LLM_OUTPUT_EVALUATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       LLM_OUTPUT_EVALUATION. Grades a language model's answer for accuracy,
       completeness, relevance and clarity. The answer leads with a rating
@@ -940,6 +1588,15 @@ endpoints:
     external_path: /contract-obligation-audit
     method: GET
     intents: [CONTRACT_OBLIGATION_AUDIT_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       CONTRACT_OBLIGATION_AUDIT. Audits contract obligations: who owes what
       by when, and, given performance facts, whether each was met. The
@@ -951,6 +1608,15 @@ endpoints:
     external_path: /code-generation
     method: GET
     intents: [CODE_GENERATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       CODE_GENERATION. Writes complete, runnable code for an instruction, in
       the requested language (Python by default), as one fenced code block
@@ -960,6 +1626,15 @@ endpoints:
     external_path: /code-review
     method: GET
     intents: [CODE_REVIEW_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       CODE_REVIEW. Reviews supplied code or a diff for correctness bugs,
       security, performance and readability. The answer leads with a
@@ -971,6 +1646,15 @@ endpoints:
     external_path: /text-authenticity
     method: GET
     intents: [TEXT_AUTHENTICITY_CHECK_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       TEXT_AUTHENTICITY_CHECK. Judges whether a text is authentic, genuinely
       from its attributed source and not fabricated, altered or
@@ -983,6 +1667,15 @@ endpoints:
     external_path: /financial-data
     method: GET
     intents: [FINANCIAL_DATA_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       FINANCIAL_DATA. Answers "what was Apple's revenue", "Tesla's net
       income", "Microsoft's total assets", "Amazon's latest quarterly
@@ -999,6 +1692,15 @@ endpoints:
     external_path: /loan-interest-rate-quote
     method: GET
     intents: [LOAN_INTEREST_RATE_QUOTE_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       LOAN_INTEREST_RATE_QUOTE. Answers "what is the 30-year mortgage rate",
       "current prime rate", "15-year fixed rate today". Returns the latest
@@ -1013,6 +1715,15 @@ endpoints:
     external_path: /smart-contract-audit
     method: GET
     intents: [SMART_CONTRACT_AUDIT_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       SMART_CONTRACT_AUDIT. Answers "audit this contract", "is 0xabc... safe",
       "does this contract have reentrancy or access control problems". Reads
@@ -1029,6 +1740,15 @@ endpoints:
     external_path: /entity-extraction
     method: GET
     intents: [ENTITY_EXTRACTION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       ENTITY_EXTRACTION. Extracts people, organizations, places, dates, amounts and products
       named in a text. Params: text, or the whole request as query.
@@ -1036,6 +1756,15 @@ endpoints:
     external_path: /keyword-extraction
     method: GET
     intents: [KEYWORD_EXTRACTION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       KEYWORD_EXTRACTION. Returns the main keywords and keyphrases of a text, most important
       first. Params: text, or query.
@@ -1043,6 +1772,15 @@ endpoints:
     external_path: /b2b-identity
     method: GET
     intents: [B2B_IDENTITY_ENRICHMENT_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       B2B_IDENTITY_ENRICHMENT. Enriches a company, domain or person with name, business, industry,
       headquarters and official website. Params: company, or query.
@@ -1050,6 +1788,15 @@ endpoints:
     external_path: /social-bot-detection
     method: GET
     intents: [SOCIAL_BOT_DETECTION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       SOCIAL_BOT_DETECTION. Judges whether a social account or its posts look automated. Leads with
       a verdict (Likely bot, Possibly automated, Likely human, Insufficient
@@ -1058,6 +1805,15 @@ endpoints:
     external_path: /travel-disruption
     method: GET
     intents: [TRAVEL_DISRUPTION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       TRAVEL_DISRUPTION. Rates disruption risk for a flight, route or airport and names the
       drivers. Params: flight, route, or query.
@@ -1065,6 +1821,15 @@ endpoints:
     external_path: /content-verification
     method: GET
     intents: [CONTENT_VERIFICATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       CONTENT_VERIFICATION. Verifies whether a claim, article or post is genuine and correctly
       attributed. Verdict first. Params: content, claim, or query.
@@ -1072,6 +1837,15 @@ endpoints:
     external_path: /product-authenticity
     method: GET
     intents: [PRODUCT_AUTHENTICITY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       PRODUCT_AUTHENTICITY. Judges whether a product or listing is genuine or counterfeit. Params:
       product, listing, or query.
@@ -1079,6 +1853,15 @@ endpoints:
     external_path: /plagiarism-detection
     method: GET
     intents: [PLAGIARISM_DETECTION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       PLAGIARISM_DETECTION. Checks a text for plagiarism against an optional source and gives an
       overlap estimate. Params: text, source.
@@ -1086,6 +1869,15 @@ endpoints:
     external_path: /document-authenticity
     method: GET
     intents: [DOCUMENT_AUTHENTICITY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       DOCUMENT_AUTHENTICITY. Judges whether a document looks authentic or forged. Params: document,
       or query.
@@ -1093,6 +1885,15 @@ endpoints:
     external_path: /sla-compliance
     method: GET
     intents: [SLA_COMPLIANCE_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       SLA_COMPLIANCE. Checks measured service data against SLA terms and states whether each
       target was met. Params: sla, metrics, or query.
@@ -1100,6 +1901,15 @@ endpoints:
     external_path: /media-forensic
     method: GET
     intents: [MEDIA_FORENSIC_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       MEDIA_FORENSIC_VERIFY. Judges whether an image, video or audio item was manipulated, from its
       description, metadata and context. Params: media, or query.
@@ -1107,6 +1917,15 @@ endpoints:
     external_path: /media-authenticity
     method: GET
     intents: [MEDIA_AUTHENTICITY_CHECK_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       MEDIA_AUTHENTICITY_CHECK. Checks whether media is original and correctly captioned. Params: media,
       claim, or query.
@@ -1114,18 +1933,45 @@ endpoints:
     external_path: /image-verification
     method: GET
     intents: [IMAGE_VERIFICATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       IMAGE_VERIFICATION. Verifies the claim made about an image. Params: image, claim, or query.
   - path: /video-verification
     external_path: /video-verification
     method: GET
     intents: [VIDEO_VERIFICATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       VIDEO_VERIFICATION. Verifies the claim made about a video. Params: video, claim, or query.
   - path: /deepfake-detection
     external_path: /deepfake-detection
     method: GET
     intents: [DEEPFAKE_DETECTION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       DEEPFAKE_DETECTION. Rates the likelihood that media is a deepfake from its source and
       description. Params: media, or query.
@@ -1133,6 +1979,15 @@ endpoints:
     external_path: /image-captioning
     method: GET
     intents: [IMAGE_CAPTIONING_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       IMAGE_CAPTIONING. Writes a caption and alt text for an image from its description or link.
       Params: image, description, or query.
@@ -1140,6 +1995,15 @@ endpoints:
     external_path: /agent-task
     method: GET
     intents: [AGENT_TASK_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       AGENT_TASK. Carries out a described task and returns the finished result. Params:
       task, or query.
@@ -1147,6 +2011,15 @@ endpoints:
     external_path: /task-completion
     method: GET
     intents: [TASK_COMPLETION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       TASK_COMPLETION. Judges whether a task was fully completed from the delivered result.
       Params: task, result.
@@ -1154,6 +2027,15 @@ endpoints:
     external_path: /wash-trading
     method: GET
     intents: [WASH_TRADING_DETECTION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       WASH_TRADING_DETECTION. Looks for wash trading patterns in trade data or a token. Params:
       trades, token, or query.
@@ -1161,6 +2043,15 @@ endpoints:
     external_path: /fraud-risk
     method: GET
     intents: [FRAUD_RISK_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       FRAUD_RISK. Scores the fraud risk of a transaction, account, merchant or offer from
       0 to 100. Params: transaction, or query.
@@ -1168,6 +2059,15 @@ endpoints:
     external_path: /transaction-risk
     method: GET
     intents: [TRANSACTION_RISK_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       TRANSACTION_RISK. Scores the risk of a payment or on-chain transaction from 0 to 100.
       Params: transaction, or query.
@@ -1175,6 +2075,15 @@ endpoints:
     external_path: /vendor-verify
     method: GET
     intents: [VENDOR_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       VENDOR_VERIFY. Checks a vendor before payment for mismatches and fraud patterns.
       Params: vendor, or query.
@@ -1182,6 +2091,15 @@ endpoints:
     external_path: /purchase-order-verify
     method: GET
     intents: [PURCHASE_ORDER_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       PURCHASE_ORDER_VERIFY. Checks a purchase order against an invoice or delivery and lists
       mismatches. Params: purchase_order, or query.
@@ -1189,6 +2107,15 @@ endpoints:
     external_path: /commerce-purchase-verify
     method: GET
     intents: [COMMERCE_PURCHASE_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       COMMERCE_PURCHASE_VERIFY. Checks that a purchase happened as claimed from the order and receipt
       details. Params: order, or query.
@@ -1196,6 +2123,15 @@ endpoints:
     external_path: /fare-rule-verify
     method: GET
     intents: [FARE_RULE_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       FARE_RULE_VERIFY. States the change, cancel and refund rules for a fare class and checks a
       claim against them. Params: fare, carrier, claim.
@@ -1203,6 +2139,15 @@ endpoints:
     external_path: /code-patch-verify
     method: GET
     intents: [CODE_PATCH_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       CODE_PATCH_VERIFY. Judges whether a patch fixes the stated problem without a regression.
       Params: patch, issue.
@@ -1210,6 +2155,15 @@ endpoints:
     external_path: /regression-verify
     method: GET
     intents: [REGRESSION_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       REGRESSION_VERIFY. Checks a change for regressions from the diff or test results. Params:
       diff, results.
@@ -1217,6 +2171,15 @@ endpoints:
     external_path: /kyc-liveness
     method: GET
     intents: [KYC_BIOMETRIC_LIVENESS_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       KYC_BIOMETRIC_LIVENESS. Judges whether a liveness check shows a live person from the check
       signals. Params: signals, or query.
@@ -1224,6 +2187,15 @@ endpoints:
     external_path: /shipment-delay-risk
     method: GET
     intents: [SHIPMENT_DELAY_RISK_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       SHIPMENT_DELAY_RISK. Rates the delay risk of a shipment or lane and names the drivers.
       Params: shipment, or query.
@@ -1231,6 +2203,15 @@ endpoints:
     external_path: /ship-rate-eta
     method: GET
     intents: [SHIP_RATE_ETA_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       SHIP_RATE_ETA. Estimates shipping price range and transit days between two places.
       Params: origin, destination, weight.
@@ -1238,6 +2219,15 @@ endpoints:
     external_path: /optimal-execution-route
     method: GET
     intents: [OPTIMAL_EXECUTION_ROUTE_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       OPTIMAL_EXECUTION_ROUTE. Advises how best to execute a token swap: venue, price impact, slippage.
       Params: pair, amount, chain.
@@ -1245,6 +2235,15 @@ endpoints:
     external_path: /warehouse-inventory
     method: GET
     intents: [WAREHOUSE_INVENTORY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       WAREHOUSE_INVENTORY. Reconciles supplied warehouse stock figures and flags discrepancies.
       Params: inventory, or query.
@@ -1252,6 +2251,15 @@ endpoints:
     external_path: /sku-in-stock
     method: GET
     intents: [SKU_IN_STOCK_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       SKU_IN_STOCK. Says whether an item is in stock from supplied stock data. Params: sku,
       or query.
@@ -1259,6 +2267,15 @@ endpoints:
     external_path: /live-shelf-price
     method: GET
     intents: [LIVE_SHELF_PRICE_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       LIVE_SHELF_PRICE. Gives the shelf price of a retail product from supplied page text or a
       typical range. Params: product, store.
@@ -1266,6 +2283,15 @@ endpoints:
     external_path: /hotel-availability
     method: GET
     intents: [HOTEL_AVAILABILITY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       HOTEL_AVAILABILITY. Gives typical availability and nightly price range for a hotel or city
       and dates. Params: hotel, dates.
@@ -1273,6 +2299,15 @@ endpoints:
     external_path: /flight-availability
     method: GET
     intents: [FLIGHT_AVAILABILITY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       FLIGHT_AVAILABILITY. Gives typical airlines, frequency and fare range for a route and date.
       Params: route, date.
@@ -1280,6 +2315,15 @@ endpoints:
     external_path: /air-quality
     method: GET
     intents: [AIR_QUALITY_INDEX_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       AIR_QUALITY_INDEX. Live air quality index and pollutant levels for a city from Open-Meteo.
       Params: city, or query.
@@ -1287,6 +2331,15 @@ endpoints:
     external_path: /crypto-yield-rate
     method: GET
     intents: [CRYPTO_YIELD_RATE_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       CRYPTO_YIELD_RATE. Live APY of the largest DeFi yield pools for a token or protocol from
       DefiLlama. Params: asset, chain, or query.
@@ -1294,6 +2347,15 @@ endpoints:
     external_path: /asset-reserve-attestation
     method: GET
     intents: [ASSET_RESERVE_ATTESTATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       ASSET_RESERVE_ATTESTATION. Stablecoin circulating supply, peg and chain split from DefiLlama (the
       supply reserves must cover). Params: asset, or query.
@@ -1301,6 +2363,15 @@ endpoints:
     external_path: /liquidity-depth
     method: GET
     intents: [LIQUIDITY_DEPTH_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       LIQUIDITY_DEPTH_VERIFY. DEX liquidity depth and volume for a token or pair from DexScreener.
       Params: pair, or query.
@@ -1308,6 +2379,15 @@ endpoints:
     external_path: /api-health-check
     method: GET
     intents: [API_HEALTH_CHECK_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       API_HEALTH_CHECK. Probes a public URL three times and reports healthy, degraded or down
       with latency. Params: url.
@@ -1315,6 +2395,15 @@ endpoints:
     external_path: /server-uptime
     method: GET
     intents: [SERVER_UPTIME_MONITOR_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       SERVER_UPTIME_MONITOR. Probes a public host three times and reports uptime state with latency.
       Params: url.
@@ -1322,12 +2411,30 @@ endpoints:
     external_path: /twitter-search
     method: GET
     intents: [TWITTER_SEARCH_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       TWITTER_SEARCH. Finds public X posts about a topic, hashtag or account. Params: query.
   - path: /embedding
     external_path: /embedding
     method: GET
     intents: [EMBEDDING_GENERATION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       EMBEDDING_GENERATION. Returns a deterministic 256-dimension unit text embedding. Params: text,
       or query.
@@ -1342,54 +2449,135 @@ endpoints:
     external_path: /grid-power-price
     method: GET
     intents: [GRID_POWER_PRICE_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       GRID_POWER_PRICE. Answers "what is the electricity price in Germany right now", "day-ahead power price in France". Returns the current day-ahead wholesale price in EUR/MWh for a European bidding zone plus the day minimum, maximum and average. Params: zone (required, a zone code such as DE-LU, FR, NL, ES or a country name). US operators are not covered.
   - path: /validator-performance
     external_path: /validator-performance
     method: GET
     intents: [VALIDATOR_PERFORMANCE_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       VALIDATOR_PERFORMANCE_VERIFY. Answers "is Ethereum validator 12345 active", "has this validator been slashed", "what is the balance of validator 1". Returns status, slashing, balance, effective balance and activation and exit epochs from a beacon node. Params: validator (required, a validator index or a 0x public key of 96 hex characters).
   - path: /cloud-resource-usage
     external_path: /cloud-resource-usage
     method: GET
     intents: [CLOUD_RESOURCE_USAGE_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       CLOUD_RESOURCE_USAGE. Answers "what is the CPU utilisation", "memory pressure", "network throughput" of a monitored host. Reads live node_exporter metrics from Prometheus and returns CPU percent, memory used percent and network receive and transmit bytes per second. Params: metric (optional: cpu, memory or network; all three when omitted).
   - path: /datacenter-telemetry
     external_path: /datacenter-telemetry
     method: GET
     intents: [DATACENTER_TELEMETRY_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       DATACENTER_TELEMETRY_VERIFY. Audits datacenter readings you supply: PUE from total facility kW and IT kW, inlet temperature against the ASHRAE 18 to 27 C range, and generator readiness from fuel percent and days since last test. Params: total_kw, it_kw, inlet_c, generator_fuel_pct, generator_test_days (any subset), or the same numbers written in the question.
   - path: /sensor-telemetry
     external_path: /sensor-telemetry
     method: GET
     intents: [SENSOR_TELEMETRY_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       SENSOR_TELEMETRY_VERIFY. Validates one edge sensor reading: heartbeat freshness, calibration bounds and HMAC-SHA256 payload integrity. Params: sensor_id, value, timestamp (required); min, max, max_age_seconds, signature, secret (optional). The signed text is sensor_id|value|timestamp.
   - path: /port-congestion
     external_path: /port-congestion
     method: GET
     intents: [LIVE_PORT_CONGESTION_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       LIVE_PORT_CONGESTION. Answers "how congested is the port of Helsinki", "how many ships are in Turku port". Returns vessels currently in port, arrivals expected in 24 hours and average stay so far, from live port calls. Covers Finnish ports. Params: port (required, a name such as Helsinki or a UN/LOCODE such as FIHEL).
   - path: /vessel-telemetry
     external_path: /vessel-telemetry
     method: GET
     intents: [VESSEL_TELEMETRY_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       VESSEL_TELEMETRY_VERIFY. Answers "where is vessel 230629000", "what is the speed and draught of this ship". Returns live AIS position, speed over ground, course, heading, draught in metres and destination for a ship. Coverage is the AIS network around Finland and the Baltic. Params: mmsi (required, 9 digits).
   - path: /satellite-imagery
     external_path: /satellite-imagery
     method: GET
     intents: [SATELLITE_IMAGERY_ANALYSIS_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       SATELLITE_IMAGERY_ANALYSIS. Answers "any wildfires, storms or floods near 34.05, -118.24". Returns open natural events detected from satellites within a radius of a point from NASA EONET, and the date of the latest NASA GIBS imagery. It does not classify image pixels. Params: lat, lon (required), radius_km (optional, default 300).
   - path: /mining-hashprice
     external_path: /mining-hashprice
     method: GET
     intents: [MINING_HASHPRICE_VERIFY_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
     description: >
       MINING_HASHPRICE_VERIFY. Answers "what is the Bitcoin hashprice", "mining revenue per PH/s per day at block 800000". Computes expected revenue per unit of hashrate per day from the block reward and network difficulty of one block. Params: height (optional, a block number or latest).
 

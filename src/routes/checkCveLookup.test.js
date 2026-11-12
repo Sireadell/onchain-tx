@@ -304,6 +304,6 @@ test('cve-lookup: a 5k-character value is capped, answered, and never forwarded 
   const res = await fetch(`${base}/cve-lookup?cve=${'x'.repeat(5000)}`);
   assert.equal(res.status, 200);
   const body = await res.json();
-  assert.ok(body.summary.length < 400);
+  assert.ok(body.summary.length < 700);
   for (const url of calls.nvd) assert.ok(url.length < 600, 'huge value forwarded to NVD');
 });

@@ -30,6 +30,7 @@ export function congestion(portCalls, code, nowMs) {
   let inPort = 0;
   let expected = 0;
   let departed = 0;
+  let overdue = 0;
   const stays = [];
   for (const c of portCalls) {
     if (c.portToVisit !== code) continue;
@@ -44,10 +45,11 @@ export function congestion(portCalls, code, nowMs) {
       if (atd && atd <= nowMs && atd >= nowMs - 24 * 3.6e6) departed += 1;
       if (ata && !atd && !stale) { inPort += 1; stays.push((nowMs - ata) / 3.6e6); }
       else if (!ata && eta && eta >= nowMs && eta <= nowMs + 24 * 3.6e6) expected += 1;
+      else if (!ata && !atd && eta && eta < nowMs && eta >= nowMs - 24 * 3.6e6) overdue += 1;
     }
   }
   const avg = stays.length ? stays.reduce((a, b) => a + b, 0) / stays.length : 0;
-  return { inPort, expected, departed, avgStayHours: avg };
+  return { inPort, expected, departed, overdue, avgStayHours: avg };
 }
 
 // Rule of thumb for Finnish ports, not a published scale: ships in port plus
@@ -93,7 +95,7 @@ async function handle(req, res) {
   const c = congestion(data.portCalls ?? [], code, Date.now());
   const level = congestionLevel(c.inPort, c.expected);
   res.json({
-    summary: `${code} has ${c.inPort} vessels in port, ${c.expected} more expected within 24 hours and ${c.departed} departed in the last 24 hours; vessels now in port have stayed ${c.avgStayHours.toFixed(1)} hours on average so far. Congestion is ${level}.`,
+    summary: `${code} has ${c.inPort} vessels in port, ${c.expected} more expected within 24 hours and ${c.departed} departed in the last 24 hours; vessels now in port have stayed ${c.avgStayHours.toFixed(1)} hours on average so far.${c.overdue ? ` ${c.overdue} more were due in the last 24 hours with no arrival reported yet (possibly waiting off the port).` : ''} Congestion is ${level}.`,
     status: 'ok',
     found: true,
     congestion_level: level,
@@ -103,6 +105,7 @@ async function handle(req, res) {
     vessels_in_port: c.inPort,
     arrivals_expected_24h: c.expected,
     departed_24h: c.departed,
+    waiting_at_anchor: c.overdue,
     avg_stay_hours_so_far: Number(c.avgStayHours.toFixed(1)),
     source: 'Digitraffic port calls (Fintraffic)',
     checked_at: new Date().toISOString(),

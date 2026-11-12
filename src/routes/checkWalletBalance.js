@@ -105,6 +105,17 @@ async function ankrTransactionCount(segment, address) {
   }
 }
 
+// Ankr allows about 40 calls a minute. Each balance read adds three optional
+// extras (code, block, nonce), so past 10 reads in a minute the extras are
+// skipped and only the balance itself is fetched.
+const recentReads = [];
+function extrasAllowed() {
+  const now = Date.now();
+  while (recentReads.length && recentReads[0] < now - 60000) recentReads.shift();
+  recentReads.push(now);
+  return recentReads.length <= 10;
+}
+
 const settled = (r) => (r.status === 'fulfilled' ? r.value : null);
 
 function hexToNumberOrNull(hex) {
@@ -171,11 +182,14 @@ async function handleNativeBalance(req, res, address, chainParam, chain) {
   } catch (err) {
     return respondRpcFailure(res, err);
   }
-  const [codeR, blockR, countR] = await Promise.allSettled([
-    getCode(chain.segment, address),
-    getBlockNumber(chain.segment),
-    ankrTransactionCount(chain.segment, address),
-  ]);
+  const withExtras = extrasAllowed();
+  const [codeR, blockR, countR] = withExtras
+    ? await Promise.allSettled([
+      getCode(chain.segment, address),
+      getBlockNumber(chain.segment),
+      ankrTransactionCount(chain.segment, address),
+    ])
+    : [{ status: 'rejected' }, { status: 'rejected' }, { status: 'rejected' }];
   return respondNativeBalance(res, {
     address, chainParam, chain, balanceHex,
     codeHex: settled(codeR), blockHex: settled(blockR), countHex: settled(countR),

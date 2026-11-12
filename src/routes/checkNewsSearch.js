@@ -81,7 +81,8 @@ function describe(a) {
 // whose written answer leads when there is one.
 function articleLine(a) {
   const who = [a.source, a.published_at ? a.published_at.slice(0, 10) : null].filter(Boolean).join(', ');
-  return `${a.title}${who ? ` (${who})` : ''}${a.url ? ` ${a.url}` : ''}`;
+  const shortUrl = a.url && !/news.google.com/.test(a.url) ? ` ${a.url}` : '';
+  return `${a.title}${who ? ` (${who})` : ""}${shortUrl}`;
 }
 
 function shortBrief(text) {

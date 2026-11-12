@@ -208,7 +208,8 @@ test('news-search: an empty feed is retried with a simplified query, and an AI a
   assert.equal(googleUrls.length, 2);
   assert.ok(decodeURIComponent(googleUrls[1]).includes('when:30d'));
   assert.ok(['answer', 'summary'].includes(Object.keys(body)[0]));
-  assert.match(body.summary, /OpenAI ships a model \(Reuters, 2026-11-09\) https:\/\/news\.google\.com\/b1/);
+  assert.match(body.summary, /OpenAI ships a model \(Reuters, 2026-11-09\)/);
+  assert.ok(!body.summary.includes('news.google.com'));
   assert.ok(body.brief.length <= 80);
   assert.equal(body.sources.length, 3);
 });

@@ -31,7 +31,7 @@ export const UNUSABLE_INPUT_CONFIDENCE = 0.1;
 export function respondUnusableInput(res, summary, confidence = UNUSABLE_INPUT_CONFIDENCE) {
   return res.status(200).json({
     status: UNUSABLE_INPUT_STATUS,
-    summary,
+    summary: `Insufficient information to answer. ${summary} Nothing is estimated or invented: send the missing input and the live source is queried straight away.`,
     confidence,
   });
 }
