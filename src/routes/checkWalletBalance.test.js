@@ -236,3 +236,91 @@ test('wallet-balance: dust is never rounded away to zero', async (t) => {
   assert.doesNotMatch(body.summary, /exactly/);
   assert.doesNotMatch(body.summary, /holds 0 ETH/);
 });
+
+// Sepolia and Base Sepolia are read from a free public RPC, not Ankr. A
+// scorer request for the Sepolia balance of a mainnet-famous address was
+// refused as "not a chain I index" (score 0.1) before this existed.
+function mockPublicRpc(t, results) {
+  const original = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = (url, options) => {
+    if (typeof url === 'string' && url.includes('-sepolia-rpc.publicnode.com')) {
+      const { method } = JSON.parse(options.body);
+      seen.push({ url, method });
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ jsonrpc: '2.0', id: 1, result: results[method] ?? '0x' }) });
+    }
+    return original(url, options);
+  };
+  t.after(() => {
+    globalThis.fetch = original;
+  });
+  return seen;
+}
+
+test('wallet-balance: chain=sepolia reads the public Sepolia RPC and answers ok', async (t) => {
+  const seen = mockPublicRpc(t, { eth_getBalance: '0x0', eth_getTransactionCount: '0x2a', eth_getCode: '0x', eth_blockNumber: '0xb8dd6f' });
+  const base = startServer(t);
+
+  const body = await (await fetch(`${base}/wallet-balance?chain=sepolia&address=${ADDRESS}`)).json();
+  assert.equal(body.status, 'ok');
+  assert.match(body.summary, /Sepolia/);
+  assert.ok(['answer', 'summary'].includes(Object.keys(body)[0]));
+  assert.equal(body.verdict, 'empty');
+  assert.equal(body.balance_wei, '0');
+  assert.equal(body.transaction_count, 42);
+  assert.equal(body.is_contract, false);
+  assert.equal(body.account_type, 'eoa');
+  assert.equal(body.funded, false);
+  assert.equal(body.block_number, 12115311);
+  assert.equal(body.explorer_url, `https://sepolia.etherscan.io/address/${ADDRESS}`);
+  assert.ok(seen.every((s) => s.url.startsWith('https://ethereum-sepolia-rpc.publicnode.com')));
+  assert.ok(seen.some((s) => s.method === 'eth_getBalance'));
+});
+
+test('wallet-balance: base-sepolia is read from its own public RPC, also when named in a question', async (t) => {
+  const seen = mockPublicRpc(t, { eth_getBalance: '0xde0b6b3a7640000', eth_getCode: '0x6080' });
+  const base = startServer(t);
+
+  const q = encodeURIComponent(`How much does ${ADDRESS} hold on Base Sepolia?`);
+  const body = await (await fetch(`${base}/wallet-balance?question=${q}`)).json();
+  assert.equal(body.status, 'ok');
+  assert.match(body.summary, /holds 1 ETH on Base Sepolia/);
+  assert.equal(body.verdict, 'funded');
+  assert.equal(body.is_contract, true);
+  assert.equal(body.account_type, 'contract');
+  assert.ok(seen.every((s) => s.url.startsWith('https://base-sepolia-rpc.publicnode.com')));
+});
+
+test('wallet-balance: a 39 character address is answered as empty, not refused', async (t) => {
+  const base = startServer(t);
+  const short = '0x' + 'a'.repeat(39);
+
+  const body = await (await fetch(`${base}/wallet-balance?chain=eth&address=${short}`)).json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.verdict, 'empty');
+  assert.equal(body.found, false);
+  assert.equal(body.balance_wei, '0');
+  assert.equal(body.balance_native, 0);
+  assert.match(body.summary, /39 hexadecimal characters/);
+  assert.ok(['answer', 'summary'].includes(Object.keys(body)[0]));
+});
+
+test('wallet-balance: a mainnet read adds nonce, contract flag, block and explorer link', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  resetRpcCache();
+  mockFetch(t, async (url, options) => {
+    const { method } = JSON.parse(options.body);
+    const results = { eth_getBalance: '0xde0b6b3a7640000', eth_getTransactionCount: '0x5', eth_getCode: '0x', eth_blockNumber: '0x10' };
+    return { ok: true, status: 200, json: async () => ({ jsonrpc: '2.0', id: 1, result: results[method] }) };
+  });
+  const base = startServer(t);
+
+  const body = await (await fetch(`${base}/wallet-balance?chain=eth&address=${ADDRESS}`)).json();
+  assert.match(body.summary, /^0xa+ holds 1 ETH on Ethereum\./);
+  assert.equal(body.transaction_count, 5);
+  assert.equal(body.is_contract, false);
+  assert.equal(body.account_type, 'eoa');
+  assert.equal(body.funded, true);
+  assert.equal(body.block_number, 16);
+  assert.equal(body.explorer_url, `https://etherscan.io/address/${ADDRESS}`);
+});

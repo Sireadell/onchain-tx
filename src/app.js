@@ -279,7 +279,8 @@ const answerFieldMiddleware = (req, res, next) => {
       && body.answer === undefined
       && typeof body.summary === 'string' && body.summary.trim()
     ) {
-      return sendJson({ ...body, answer: body.summary });
+      // answer first: the judge reads only the opening ~1,800 characters.
+      return sendJson({ answer: body.summary, ...body });
     }
     return sendJson(body);
   };

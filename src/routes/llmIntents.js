@@ -21,6 +21,20 @@ export const securityReviewRouter = makeLlmIntentRouter({
   emptyHint: 'I cannot run a security review because nothing to review was supplied. Pass the code, configuration or system description as the code or query parameter.',
 });
 
+// Splits the "Strengths: a; b Errors: c; d" tail the prompt asks for into two
+// arrays, so the structured fields always match the prose.
+export function splitStrengthsErrors(text) {
+  const raw = String(text ?? '');
+  const sAt = raw.search(/\bStrengths?:/i);
+  const eAt = raw.search(/\bErrors?:/i);
+  const take = (from, to) => {
+    if (from < 0) return [];
+    const body = raw.slice(from, to > from ? to : undefined).replace(/^[^:]*:/, '');
+    return body.split(/;|\n/).map((x) => x.trim().replace(/\.$/, '')).filter((x) => x && !/^none( found)?$/i.test(x));
+  };
+  return { strengths: take(sAt, eAt), errors: take(eAt, sAt > eAt ? sAt : -1) };
+}
+
 export const llmOutputEvaluationRouter = makeLlmIntentRouter({
   intent: 'LLM_OUTPUT_EVALUATION',
   canonical: 'llm-output-evaluation',
@@ -29,7 +43,9 @@ export const llmOutputEvaluationRouter = makeLlmIntentRouter({
   prompt: 'You evaluate the quality of a language model\'s answer. The input holds the original prompt or question, the model\'s output, and possibly a reference answer or criteria. '
     + 'Judge accuracy first, then completeness, relevance and clarity. Check factual claims against what is well established and flag any that are wrong or invented. '
     + 'Begin with exactly one rating word: Excellent, Good, Acceptable, Poor, or Fails, followed by a period, then "Score: N/10." and two or three sentences naming the specific strengths and errors. '
-    + 'If only a question is supplied with no output to grade, give the rating for the most likely correct answer and state that answer.' + PLAIN,
+    + 'If no model output is supplied, treat the scenario in the prompt itself as the answer under review: state whether it is supported by the facts given, whether it follows the instructions, and whether it is safe to accept, each as yes or no with one reason, then the rating and Score. Never rate it Fails only because no output was supplied. '
+    + 'End with "Strengths:" followed by one or two short strengths separated by semicolons, then "Errors:" followed by one or two short errors or risks separated by semicolons (write "none found" if there are none).' + PLAIN,
+  extra: (summary) => splitStrengthsErrors(summary),
   emptyHint: 'I cannot evaluate a model output because none was supplied. Pass the original prompt as prompt and the model answer as output.',
 });
 

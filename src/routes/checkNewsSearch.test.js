@@ -26,7 +26,7 @@ function stubTavily(t, body, { status = 200 } = {}) {
   const original = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, init) => {
-    if (String(url).startsWith('https://news.google.com')) return new Response('<rss><channel></channel></rss>', { status: 200 });
+    if (String(url).startsWith('https://news.google.com') || String(url).startsWith('https://www.bing.com')) return new Response('<rss><channel></channel></rss>', { status: 200 });
     if (!String(url).startsWith('https://api.tavily.com')) return original(url, init);
     calls.push({ url: String(url), body: JSON.parse(init.body) });
     return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -79,7 +79,12 @@ test('news-search: nothing matched is an answer, not a failure', async (t) => {
   const base = startServer(t);
   const res = await fetch(`${base}/news-search?query=asdkjhasdkjh`);
   assert.equal(res.status, 200);
-  assert.equal((await res.json()).status, 'invalid_input');
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.result_count, 0);
+  assert.deepEqual(body.sources, []);
+  assert.equal(body.confidence, 0.6);
+  assert.match(body.summary, /No article about asdkjhasdkjh was published in the last 7 days/);
 });
 
 test('news-search: a bare topic is framed as a news search before it reaches the provider', async (t) => {
@@ -148,6 +153,7 @@ test('news-search: a short topic is answered from real articles with publisher a
   const original = globalThis.fetch;
   const urls = [];
   globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith('https://www.bing.com')) return new Response('<rss><channel></channel></rss>', { status: 200 });
     if (String(url).startsWith('https://news.google.com')) { urls.push(String(url)); return new Response(RSS, { status: 200 }); }
     if (String(url).startsWith('https://api.tavily.com')) throw new Error('paid search must not run for a short topic');
     return original(url, init);
@@ -171,4 +177,58 @@ test('news-search: when the news feed is down the AI search still answers', asyn
   const body = await (await fetch(`${base}/news-search?query=${encodeURIComponent('has the merger been approved by the regulators yet?')}`)).json();
   assert.equal(body.status, 'ok');
   assert.match(body.summary, /approved by regulators/);
+});
+
+const RSS3 = `<rss><channel>
+<item><title>OpenAI ships a model - Reuters</title><link>https://news.google.com/b1</link><pubDate>Mon, 09 Nov 2026 10:00:00 GMT</pubDate><source url="https://reuters.com">Reuters</source></item>
+<item><title>OpenAI raises funds - Bloomberg</title><link>https://news.google.com/b2</link><pubDate>Mon, 09 Nov 2026 09:00:00 GMT</pubDate><source url="https://bloomberg.com">Bloomberg</source></item>
+<item><title>OpenAI hires a chief - FT</title><link>https://news.google.com/b3</link><pubDate>Sun, 08 Nov 2026 09:00:00 GMT</pubDate><source url="https://ft.com">FT</source></item>
+</channel></rss>`;
+
+test('news-search: an empty feed is retried with a simplified query, and an AI answer with no sources is not what gets published', async (t) => {
+  withKey(t);
+  const original = globalThis.fetch;
+  const googleUrls = [];
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.startsWith('https://www.bing.com')) return new Response('<rss><channel></channel></rss>', { status: 200 });
+    if (u.startsWith('https://news.google.com')) {
+      googleUrls.push(u);
+      return new Response(googleUrls.length === 1 ? '<rss><channel></channel></rss>' : RSS3, { status: 200 });
+    }
+    if (u.startsWith('https://api.tavily.com')) return new Response(JSON.stringify({ answer: 'x', results: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    return original(url, init);
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/news-search?query=${encodeURIComponent('recent advancements in quantum computing research by IBM')}&recent_days=7`)).json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.result_count, 3);
+  assert.notEqual(body.status, 'invalid_input');
+  assert.equal(googleUrls.length, 2);
+  assert.ok(decodeURIComponent(googleUrls[1]).includes('when:30d'));
+  assert.ok(['answer', 'summary'].includes(Object.keys(body)[0]));
+  assert.match(body.summary, /OpenAI ships a model \(Reuters, 2026-11-09\) https:\/\/news\.google\.com\/b1/);
+  assert.ok(body.brief.length <= 80);
+  assert.equal(body.sources.length, 3);
+});
+
+test('news-search: Bing results are merged with Google and duplicates dropped', async (t) => {
+  withKey(t);
+  const original = globalThis.fetch;
+  const BING = `<rss><channel>
+<item><title>Starship completes seventh test flight</title><link>http://www.bing.com/news/apiclick.aspx?ref=x&amp;url=https%3a%2f%2fexample.com%2fdup&amp;c=1</link><pubDate>${new Date().toUTCString()}</pubDate><News:Source>Reuters</News:Source></item>
+<item><title>Starship fuel test passes</title><link>http://www.bing.com/news/apiclick.aspx?ref=x&amp;url=https%3a%2f%2fexample.com%2fnew&amp;c=1</link><pubDate>${new Date().toUTCString()}</pubDate><News:Source>Wired</News:Source></item>
+</channel></rss>`;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.startsWith('https://www.bing.com')) return new Response(BING, { status: 200 });
+    if (u.startsWith('https://news.google.com')) return new Response(RSS, { status: 200 });
+    return original(url, init);
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/news-search?query=SpaceX+Starship&recent_days=30`)).json();
+  assert.equal(body.result_count, 3);
+  assert.ok(body.sources.some((s) => s.url === 'https://example.com/new'));
 });

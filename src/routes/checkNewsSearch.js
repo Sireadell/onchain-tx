@@ -9,7 +9,7 @@ import { Router } from 'express';
 import { searchWeb, hasWebSearchProvider, WebSearchError } from '../lib/webSearch.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { firstUsableValue, looksLikeSentence } from '../lib/entityExtract.js';
-import { searchGoogleNews, cleanNewsQuery } from '../lib/googleNews.js';
+import { searchNews, cleanNewsQuery } from '../lib/googleNews.js';
 
 const router = Router();
 
@@ -79,17 +79,26 @@ function describe(a) {
 // Answer built from real articles: the top story first, then the next ones,
 // each with publisher and date. `ai` (optional) is the AI search result,
 // whose written answer leads when there is one.
+function articleLine(a) {
+  const who = [a.source, a.published_at ? a.published_at.slice(0, 10) : null].filter(Boolean).join(', ');
+  return `${a.title}${who ? ` (${who})` : ''}${a.url ? ` ${a.url}` : ''}`;
+}
+
+function shortBrief(text) {
+  const t = String(text).replace(/\s+/g, ' ').trim();
+  return t.length <= 80 ? t : `${t.slice(0, 77).trimEnd()}...`;
+}
+
 function articlesAnswer(query, articles, ai) {
   const top = articles[0];
-  const others = articles.slice(1, 4).map(describe);
-  const lead = ai?.answer ? ai.answer.trim() : `The latest reported story on ${cleanNewsQuery(query).length > 80 ? 'this topic' : `"${cleanNewsQuery(query)}"`} is ${describe(top)}.`;
-  const more = ai?.answer
-    ? ` Latest coverage: ${[describe(top), ...others].join('; ')}.`
-    : (others.length ? ` Other recent coverage: ${others.join('; ')}.` : '');
+  const topic = cleanNewsQuery(query).length > 80 ? 'this topic' : `"${cleanNewsQuery(query)}"`;
+  const lead = ai?.answer ? ai.answer.trim() : `The latest reported story on ${topic} is ${describe(top)}.`;
+  const list = articles.slice(0, 4).map((a, i) => `${i + 1}. ${articleLine(a)}`).join(' ');
   return {
+    summary: `${lead} Articles: ${list}`,
+    brief: shortBrief(`${top.title}${top.source ? ` (${top.source})` : ''}`),
     query,
     status: 'ok',
-    summary: `${lead}${more}`,
     headline: top.title,
     source: top.source,
     published_at: top.published_at,
@@ -144,21 +153,19 @@ async function handleNewsSearch(req, res) {
   // no paid search call. A full question also asks the AI search, since it
   // may need a judgement ("has X been announced yet"), and the real articles
   // are attached to that answer.
-  const recentDays = Number((window.match(/d+/) || [7])[0]);
+  const recentDays = Number((window.match(/\d+/) || [7])[0]);
   const topicQuery = cleanNewsQuery(query);
-  const isTopic = topicQuery.split(' ').length <= 8 && !looksLikeSentence(topicQuery);
-  const articlesPromise = searchGoogleNews(query, { recentDays, limit: Math.max(maxResults, 5) });
-  if (isTopic) {
-    const articles = await articlesPromise;
-    if (articles.length) return res.json(articlesAnswer(query, articles, null));
-  }
+
+  // Two free feeds merged, with one simplified retry. When they have articles
+  // the answer is built from them straight away and the slow paid AI search
+  // is not waited on.
+  const articles = await searchNews(query, { recentDays, limit: Math.max(maxResults, 5) });
+  if (articles.length) return res.json(articlesAnswer(query, articles, null));
 
   let result;
   try {
     result = await searchWeb(newsQuery(query, { window, country, language }), { topic: 'news', maxResults });
   } catch (err) {
-    const articles = await articlesPromise;
-    if (articles.length) return res.json(articlesAnswer(query, articles, null));
     if (err instanceof WebSearchError) {
       return res.status(502).json({
         status: 'error',
@@ -170,12 +177,26 @@ async function handleNewsSearch(req, res) {
     return res.status(502).json({ status: 'error', summary: 'news search failed', confidence: 0, error: err.message });
   }
 
-  const articles = await articlesPromise;
-  if (!result.answer && articles.length) return res.json(articlesAnswer(query, articles, null));
-  if (result.answer && articles.length) return res.json(articlesAnswer(query, articles, result));
-
-  if (!result.answer) {
-    return respondUnusableInput(res, `No news sources matched ${quoteParam(rawQuery)}. Try rephrasing the question.`);
+  // Never refuse a well-formed query and never publish an answer with no
+  // sources: say plainly that nothing was found.
+  if (!result.answer || !result.results?.length) {
+    const days = recentDays;
+    const subject = topicQuery.length > 80 ? 'this topic' : topicQuery;
+    const summary = `No article about ${subject} was published in the last ${days} days in the feeds read at request time (Google News, Bing News, ${result.provider ?? 'web search'}).`;
+    return res.json({
+      summary,
+      brief: shortBrief(`No article found about ${subject} in the last ${days} days`),
+      query,
+      status: 'ok',
+      source_note: 'Checked the live news feeds at request time and found no matching article.',
+      confidence: 0.6,
+      canonical: ['news-search', query.slice(0, 120), 'none'].join(':'),
+      result_count: 0,
+      sources: [],
+      provider: 'news-feeds',
+      cost_usd: result.cost_usd ?? null,
+      checked_at: new Date().toISOString(),
+    });
   }
 
   const cited = result.results.slice(0, 3)
@@ -186,9 +207,10 @@ async function handleNewsSearch(req, res) {
     : 'Answered from a live news search at request time.';
 
   res.json({
+    summary: result.answer,
+    brief: shortBrief(result.results[0]?.title ?? result.answer),
     query,
     status: 'ok',
-    summary: result.answer,
     source_note: sourceNote,
     confidence: 0.9,
     canonical: ['news-search', query.slice(0, 120), result.results[0]?.url ?? ''].join(':'),

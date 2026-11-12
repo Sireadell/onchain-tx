@@ -125,3 +125,24 @@ export function resolveRpcChainLoose(input) {
 export function rpcChainNames() {
   return Object.keys(CHAINS).filter((name) => resolveRpcChainLoose(name));
 }
+
+// Public test networks. Kept apart from CHAINS on purpose: CHAINS entries are
+// assumed to have an Ankr `segment` (the startup probe and the other routes
+// loop over it), and these have none. They are read straight from a free
+// public RPC with eth_getBalance, eth_getTransactionCount and eth_getCode,
+// and only the wallet balance route looks here. Both endpoints answered
+// eth_blockNumber live on 2026-11-12.
+export const TESTNETS = {
+  sepolia: { key: 'sepolia', label: 'Sepolia', nativeSymbol: 'ETH', chainId: 11155111, publicRpcUrl: 'https://ethereum-sepolia-rpc.publicnode.com', explorer: 'https://sepolia.etherscan.io' },
+  'base-sepolia': { key: 'base-sepolia', label: 'Base Sepolia', nativeSymbol: 'ETH', chainId: 84532, publicRpcUrl: 'https://base-sepolia-rpc.publicnode.com', explorer: 'https://sepolia.basescan.org' },
+};
+
+// Finds a test network named in a chain param or a whole question. Base
+// Sepolia is checked first so "base sepolia" is never read as plain Base.
+export function resolveTestnetLoose(input) {
+  if (typeof input !== 'string') return null;
+  const text = input.toLowerCase();
+  if (/(?:^|[^a-z0-9])base[\s_-]*sepolia(?:$|[^a-z0-9])/.test(text)) return TESTNETS['base-sepolia'];
+  if (/(?:^|[^a-z0-9])sepolia(?:$|[^a-z0-9])/.test(text)) return TESTNETS.sepolia;
+  return null;
+}

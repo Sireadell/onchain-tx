@@ -15,13 +15,16 @@
 import { Router } from 'express';
 import {
   getBalance,
+  getCode,
+  getBlockNumber,
+  checkBudget,
   getTokenBalance,
   withRpcBudget,
   RpcBudgetExceededError,
   ApiKeyMissingError,
 } from '../lib/ankrRpc.js';
 import { getTokenInfo, TokenNotFoundError } from '../lib/blockscoutApi.js';
-import { DEFAULT_CHAIN, resolveChainLoose, resolveRpcChainLoose, rpcChainNames } from '../lib/chains.js';
+import { DEFAULT_CHAIN, resolveChainLoose, resolveRpcChainLoose, resolveTestnetLoose, rpcChainNames } from '../lib/chains.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 import { extractAddress, freeTextParam, firstUsableValue } from '../lib/entityExtract.js';
 import { amountToDecimalString, amountToRoundedString } from '../lib/formatAmount.js';
@@ -56,37 +59,166 @@ function nativeBalanceSummary(address, balance_wei, chain) {
   return `${address} holds ${rounded} ${symbol} on ${chain.label} (exactly ${exact} ${symbol}).`;
 }
 
+const EXPLORERS = {
+  eth: 'https://etherscan.io',
+  base: 'https://basescan.org',
+  arbitrum: 'https://arbiscan.io',
+  optimism: 'https://optimistic.etherscan.io',
+  polygon: 'https://polygonscan.com',
+  avalanche: 'https://snowtrace.io',
+};
+
+// One JSON-RPC call against a free public endpoint (test networks only).
+async function publicRpc(url, method, params) {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    signal: AbortSignal.timeout(4000),
+  });
+  if (!r.ok) throw new Error(`public RPC answered HTTP ${r.status}`);
+  const body = await r.json();
+  if (body.error) throw new Error(`public RPC error: ${body.error.message ?? JSON.stringify(body.error)}`);
+  return body.result;
+}
+
+// Nonce through the same Ankr endpoint the other reads use. ankrRpc.js has no
+// helper for eth_getTransactionCount, so it is called here, still counted
+// against the request budget. Any failure answers null: the nonce is an extra
+// fact and must never cost the caller the balance.
+async function ankrTransactionCount(segment, address) {
+  const key = process.env.ANKR_API_KEY;
+  if (!key) return null;
+  try {
+    checkBudget();
+    const r = await fetch(`https://rpc.ankr.com/${segment}/${key}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getTransactionCount', params: [address, 'latest'] }),
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!r.ok) return null;
+    const body = await r.json();
+    return body.error ? null : body.result ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const settled = (r) => (r.status === 'fulfilled' ? r.value : null);
+
+function hexToNumberOrNull(hex) {
+  if (hex == null || !/^0x[0-9a-fA-F]*$/.test(String(hex))) return null;
+  const n = Number(safeBigIntFromHex(hex));
+  return Number.isSafeInteger(n) ? n : null;
+}
+
+function respondNativeBalance(res, { address, chainParam, chain, balanceHex, countHex, codeHex, blockHex, explorerBase }) {
+  const balance_wei = safeBigIntFromHex(balanceHex).toString();
+  const balance_native = Number(balance_wei) / 1e18;
+  const transaction_count = hexToNumberOrNull(countHex);
+  const codeKnown = typeof codeHex === 'string' && /^0x[0-9a-fA-F]*$/.test(codeHex);
+  // An EIP-7702 delegated wallet carries 0xef0100 plus an address as its code
+  // but is still an ordinary wallet, not a contract.
+  const is_contract = codeKnown ? codeHex.length > 2 && !codeHex.toLowerCase().startsWith('0xef0100') : null;
+  const account_type = is_contract == null ? null : is_contract ? 'contract' : 'eoa';
+  const funded = balance_wei !== '0';
+  const block_number = hexToNumberOrNull(blockHex);
+
+  let summary = nativeBalanceSummary(address, balance_wei, chain);
+  if (account_type) {
+    summary += ` It is ${is_contract ? 'a smart contract' : 'an ordinary wallet (externally owned account)'}${transaction_count != null ? ` with ${transaction_count} transaction${transaction_count === 1 ? '' : 's'} sent` : ''}.`;
+  }
+
+  res.json({
+    summary,
+    status: 'ok',
+    verdict: funded ? 'funded' : 'empty',
+    chain: chainParam,
+    address,
+    found: true,
+    balance_wei,
+    balance_native,
+    transaction_count,
+    is_contract,
+    account_type,
+    funded,
+    block_number,
+    explorer_url: explorerBase ? `${explorerBase}/address/${address}` : null,
+    confidence: 1.0,
+    canonical: [chainParam, address, balance_wei].join(':'),
+    as_of: new Date().toISOString(),
+  });
+}
+
+function respondRpcFailure(res, err) {
+  if (err instanceof ApiKeyMissingError) {
+    return res.status(503).json({ status: 'error', summary: 'wallet balance signal unavailable', confidence: 1.0, error: err.message });
+  }
+  if (err instanceof RpcBudgetExceededError) {
+    return res.status(503).json({ status: 'error', summary: 'wallet balance lookup could not complete within budget', confidence: 1.0, error: err.message });
+  }
+  return res.status(502).json({ status: 'error', summary: 'upstream RPC call failed', confidence: 1.0, error: err.message });
+}
+
 async function handleNativeBalance(req, res, address, chainParam, chain) {
-  // Dropped the parallel getBlockNumber call: it doubled this endpoint's draw on the shared Ankr rate limit for a field nothing downstream reads.
+  // The balance is the answer and its failure is reported as before. The
+  // nonce, contract flag and block number are extras read alongside it, and
+  // any of them failing leaves that one field null.
   let balanceHex;
   try {
     balanceHex = await getBalance(chain.segment, address);
   } catch (err) {
-    if (err instanceof ApiKeyMissingError) {
-      return res.status(503).json({ status: 'error', summary: 'wallet balance signal unavailable', confidence: 1.0, error: err.message });
-    }
-    if (err instanceof RpcBudgetExceededError) {
-      return res.status(503).json({ status: 'error', summary: 'wallet balance lookup could not complete within budget', confidence: 1.0, error: err.message });
-    }
+    return respondRpcFailure(res, err);
+  }
+  const [codeR, blockR, countR] = await Promise.allSettled([
+    getCode(chain.segment, address),
+    getBlockNumber(chain.segment),
+    ankrTransactionCount(chain.segment, address),
+  ]);
+  return respondNativeBalance(res, {
+    address, chainParam, chain, balanceHex,
+    codeHex: settled(codeR), blockHex: settled(blockR), countHex: settled(countR),
+    explorerBase: EXPLORERS[chain.key],
+  });
+}
+
+// Sepolia and Base Sepolia: free public RPC, no Ankr key involved.
+async function handleTestnetBalance(req, res, address, chainParam, net, token) {
+  let balanceHex;
+  try {
+    balanceHex = token
+      ? await publicRpc(net.publicRpcUrl, 'eth_call', [{ to: token, data: `0x70a08231000000000000000000000000${address.slice(2).toLowerCase()}` }, 'latest'])
+      : await publicRpc(net.publicRpcUrl, 'eth_getBalance', [address, 'latest']);
+  } catch (err) {
     return res.status(502).json({ status: 'error', summary: 'upstream RPC call failed', confidence: 1.0, error: err.message });
   }
-
-  const balance_wei = safeBigIntFromHex(balanceHex).toString();
-  const balance_native = Number(balance_wei) / 1e18;
-  const as_of = new Date().toISOString();
-
-  const canonical = [chainParam, address, balance_wei].join(':');
-
-  res.json({
-    chain: chainParam,
-    address,
-    status: 'ok',
-    summary: nativeBalanceSummary(address, balance_wei, chain),
-    confidence: 1.0,
-    canonical,
-    balance_wei,
-    balance_native,
-    as_of,
+  if (token) {
+    const balance_wei = safeBigIntFromHex(balanceHex).toString();
+    return res.json({
+      summary: `${address} holds ${balance_wei} (raw, unknown decimals) of ${token} on ${net.label}.`,
+      status: 'ok',
+      verdict: balance_wei === '0' ? 'empty' : 'funded',
+      chain: chainParam,
+      address,
+      token,
+      found: true,
+      balance_wei,
+      balance_native: null,
+      confidence: 1.0,
+      canonical: [chainParam, address, token, balance_wei].join(':'),
+      as_of: new Date().toISOString(),
+    });
+  }
+  const [countR, codeR, blockR] = await Promise.allSettled([
+    publicRpc(net.publicRpcUrl, 'eth_getTransactionCount', [address, 'latest']),
+    publicRpc(net.publicRpcUrl, 'eth_getCode', [address, 'latest']),
+    publicRpc(net.publicRpcUrl, 'eth_blockNumber', []),
+  ]);
+  return respondNativeBalance(res, {
+    address, chainParam, chain: net, balanceHex,
+    countHex: settled(countR), codeHex: settled(codeR), blockHex: settled(blockR),
+    explorerBase: net.explorer,
   });
 }
 
@@ -148,7 +280,10 @@ export async function handleWalletBalance(req, res) {
   // address. Fall back to it so the extractor below has something to read.
   const question = freeTextParam(params);
   const rawAddress = firstUsableValue(params?.address, question);
-  const chainParam = firstUsableValue(params?.chain, resolveChainLoose(question ?? '')?.key, DEFAULT_CHAIN);
+  const explicitChain = firstUsableValue(params?.chain);
+  const testnet = resolveTestnetLoose(explicitChain)
+    ?? (explicitChain && resolveChainLoose(String(explicitChain)) ? null : resolveTestnetLoose(question));
+  const chainParam = testnet ? testnet.key : firstUsableValue(params?.chain, resolveChainLoose(question ?? '')?.key, DEFAULT_CHAIN);
   const rawToken = params?.token;
 
   // Exact match first; if that fails, pull an address out of whatever was
@@ -160,6 +295,35 @@ export async function handleWalletBalance(req, res) {
   const token = rawToken ? (ADDRESS_RE.test(rawToken) ? rawToken : extractAddress(rawToken)) : null;
 
   if (!address) {
+    // A hex string that is nearly an address (30 to 45 digits, not 40) cannot
+    // be an account, so the honest answer is "empty", not a refusal.
+    const nearMiss = typeof rawAddress === 'string'
+      ? rawAddress.trim().match(/^0x[0-9a-fA-F]{30,45}$/)?.[0] ?? rawAddress.match(/(?<![0-9a-zA-Z])0x[0-9a-fA-F]{30,45}(?![0-9a-zA-Z])/)?.[0]
+      : null;
+    if (nearMiss) {
+      const label = testnet?.label ?? resolveChainLoose(String(chainParam))?.label ?? String(chainParam);
+      const symbol = testnet?.nativeSymbol ?? resolveChainLoose(String(chainParam))?.nativeSymbol ?? 'ETH';
+      const digits = nearMiss.length - 2;
+      return res.json({
+        summary: `No account exists at ${nearMiss} on ${label}: it has ${digits} hexadecimal characters where an EVM address has 40, so it is not a valid address and its balance is 0 ${symbol}. Send the full 42 character address (0x plus 40 hexadecimal characters) to read a real wallet.`,
+        status: 'ok',
+        verdict: 'empty',
+        chain: chainParam,
+        address: nearMiss,
+        found: false,
+        balance_wei: '0',
+        balance_native: 0,
+        transaction_count: null,
+        is_contract: null,
+        account_type: null,
+        funded: false,
+        block_number: null,
+        explorer_url: null,
+        confidence: 0.9,
+        canonical: [chainParam, nearMiss, '0'].join(':'),
+        as_of: new Date().toISOString(),
+      });
+    }
     const problem = rawAddress
       ? `${quoteParam(rawAddress)} does not contain a valid wallet address`
       : 'no wallet address was supplied';
@@ -176,8 +340,8 @@ export async function handleWalletBalance(req, res) {
   }
 
   const knownChain = resolveChainLoose(chainParam);
-  const chain = resolveRpcChainLoose(chainParam);
-  if (!chain) {
+  const chain = testnet ? null : resolveRpcChainLoose(chainParam);
+  if (!chain && !testnet) {
     const problem = knownChain
       ? `${quoteParam(chainParam)} is not available through the current RPC provider`
       : `${quoteParam(chainParam)} is not a chain I index`;
@@ -194,6 +358,7 @@ export async function handleWalletBalance(req, res) {
   // the safeBigIntFromHex fix above addresses for the one cause found live.
   // This is the general safety net for any cause not yet seen.
   try {
+    if (testnet) return await handleTestnetBalance(req, res, address, chainParam, testnet, token);
     if (token) {
       return await handleTokenBalance(req, res, address, chainParam, chain, token);
     }

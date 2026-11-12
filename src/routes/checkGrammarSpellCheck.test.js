@@ -103,7 +103,7 @@ test('grammar-spell-check: returns corrected text and a fix count', async (t) =>
   const body = await res.json();
   assert.equal(res.status, 200);
   assert.equal(body.status, 'ok');
-  assert.equal(body.summary, 'I will receive the package tomorrow.');
+  assert.match(body.summary, /^1 issue found: 'recieve' should be 'receive'.*Corrected text: I will receive the package tomorrow.$/);
   assert.equal(body.corrected_text, 'I will receive the package tomorrow.');
   assert.equal(body.fix_count, 1);
   assert.deepEqual(body.fixes, ['recieve -> receive']);
@@ -117,7 +117,7 @@ test('grammar-spell-check: already-correct text reports zero fixes', async (t) =
   const res = await fetch(`${base}/grammar-spell-check?text=${encodeURIComponent('This sentence is already correct.')}`);
   const body = await res.json();
   assert.equal(body.fix_count, 0);
-  assert.equal(body.summary, 'This sentence is already correct.');
+  assert.equal(body.summary, 'No issues found. Corrected text: This sentence is already correct.');
 });
 
 test('grammar-spell-check: alias params are accepted', async (t) => {

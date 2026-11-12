@@ -11,7 +11,7 @@ const PLAIN = ' Reply in plain prose with no markdown headings, bold text, bulle
   + 'Always commit to a single best answer; never say you cannot help. '
   + 'If part of the claim depends on a file, image, video or live system that was not supplied as text, say in one clause what could not be checked, and still give the best verdict from the text, links and metadata supplied.';
 
-function judge({ intent, canonical, role, verdicts, task, keys = [], emptyHint, maxTokens = 450 }) {
+function judge({ intent, canonical, role, verdicts, task, keys = [], emptyHint, maxTokens = 450, extra }) {
   return makeLlmIntentRouter({
     intent,
     canonical,
@@ -24,6 +24,7 @@ function judge({ intent, canonical, role, verdicts, task, keys = [], emptyHint, 
         : 'Keep the answer to at most six sentences.')
       + PLAIN,
     emptyHint,
+    extra,
   });
 }
 
@@ -269,13 +270,30 @@ export const regressionVerifyRouter = judge({
   emptyHint: 'I cannot check for regressions because no change or results were supplied. Pass them as the diff or query parameter.',
 });
 
+// The checks a real KYC decision needs and what each one depends on. They are
+// fixed facts about this endpoint: it reads text only, so none of them ran.
+export const KYC_CHECKS_NOT_PERFORMED = [
+  'biometric liveness (needs a live challenge-response capture session)',
+  'selfie-to-ID face match (needs the identity document image and the capture)',
+  'document authenticity (needs the document image and its security features)',
+];
+
 export const kycLivenessRouter = judge({
   intent: 'KYC_BIOMETRIC_LIVENESS', canonical: 'kyc-biometric-liveness',
   role: 'You assess a KYC liveness check result.',
-  task: 'From the check description and signals supplied (blink, head turn, texture, replay or injection indicators, device data), judge whether a live person was present. State that a face image itself was not inspected unless a description of it was given.',
+  task: 'From the check description and signals supplied (blink, head turn, texture, replay or injection indicators, device data), judge whether a live person was present. '
+    + 'State plainly that no image or video was inspected unless a description of it was given. '
+    + 'Then name what a passing check would require: a liveness check needs a live challenge-response capture, and a selfie-to-ID match needs the identity document image and the capture to compare.',
   verdicts: ['Live person', 'Likely live', 'Inconclusive', 'Likely spoof', 'Spoof'],
   keys: ['session', 'signals', 'check', 'description', 'result'],
   emptyHint: 'I cannot assess liveness because no check details were supplied. Pass them as the signals or query parameter.',
+  extra: () => ({
+    found: false,
+    liveness_checked: false,
+    document_match_checked: false,
+    checks_performed: [],
+    checks_not_performed: [...KYC_CHECKS_NOT_PERFORMED],
+  }),
 });
 
 export const shipmentDelayRouter = judge({

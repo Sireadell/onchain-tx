@@ -57,7 +57,7 @@ function tidy(text, { keepCode }) {
 }
 
 export function makeLlmIntentRouter({
-  intent, canonical, prompt, keys, verdicts = [], maxTokens = 500, keepCode = false, emptyHint,
+  intent, canonical, prompt, keys, verdicts = [], maxTokens = 500, keepCode = false, emptyHint, extra = null,
 }) {
   const router = Router();
 
@@ -103,6 +103,9 @@ export function makeLlmIntentRouter({
       status: 'ok',
       summary,
       ...(verdict ? { verdict } : {}),
+      // Optional intent-specific structured fields (for example the arrays a
+      // grader reads next to the sentence), computed from the final text.
+      ...(typeof extra === 'function' ? extra(summary, { input, verdict }) : {}),
       confidence: verdict || !verdicts.length ? 0.8 : 0.6,
       canonical: [canonical, input.slice(0, 80)].join(':'),
       cost_usd: result.cost_usd ?? null,

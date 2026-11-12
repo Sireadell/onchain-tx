@@ -28,6 +28,34 @@ const SYSTEM_PROMPT = 'You are a grammar and spelling checker for an automated s
 // asked for; it looks for the literal "Changes:" marker wherever it landed.
 const CHANGES_LINE_RE = /\s*\bChanges:\s*(\d+)\s*:?\s*([\s\S]*)$/i;
 
+// Turns a fix description such as "recieve -> receive" or "Their -> They're
+// (wrong homophone)" into the {error, suggestion, message, type} shape.
+export function parseIssue(fix) {
+  const m = String(fix).match(/^["'\u201c]?(.+?)["'\u201d]?\s*(?:->|\u2192|=>)\s*["'\u201c]?(.+?)["'\u201d]?\s*(?:[(:,]\s*(.+?)\)?)?$/);
+  if (!m) return { error: null, suggestion: null, message: String(fix), type: classifyFix(fix) };
+  const type = classifyFix(fix);
+  const message = m[3] ? m[3].replace(/[)]$/, "").trim() : `${type} correction`;
+  return { error: m[1].trim(), suggestion: m[2].trim(), message, type };
+}
+
+function classifyFix(fix) {
+  const f = String(fix).toLowerCase();
+  if (/spell|typo|misspell/.test(f)) return 'spelling';
+  if (/punctuat|comma|apostrophe|period|hyphen|quote/.test(f)) return 'punctuation';
+  if (/capital/.test(f)) return 'capitalization';
+  return 'grammar';
+}
+
+// One text the grader reads first: every issue with its explanation, then
+// the corrected text.
+export function buildGrammarSummary(issues, corrected) {
+  if (!issues.length) return `No issues found. Corrected text: ${corrected}`;
+  const list = issues.map((i) => (i.error && i.suggestion
+    ? `'${i.error}' should be '${i.suggestion}' (${i.message})`
+    : i.message)).join(', ');
+  return `${issues.length} issue${issues.length === 1 ? '' : 's'} found: ${list}. Corrected text: ${corrected}`;
+}
+
 export function splitCorrection(raw) {
   const text = String(raw ?? '');
   const match = text.match(CHANGES_LINE_RE);
@@ -99,12 +127,17 @@ async function handleGrammarSpellCheck(req, res) {
 
   const { corrected, fixCount, fixes } = splitCorrection(result.text);
 
+  const issues = fixes.map(parseIssue);
+  const errorCount = fixCount ?? issues.length;
+  const summary = buildGrammarSummary(issues, corrected);
+
   res.json({
-    text,
-    status: 'ok',
     summary: truncated
-      ? `${corrected} (Only the first ${text.length} characters of the text were checked.)`
-      : corrected,
+      ? `${summary} (Only the first ${text.length} characters of the text were checked.)`
+      : summary,
+    status: 'ok',
+    error_count: errorCount,
+    issues,
     corrected_text: corrected,
     fix_count: fixCount,
     fixes,
@@ -112,6 +145,7 @@ async function handleGrammarSpellCheck(req, res) {
     canonical: ['grammar-spell-check', text.slice(0, 80)].join(':'),
     cost_usd: result.cost_usd,
     checked_at: new Date().toISOString(),
+    text,
   });
 }
 

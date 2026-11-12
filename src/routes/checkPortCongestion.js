@@ -6,7 +6,6 @@
 
 import { Router } from 'express';
 import { firstUsableValue, freeTextParam } from '../lib/entityExtract.js';
-import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { getJson, upstreamDown, paramsOf } from '../lib/liveJson.js';
 
 const router = Router();
@@ -30,6 +29,7 @@ export function resolvePort(value, text) {
 export function congestion(portCalls, code, nowMs) {
   let inPort = 0;
   let expected = 0;
+  let departed = 0;
   const stays = [];
   for (const c of portCalls) {
     if (c.portToVisit !== code) continue;
@@ -41,12 +41,20 @@ export function congestion(portCalls, code, nowMs) {
       // A call with no departure report whose planned departure passed more
       // than 12 hours ago is a stale record, not a ship still alongside.
       const stale = etd != null && etd < nowMs - 12 * 3.6e6;
+      if (atd && atd <= nowMs && atd >= nowMs - 24 * 3.6e6) departed += 1;
       if (ata && !atd && !stale) { inPort += 1; stays.push((nowMs - ata) / 3.6e6); }
       else if (!ata && eta && eta >= nowMs && eta <= nowMs + 24 * 3.6e6) expected += 1;
     }
   }
   const avg = stays.length ? stays.reduce((a, b) => a + b, 0) / stays.length : 0;
-  return { inPort, expected, avgStayHours: avg };
+  return { inPort, expected, departed, avgStayHours: avg };
+}
+
+// Rule of thumb for Finnish ports, not a published scale: ships in port plus
+// ships due within a day. Under 10 is low, under 25 moderate, otherwise high.
+export function congestionLevel(inPort, expected) {
+  const load = inPort + expected;
+  return load < 10 ? 'low' : load < 25 ? 'moderate' : 'high';
 }
 
 async function handle(req, res) {
@@ -54,7 +62,26 @@ async function handle(req, res) {
   const raw = firstUsableValue(params.port, params.locode, params.port_name, params.harbor);
   const code = resolvePort(raw, freeTextParam(params));
   if (!code) {
-    return respondUnusableInput(res, `${quoteParam(raw ?? freeTextParam(params))} is not a port I cover. I cover Finnish ports: ${Object.keys(PORTS).join(', ')} (or names such as Helsinki, Turku, Hamina-Kotka). Global port feeds need paid keys I do not hold.`);
+    const text = freeTextParam(params);
+    const named = text?.match(/(?:\b[Pp]ort of|\b(?:at|in|for))\s+(?:the\s+)?(?:[Pp]ort of\s+)?([A-Z][A-Za-z'-]+(?:\s+[A-Z][A-Za-z'-]+)?)/)?.[1];
+    const asked = String(raw ?? named ?? 'That port').trim().slice(0, 80) || 'That port';
+    return res.json({
+      summary: `${asked} is outside the open port-call register this service reads, which covers Finnish ports only (Helsinki, Turku, Hamina-Kotka, Rauma, Pori, Kokkola, Oulu, Kemi, Kaskinen, Vaasa, Naantali, Porvoo), so no berth or queue figures are given rather than estimated.`,
+      status: 'not_found',
+      found: false,
+      confidence: 0.6,
+      canonical: `port-congestion:${asked.toLowerCase()}`,
+      port: asked,
+      vessels_in_port: null,
+      arrivals_expected_24h: null,
+      departed_24h: null,
+      avg_stay_hours_so_far: null,
+      congestion_level: null,
+      reason: 'Port is not in the Finnish port-call register.',
+      covered_ports: Object.keys(PORTS),
+      source: 'Digitraffic port calls (Fintraffic)',
+      checked_at: new Date().toISOString(),
+    });
   }
   const from = new Date(Date.now() - 14 * 86400e3).toISOString();
   let data;
@@ -64,14 +91,18 @@ async function handle(req, res) {
     return upstreamDown(res, 'The port call source', err);
   }
   const c = congestion(data.portCalls ?? [], code, Date.now());
+  const level = congestionLevel(c.inPort, c.expected);
   res.json({
+    summary: `${code} has ${c.inPort} vessels in port, ${c.expected} more expected within 24 hours and ${c.departed} departed in the last 24 hours; vessels now in port have stayed ${c.avgStayHours.toFixed(1)} hours on average so far. Congestion is ${level}.`,
     status: 'ok',
-    summary: `${code} has ${c.inPort} vessels in port and ${c.expected} more expected within 24 hours; vessels now in port have stayed ${c.avgStayHours.toFixed(1)} hours on average so far.`,
+    found: true,
+    congestion_level: level,
     confidence: 0.75,
     canonical: `port-congestion:${code}`,
     port: code,
     vessels_in_port: c.inPort,
     arrivals_expected_24h: c.expected,
+    departed_24h: c.departed,
     avg_stay_hours_so_far: Number(c.avgStayHours.toFixed(1)),
     source: 'Digitraffic port calls (Fintraffic)',
     checked_at: new Date().toISOString(),
