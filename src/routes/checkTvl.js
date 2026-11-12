@@ -144,10 +144,21 @@ async function handleTvl(req, res) {
         tvl_usd: null,
       });
     }
-    if (err instanceof RpcBudgetExceededError) {
-      return res.status(503).json({ status: 'error', summary: 'TVL lookup could not complete within budget', confidence: 1.0, error: err.message });
-    }
-    return res.status(502).json({ status: 'error', summary: 'upstream TVL data call failed', confidence: 1.0, error: err.message });
+    // A 200 with the fields named, never a 5xx: a 5xx is booked as no answer.
+    return res.json({
+      query_type: queryType,
+      query,
+      status: 'unavailable',
+      verdict: 'unavailable',
+      summary: `DefiLlama did not answer in time for ${query}, so no total value locked is stated rather than an old figure guessed.`,
+      confidence: 0.3,
+      tvl_usd: null,
+      protocol: protocol ?? null,
+      tvl_chain: tvlChain ?? null,
+      source: 'DefiLlama',
+      error: err.message,
+      as_of: new Date().toISOString(),
+    });
   }
 
   const as_of = new Date().toISOString();
@@ -165,12 +176,13 @@ async function handleTvl(req, res) {
   // are rewritten (a lookup in a static table, no extra network call) —
   // a name that resolves normally is echoed back as the caller wrote it.
   const protocolName = protocol ? protocolDisplayName(protocol) : null;
-  // One figure per sentence. When a chain is named as well, the sentence
-  // states the protocol total (the figure the top TVL miners answer with) and
-  // the per-chain figure stays in chain_tvl_usd, so a scorer reading the
-  // sentence finds a single number to compare.
+  // One figure per sentence, and it is the figure that was asked for: with a
+  // chain named, that is the protocol's value locked on that chain. The
+  // all-chain total stays in protocol_total_tvl_usd and is never put in its
+  // place (answering "Aave on Polygon" with Aave's total across every chain
+  // states a number about a different question).
   const summary = protocol && tvlChain
-    ? `${protocolName} has $${protocolTotalTvlUsd.toFixed(2)} TVL according to DefiLlama.`
+    ? `${protocolName} on ${tvlChain} has $${tvlUsd.toFixed(2)} TVL according to DefiLlama.`
     : `${protocolName ?? query} has $${tvlUsd.toFixed(2)} TVL according to DefiLlama.`;
   res.json({
     query_type: queryType,
@@ -178,8 +190,8 @@ async function handleTvl(req, res) {
     status: 'ok',
     summary,
     confidence: 1.0,
-    canonical: [queryType, query, Math.round(protocol && tvlChain ? protocolTotalTvlUsd : tvlUsd)].join(':'),
-    tvl_usd: protocol && tvlChain ? protocolTotalTvlUsd : tvlUsd,
+    canonical: [queryType, query, Math.round(tvlUsd)].join(':'),
+    tvl_usd: tvlUsd,
     chain_tvl_usd: protocol && tvlChain ? tvlUsd : null,
     protocol_total_tvl_usd: protocolTotalTvlUsd,
     protocol: protocol ?? null,

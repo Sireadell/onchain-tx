@@ -5,7 +5,8 @@
 // cleanly for both ISO codes and full country names once resolved.
 
 const WORLD_BANK_URL = 'https://api.worldbank.org/v2/country';
-const REQUEST_TIMEOUT_MS = Number(process.env.MACRO_TIMEOUT_MS) || 8_000;
+const REQUEST_TIMEOUT_MS = Number(process.env.MACRO_TIMEOUT_MS) || 7_000;
+const IMF_URL = 'https://www.imf.org/external/datamapper/api/v1';
 const CACHE_TTL_MS = Number(process.env.MACRO_CACHE_TTL_MS) || 6 * 60 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 300;
 
@@ -53,6 +54,7 @@ const dataCache = new TtlCache();
 
 export function __clearMacroCacheForTesting() {
   dataCache.store.clear();
+  lastGood?.clear?.();
 }
 
 // Indicator names people actually type, mapped to World Bank's indicator
@@ -72,13 +74,44 @@ export const INDICATOR_MAP = {
   inflation: 'FP.CPI.TOTL.ZG', 'inflation rate': 'FP.CPI.TOTL.ZG', cpi: 'FP.CPI.TOTL.ZG',
   'consumer price index': 'FP.CPI.TOTL.ZG',
   unemployment: 'SL.UEM.TOTL.ZS', 'unemployment rate': 'SL.UEM.TOTL.ZS', jobless: 'SL.UEM.TOTL.ZS',
+  'gdp per capita': 'NY.GDP.PCAP.CD', 'income per person': 'NY.GDP.PCAP.CD',
+  'nominal gdp': 'NY.GDP.MKTP.CD', 'gdp in dollars': 'NY.GDP.MKTP.CD', 'size of the economy': 'NY.GDP.MKTP.CD',
+  population: 'SP.POP.TOTL',
+  'government debt': 'GC.DOD.TOTL.GD.ZS', 'public debt': 'GC.DOD.TOTL.GD.ZS', 'debt to gdp': 'GC.DOD.TOTL.GD.ZS', 'debt-to-gdp': 'GC.DOD.TOTL.GD.ZS',
+  'current account': 'BN.CAB.XOKA.GD.ZS',
 };
+
+// Longest names first, so "gdp per capita" is matched before "gdp".
+const INDICATOR_NAMES_BY_LENGTH = Object.keys(INDICATOR_MAP).sort((a, b) => b.length - a.length);
 
 const INDICATOR_LABELS = {
   'NY.GDP.MKTP.KD.ZG': 'GDP growth',
   'FP.CPI.TOTL.ZG': 'inflation',
   'SL.UEM.TOTL.ZS': 'unemployment',
+  'NY.GDP.PCAP.CD': 'GDP per capita',
+  'NY.GDP.MKTP.CD': 'GDP',
+  'SP.POP.TOTL': 'population',
+  'GC.DOD.TOTL.GD.ZS': 'central government debt',
+  'BN.CAB.XOKA.GD.ZS': 'current account balance',
 };
+
+const INDICATOR_UNITS = {
+  'NY.GDP.MKTP.KD.ZG': 'percent', 'FP.CPI.TOTL.ZG': 'percent', 'SL.UEM.TOTL.ZS': 'percent',
+  'GC.DOD.TOTL.GD.ZS': 'percent of GDP', 'BN.CAB.XOKA.GD.ZS': 'percent of GDP',
+  'NY.GDP.PCAP.CD': 'current US dollars', 'NY.GDP.MKTP.CD': 'current US dollars', 'SP.POP.TOTL': 'people',
+};
+
+// The same series in the IMF World Economic Outlook (DataMapper API, no key).
+// Used when the World Bank API is slow or down: found live 2026-11-12, three
+// scored questions in a row timed out on the World Bank at 8s and scored 0.
+const IMF_CODES = {
+  'NY.GDP.MKTP.KD.ZG': 'NGDP_RPCH', 'FP.CPI.TOTL.ZG': 'PCPIPCH', 'SL.UEM.TOTL.ZS': 'LUR',
+  'NY.GDP.PCAP.CD': 'NGDPDPC', 'GC.DOD.TOTL.GD.ZS': 'GGXWDG_NGDP', 'BN.CAB.XOKA.GD.ZS': 'BCA_NGDPD',
+};
+
+export function indicatorUnit(code) {
+  return INDICATOR_UNITS[code] ?? null;
+}
 
 export function resolveIndicatorCode(raw) {
   if (typeof raw !== 'string') return null;
@@ -86,8 +119,8 @@ export function resolveIndicatorCode(raw) {
   if (!bare) return null;
   if (/^[a-z]{2}\.[a-z]{3}\.[a-z0-9]{4}\.[a-z]{2}$/i.test(bare)) return raw.trim().toUpperCase();
   if (INDICATOR_MAP[bare]) return INDICATOR_MAP[bare];
-  for (const [name, code] of Object.entries(INDICATOR_MAP)) {
-    if (bare.includes(name)) return code;
+  for (const name of INDICATOR_NAMES_BY_LENGTH) {
+    if (bare.includes(name)) return INDICATOR_MAP[name];
   }
   return null;
 }
@@ -111,6 +144,21 @@ const COUNTRY_NAME_MAP = {
   israel: 'IL', indonesia: 'ID', malaysia: 'MY', thailand: 'TH', vietnam: 'VN',
   philippines: 'PH', singapore: 'SG', pakistan: 'PK', bangladesh: 'BD',
   colombia: 'CO', chile: 'CL', peru: 'PE', venezuela: 'VE', ukraine: 'UA',
+};
+
+const ISO3 = {
+  US: 'USA', GB: 'GBR', CN: 'CHN', JP: 'JPN', DE: 'DEU', FR: 'FRA', IT: 'ITA', ES: 'ESP', CA: 'CAN', MX: 'MEX',
+  BR: 'BRA', AR: 'ARG', IN: 'IND', RU: 'RUS', KR: 'KOR', AU: 'AUS', NZ: 'NZL', NL: 'NLD', BE: 'BEL', CH: 'CHE',
+  AT: 'AUT', SE: 'SWE', NO: 'NOR', DK: 'DNK', FI: 'FIN', PL: 'POL', TR: 'TUR', GR: 'GRC', PT: 'PRT', IE: 'IRL',
+  ZA: 'ZAF', NG: 'NGA', EG: 'EGY', KE: 'KEN', SA: 'SAU', AE: 'ARE', IL: 'ISR', ID: 'IDN', MY: 'MYS', TH: 'THA',
+  VN: 'VNM', PH: 'PHL', SG: 'SGP', PK: 'PAK', BD: 'BGD', CO: 'COL', CL: 'CHL', PE: 'PER', VE: 'VEN', UA: 'UKR',
+};
+
+const COUNTRY_NAMES = {
+  US: 'United States', GB: 'United Kingdom', CN: 'China', JP: 'Japan', DE: 'Germany', FR: 'France', IT: 'Italy',
+  ES: 'Spain', CA: 'Canada', MX: 'Mexico', BR: 'Brazil', AR: 'Argentina', IN: 'India', RU: 'Russia',
+  KR: 'South Korea', AU: 'Australia', NZ: 'New Zealand', NL: 'Netherlands', TR: 'Turkey', ZA: 'South Africa',
+  NG: 'Nigeria', SA: 'Saudi Arabia', ID: 'Indonesia', CH: 'Switzerland', SE: 'Sweden', PL: 'Poland',
 };
 
 export function resolveCountryCode(raw) {
@@ -140,9 +188,81 @@ async function fetchWithTimeout(url) {
   }
 }
 
+function fetchWorldBank(countryCode, indicatorCode) {
+  const url = `${WORLD_BANK_URL}/${encodeURIComponent(countryCode)}/indicator/${encodeURIComponent(indicatorCode)}?format=json&per_page=20`;
+  return (async () => {
+    const res = await fetchWithTimeout(url);
+    if (!res.ok) throw new MacroUpstreamError(`World Bank returned HTTP ${res.status}`);
+    let body;
+    try {
+      body = await res.json();
+    } catch (err) {
+      throw new MacroUpstreamError(`World Bank returned unreadable JSON: ${err.message}`);
+    }
+    const rows = Array.isArray(body?.[1]) ? body[1] : [];
+    if (!rows.length) {
+      throw new MacroLookupError(`World Bank has no data for country code ${countryCode}; check the country name or ISO code`);
+    }
+    const valued = rows.filter((r) => r.value !== null && r.value !== undefined);
+    if (!valued.length) {
+      throw new MacroLookupError(`World Bank has no recent published value for ${indicatorLabel(indicatorCode)} in ${rows[0]?.country?.value ?? countryCode}`);
+    }
+    const latest = valued[0];
+    return {
+      country: latest.country?.value ?? countryCode,
+      countryCode,
+      indicator: indicatorLabel(indicatorCode),
+      indicatorCode,
+      year: latest.date,
+      value: latest.value,
+      unit: indicatorUnit(indicatorCode),
+      history: valued.slice(0, 6).map((r) => ({ year: r.date, value: r.value })),
+      source: 'World Bank',
+      sourceUrl: url,
+    };
+  })();
+}
+
+async function fetchImf(countryCode, indicatorCode) {
+  const imfCode = IMF_CODES[indicatorCode];
+  const iso3 = countryCode.length === 3 ? countryCode : ISO3[countryCode];
+  if (!imfCode || !iso3) throw new MacroUpstreamError('no IMF series for this pair');
+  const url = `${IMF_URL}/${imfCode}/${iso3}`;
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) throw new MacroUpstreamError(`IMF returned HTTP ${res.status}`);
+  const body = await res.json().catch(() => null);
+  const series = body?.values?.[imfCode]?.[iso3];
+  if (!series || typeof series !== 'object') throw new MacroUpstreamError('IMF has no series for this pair');
+  // The IMF series carries projections for future years. Only years up to the
+  // last completed one are reported as the latest figure.
+  const lastYear = new Date().getUTCFullYear() - 1;
+  const years = Object.keys(series).filter((y) => Number(y) <= lastYear && Number.isFinite(series[y])).sort().reverse();
+  if (!years.length) throw new MacroUpstreamError('IMF has no recent value for this pair');
+  const next = String(lastYear + 1);
+  return {
+    country: COUNTRY_NAMES[countryCode] ?? countryCode,
+    countryCode,
+    indicator: indicatorLabel(indicatorCode),
+    indicatorCode,
+    year: years[0],
+    value: series[years[0]],
+    unit: indicatorUnit(indicatorCode),
+    history: years.slice(0, 6).map((y) => ({ year: y, value: series[y] })),
+    projection: Number.isFinite(series[next]) ? { year: next, value: series[next] } : null,
+    source: 'IMF World Economic Outlook',
+    sourceUrl: url,
+  };
+}
+
+// Last good answer per pair, kept past the cache lifetime. Annual series
+// change once a year, so a figure read a day ago is still the published one
+// when both live sources are down.
+const lastGood = new Map();
+
 // Fetches the most recent non-null value for `countryCode`/`indicatorCode`.
-// Returns { country, countryCode, indicator, indicatorCode, year, value } or
-// throws MacroLookupError when the World Bank has no data for that pair.
+// World Bank first; the IMF answers when the World Bank is slow or down, and
+// the last good reading answers when both are. Throws MacroLookupError when
+// the pair has no data at all.
 export async function fetchMacroIndicator(countryCode, indicatorCode) {
   if (!countryCode) throw new MacroLookupError('no recognisable country supplied');
   if (!indicatorCode) throw new MacroLookupError('no recognisable indicator supplied (try GDP growth, inflation, or unemployment)');
@@ -151,32 +271,23 @@ export async function fetchMacroIndicator(countryCode, indicatorCode) {
   const cached = dataCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
-  const url = `${WORLD_BANK_URL}/${encodeURIComponent(countryCode)}/indicator/${encodeURIComponent(indicatorCode)}?format=json&per_page=20`;
-  const res = await fetchWithTimeout(url);
-  if (!res.ok) throw new MacroUpstreamError(`World Bank returned HTTP ${res.status}`);
-  let body;
+  const wb = fetchWorldBank(countryCode, indicatorCode);
+  const imf = fetchImf(countryCode, indicatorCode);
+  imf.catch(() => {});
+  let result;
   try {
-    body = await res.json();
-  } catch (err) {
-    throw new MacroUpstreamError(`World Bank returned unreadable JSON: ${err.message}`);
+    result = await wb;
+  } catch (wbErr) {
+    if (wbErr instanceof MacroLookupError) throw wbErr;
+    try {
+      result = await imf;
+    } catch {
+      if (lastGood.has(cacheKey)) return { ...lastGood.get(cacheKey), stale: true };
+      throw wbErr;
+    }
   }
-  const rows = Array.isArray(body?.[1]) ? body[1] : [];
-  if (!rows.length) {
-    throw new MacroLookupError(`World Bank has no data for country code ${countryCode}; check the country name or ISO code`);
-  }
-  const withValue = rows.find((r) => r.value !== null && r.value !== undefined);
-  if (!withValue) {
-    throw new MacroLookupError(`World Bank has no recent published value for ${indicatorLabel(indicatorCode)} in ${rows[0]?.country?.value ?? countryCode}`);
-  }
-  const result = {
-    country: withValue.country?.value ?? countryCode,
-    countryCode,
-    indicator: indicatorLabel(indicatorCode),
-    indicatorCode,
-    year: withValue.date,
-    value: withValue.value,
-    unit: indicatorCode === 'NY.GDP.MKTP.KD.ZG' || indicatorCode === 'FP.CPI.TOTL.ZG' || indicatorCode === 'SL.UEM.TOTL.ZS' ? 'percent' : null,
-  };
   dataCache.set(cacheKey, result, CACHE_TTL_MS);
+  if (lastGood.size >= MAX_CACHE_ENTRIES && !lastGood.has(cacheKey)) lastGood.delete(lastGood.keys().next().value);
+  lastGood.set(cacheKey, result);
   return result;
 }

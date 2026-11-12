@@ -83,11 +83,11 @@ test('tvl: both protocol and tvl_chain return chain-specific and total protocol 
   assert.equal(body.status, 'ok');
   assert.equal(body.query_type, 'protocol_chain');
   assert.equal(body.query, 'aave-v3:ethereum');
-  assert.equal(body.tvl_usd, 5000);
+  assert.equal(body.tvl_usd, 4000);
   assert.equal(body.chain_tvl_usd, 4000);
   assert.equal(body.protocol_total_tvl_usd, 5000);
-  assert.match(body.summary, /\$5000\.00 TVL/);
-  assert.doesNotMatch(body.summary, /4000/);
+  assert.match(body.summary, /on ethereum has \$4000\.00 TVL/);
+  assert.doesNotMatch(body.summary, /5000/);
   assert.equal(calledPaths.length, 2);
 });
 

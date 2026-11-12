@@ -14,17 +14,113 @@
 // shouldn't take out a signal that doesn't depend on it.
 
 import { Router } from 'express';
-import { getGasPrice, getBlockNumber, withRpcBudget, RpcBudgetExceededError, ApiKeyMissingError } from '../lib/ankrRpc.js';
+import { getGasPrice, getBlockNumber, withRpcBudget } from '../lib/ankrRpc.js';
 import { getCoinPrice } from '../lib/defiLlamaApi.js';
 import { DEFAULT_CHAIN, resolveChainLoose, resolveRpcChainLoose, rpcChainNames } from '../lib/chains.js';
 import { freeTextParam, firstUsableValue } from '../lib/entityExtract.js';
 import { freeTextMatchesIntent, GAS_CUES } from '../lib/intentGuard.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 import { safeBigIntFromHex } from '../lib/safeBigInt.js';
+import {
+  nonEvmChain, fetchSolanaFees, fetchBitcoinFees, SOLANA_BASE_FEE_LAMPORTS, BITCOIN_TYPICAL_VBYTES,
+} from '../lib/nonEvmGas.js';
 
 const STANDARD_TRANSFER_GAS_UNITS = 21_000;
 
 const router = Router();
+
+async function nativePrice(id) {
+  try {
+    return (await getCoinPrice(`coingecko:${id}`)).priceUsd;
+  } catch {
+    return null;
+  }
+}
+
+function unavailable(res, chainLabel, err) {
+  // A 200 with the fields named, never a 5xx: a 5xx is booked as no answer.
+  return res.json({
+    chain: chainLabel,
+    status: 'unavailable',
+    verdict: 'unavailable',
+    summary: `The ${chainLabel} fee feed did not answer at request time, so no gas price is stated rather than an old one guessed.`,
+    confidence: 0.3,
+    gas_price_gwei: null,
+    fee_usd: null,
+    error: err?.message ?? null,
+    as_of: new Date().toISOString(),
+  });
+}
+
+async function handleSolana(res) {
+  let fees;
+  try {
+    fees = await fetchSolanaFees();
+  } catch (err) {
+    return unavailable(res, 'Solana', err);
+  }
+  const as_of = new Date().toISOString();
+  const solUsd = await nativePrice('solana');
+  // Priority fee is per compute unit in micro-lamports; a plain transfer asks
+  // for about 200,000 compute units at most.
+  const priorityLamports = Math.round((fees.median * 200_000) / 1e6);
+  const typicalLamports = SOLANA_BASE_FEE_LAMPORTS + priorityLamports;
+  const typicalSol = typicalLamports / 1e9;
+  const feeUsd = solUsd != null ? typicalSol * solUsd : null;
+  const summary = `Solana fee: ${typicalLamports} lamports (${typicalSol} SOL) for a standard one-signature transfer`
+    + `${feeUsd != null ? `, about $${feeUsd.toFixed(6)} USD at $${solUsd.toFixed(2)} per SOL` : ''}.`
+    + ` That is the fixed base fee of ${SOLANA_BASE_FEE_LAMPORTS} lamports per signature plus a median priority fee of ${fees.median} micro-lamports per compute unit (75th percentile ${fees.p75}) over the last ${fees.slotsSampled} slots.`
+    + ` Solana has no gas price in gwei. Observed at: ${as_of}.`;
+  return res.json({
+    chain: 'solana',
+    status: 'ok',
+    verdict: 'found',
+    summary,
+    confidence: 0.95,
+    canonical: ['solana', 'fee_lamports', typicalLamports, fees.latestSlot ?? '-'].join(':'),
+    base_fee_lamports: SOLANA_BASE_FEE_LAMPORTS,
+    priority_fee_micro_lamports_per_cu: fees.median,
+    priority_fee_p75_micro_lamports_per_cu: fees.p75,
+    typical_fee_lamports: typicalLamports,
+    typical_fee_sol: typicalSol,
+    fee_usd: feeUsd,
+    native_price_usd: solUsd,
+    slots_sampled: fees.slotsSampled,
+    slot: fees.latestSlot,
+    source: 'Solana mainnet RPC getRecentPrioritizationFees; SOL price from DefiLlama',
+    as_of,
+  });
+}
+
+async function handleBitcoin(res) {
+  let fees;
+  try {
+    fees = await fetchBitcoinFees();
+  } catch (err) {
+    return unavailable(res, 'Bitcoin', err);
+  }
+  const as_of = new Date().toISOString();
+  const btcUsd = await nativePrice('bitcoin');
+  const usd = (rate) => (btcUsd != null ? (rate * BITCOIN_TYPICAL_VBYTES * btcUsd) / 1e8 : null);
+  const fastUsd = usd(fees.fastest);
+  const summary = `Bitcoin fee rate: ${fees.fastest} sat/vB for the next block, ${fees.halfHour} sat/vB within about 30 minutes, ${fees.hour} sat/vB within an hour (economy ${fees.economy} sat/vB).`
+    + `${fastUsd != null ? ` A standard ${BITCOIN_TYPICAL_VBYTES}-vbyte payment costs about $${fastUsd.toFixed(4)} USD at the next-block rate, with BTC at $${btcUsd.toFixed(0)}.` : ''}`
+    + ` Bitcoin prices fees per virtual byte, not in gwei. Observed at: ${as_of}.`;
+  return res.json({
+    chain: 'bitcoin',
+    status: 'ok',
+    verdict: 'found',
+    summary,
+    confidence: 0.95,
+    canonical: ['bitcoin', 'fee_sat_vb', fees.fastest].join(':'),
+    fee_rate_sat_vb: fees,
+    typical_vbytes: BITCOIN_TYPICAL_VBYTES,
+    fee_usd: fastUsd,
+    native_price_usd: btcUsd,
+    source: `${fees.source} fee estimates; BTC price from DefiLlama`,
+    as_of,
+  });
+}
 
 async function handleGasPrice(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
@@ -39,6 +135,11 @@ async function handleGasPrice(req, res) {
       'This request does not appear to ask about blockchain gas or transaction fees. Name a supported chain and ask for its gas price or standard transfer cost.',
     );
   }
+  const nonEvm = nonEvmChain(params?.chain)
+    ?? (!params?.chain && !resolveChainLoose(question ?? '') ? nonEvmChain(question) : null);
+  if (nonEvm === 'solana') return handleSolana(res);
+  if (nonEvm === 'bitcoin') return handleBitcoin(res);
+
   const chainParam = firstUsableValue(params?.chain, resolveChainLoose(question ?? '')?.key, DEFAULT_CHAIN);
 
   const knownChain = resolveChainLoose(chainParam);
@@ -61,13 +162,7 @@ async function handleGasPrice(req, res) {
       getBlockNumber(chain.segment).catch(() => null),
     ]);
   } catch (err) {
-    if (err instanceof ApiKeyMissingError) {
-      return res.status(503).json({ status: 'error', summary: 'gas price signal unavailable', confidence: 0, error: err.message });
-    }
-    if (err instanceof RpcBudgetExceededError) {
-      return res.status(503).json({ status: 'error', summary: 'gas price lookup could not complete within budget', confidence: 0, error: err.message });
-    }
-    return res.status(502).json({ status: 'error', summary: 'upstream RPC call failed', confidence: 0, error: err.message });
+    return unavailable(res, chain.label, err);
   }
 
   // Guarded: an RPC can answer "0x" here and BigInt("0x") throws, which
@@ -121,6 +216,7 @@ async function handleGasPrice(req, res) {
   res.json({
     chain: chainParam,
     status: 'ok',
+    verdict: 'found',
     summary,
     confidence: 1.0,
     canonical,

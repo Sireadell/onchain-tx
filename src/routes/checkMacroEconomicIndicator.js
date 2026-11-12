@@ -7,7 +7,7 @@
 import { Router } from 'express';
 import {
   fetchMacroIndicator, resolveCountryCode, resolveIndicatorCode,
-  MacroUpstreamError, MacroLookupError, WORLD_BANK_ATTRIBUTION,
+  MacroUpstreamError, MacroLookupError, WORLD_BANK_ATTRIBUTION, indicatorLabel, indicatorUnit,
 } from '../lib/macroData.js';
 import {
   fetchPolicyRate, resolvePolicyRegion, policyRateSummary, POLICY_RATE_RE, POLICY_REGIONS, PolicyRateUpstreamError,
@@ -26,9 +26,44 @@ const FREE_TEXT_KEYS = ['query', 'q', 'question', 'text', 'input', 'search'];
 
 const MAX_INPUT_CHARS = 400;
 
-function summarize(result) {
-  const signed = result.value >= 0 ? `+${result.value.toFixed(2)}` : result.value.toFixed(2);
-  return `${result.country}'s ${result.indicator} was ${signed}${result.unit === 'percent' ? '%' : ''} in ${result.year}, the most recent year the World Bank has published data for.`;
+function formatValue(value, unit) {
+  if (!Number.isFinite(value)) return String(value);
+  if (unit === 'percent' || unit === 'percent of GDP') {
+    return `${value.toFixed(2)}%${unit === 'percent of GDP' ? ' of GDP' : ''}`;
+  }
+  if (unit === 'current US dollars') {
+    if (Math.abs(value) >= 1e12) return `$${(value / 1e12).toFixed(2)} trillion`;
+    if (Math.abs(value) >= 1e9) return `$${(value / 1e9).toFixed(2)} billion`;
+    return `$${Math.round(value).toLocaleString('en-US')}`;
+  }
+  if (unit === 'people') {
+    if (value >= 1e6) return `${(value / 1e6).toFixed(2)} million people`;
+    return `${Math.round(value).toLocaleString('en-US')} people`;
+  }
+  return value.toFixed(2);
+}
+
+// One sentence with the figure and its year, then the direction against the
+// year before and the recent series, so the reader sees the trend and not a
+// lone number.
+export function summarize(result) {
+  const head = `${result.country}'s ${result.indicator} was ${formatValue(result.value, result.unit)} in ${result.year}, the latest annual figure published by the ${result.source ?? 'World Bank'}.`;
+  const hist = Array.isArray(result.history) ? result.history.filter((h) => Number.isFinite(h.value)) : [];
+  const parts = [head];
+  if (hist.length >= 2) {
+    const prev = hist[1];
+    const diff = result.value - prev.value;
+    const pct = result.unit === 'percent' || result.unit === 'percent of GDP';
+    const change = pct ? `${Math.abs(diff).toFixed(2)} percentage points` : formatValue(Math.abs(diff), result.unit);
+    const dir = Math.abs(diff) < 1e-9 ? `unchanged from ${prev.year}` : `${diff > 0 ? 'up' : 'down'} ${change} from ${formatValue(prev.value, result.unit)} in ${prev.year}`;
+    parts.push(`That is ${dir}.`);
+    if (hist.length >= 3) {
+      parts.push(`Recent series: ${hist.slice(0, 5).map((h) => `${h.year} ${formatValue(h.value, result.unit)}`).join(', ')}.`);
+    }
+  }
+  if (result.projection) parts.push(`The IMF projects ${formatValue(result.projection.value, result.unit)} for ${result.projection.year}.`);
+  if (result.stale) parts.push('Both live statistics sources were slow at request time, so this is the last figure read from them.');
+  return parts.join(' ');
 }
 
 async function handleMacroEconomicIndicator(req, res) {
@@ -77,11 +112,16 @@ async function handleMacroEconomicIndicator(req, res) {
       });
     } catch (err) {
       if (err instanceof PolicyRateUpstreamError) {
-        return res.status(502).json({
-          status: 'error',
-          summary: 'The central bank data source is temporarily unavailable, so the rate could not be checked right now. Retry shortly.',
-          confidence: 0,
+        return res.json({
+          status: 'unavailable',
+          verdict: 'unavailable',
+          summary: `The ${POLICY_REGIONS[region]} central bank rate feed did not answer at request time, so no rate is stated rather than an old one guessed.`,
+          confidence: 0.3,
+          country: POLICY_REGIONS[region],
+          value: null,
+          unit: 'percent',
           error: err.message,
+          checked_at: new Date().toISOString(),
         });
       }
       throw err;
@@ -137,11 +177,21 @@ async function handleMacroEconomicIndicator(req, res) {
       return respondUnusableInput(res, err.message);
     }
     if (err instanceof MacroUpstreamError) {
-      return res.status(502).json({
-        status: 'error',
-        summary: 'The World Bank data API is temporarily unavailable, so this indicator could not be checked right now. Retry shortly.',
-        confidence: 0,
+      // Still a 200 with every field named: a 5xx is booked as a failed answer.
+      return res.json({
+        status: 'unavailable',
+        verdict: 'unavailable',
+        summary: `Neither the World Bank nor the IMF statistics API answered at request time, so no ${indicatorLabel(indicatorCode)} figure for ${countryCode} is stated rather than one guessed.`,
+        confidence: 0.3,
+        country_code: countryCode,
+        indicator: indicatorLabel(indicatorCode),
+        indicator_code: indicatorCode,
+        year: null,
+        value: null,
+        unit: indicatorUnit(indicatorCode),
+        source: 'World Bank, IMF',
         error: err.message,
+        checked_at: new Date().toISOString(),
       });
     }
     throw err;
@@ -149,8 +199,9 @@ async function handleMacroEconomicIndicator(req, res) {
 
   res.json({
     status: 'ok',
+    verdict: 'found',
     summary: summarize(result),
-    confidence: 0.85,
+    confidence: result.stale ? 0.8 : 0.95,
     canonical: ['macro-economic-indicator', result.countryCode.toLowerCase(), result.indicatorCode.toLowerCase()].join(':'),
     country: result.country,
     country_code: result.countryCode,
@@ -159,8 +210,12 @@ async function handleMacroEconomicIndicator(req, res) {
     year: result.year,
     value: result.value,
     unit: result.unit,
-    source: 'World Bank',
-    attribution: WORLD_BANK_ATTRIBUTION,
+    frequency: 'annual',
+    history: result.history ?? null,
+    projection: result.projection ?? null,
+    source: result.source ?? 'World Bank',
+    source_url: result.sourceUrl ?? null,
+    attribution: result.source === 'IMF World Economic Outlook' ? 'IMF World Economic Outlook (imf.org DataMapper API).' : WORLD_BANK_ATTRIBUTION,
     checked_at: new Date().toISOString(),
   });
 }

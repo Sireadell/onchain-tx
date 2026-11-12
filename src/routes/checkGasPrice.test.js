@@ -60,7 +60,7 @@ test('gas-price: unsupported chain rejected before any RPC call', async (t) => {
   });
   const base = startServer(t);
 
-  const res = await fetch(`${base}/gas-price?chain=solana`);
+  const res = await fetch(`${base}/gas-price?chain=dogechain`);
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.status, 'invalid_input');
@@ -157,8 +157,58 @@ test('gas-price: infrastructure failures report zero confidence', async (t) => {
   mockFetch(t, async () => { throw new Error('RPC unavailable'); });
   const base = startServer(t);
   const res = await fetch(`${base}/gas-price?chain=eth`);
-  assert.equal(res.status, 502);
-  assert.equal((await res.json()).confidence, 0);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.status, 'unavailable');
+  assert.equal(body.gas_price_gwei, null);
+});
+
+test('gas-price: Solana answers with lamports from the Solana RPC, not a refusal', async (t) => {
+  resetDefiLlamaCache();
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.includes('solana.com')) {
+      return new Response(JSON.stringify({ result: [{ slot: 10, prioritizationFee: 0 }, { slot: 11, prioritizationFee: 1000 }, { slot: 12, prioritizationFee: 0 }] }), { status: 200 });
+    }
+    if (u.includes('coins.llama.fi')) {
+      return new Response(JSON.stringify({ coins: { 'coingecko:solana': { price: 100, symbol: 'SOL', timestamp: 1, confidence: 0.99 } } }), { status: 200 });
+    }
+    if (u.startsWith('http://127.0.0.1')) return original(url, init);
+    throw new Error(`unexpected ${u}`);
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+  const res = await fetch(`${base}/gas-price?chain=solana`);
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.status, 'ok');
+  assert.equal(body.typical_fee_lamports, 5000);
+  assert.match(body.summary, /5000 lamports/);
+  assert.match(body.summary, /Observed at:/);
+});
+
+test('gas-price: Bitcoin answers in sat/vB from mempool.space', async (t) => {
+  resetDefiLlamaCache();
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.startsWith('http://127.0.0.1')) return original(url, init);
+    if (u.includes('blockstream.info')) return new Response('{}', { status: 503 });
+    if (u.includes('mempool.space')) {
+      return new Response(JSON.stringify({ fastestFee: 4, halfHourFee: 3, hourFee: 2, economyFee: 1, minimumFee: 1 }), { status: 200 });
+    }
+    if (u.includes('coins.llama.fi')) {
+      return new Response(JSON.stringify({ coins: { 'coingecko:bitcoin': { price: 100000, symbol: 'BTC', timestamp: 1, confidence: 0.99 } } }), { status: 200 });
+    }
+    throw new Error(`unexpected ${u}`);
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+  const res = await fetch(`${base}/gas-price?chain=bitcoin`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.match(body.summary, /4 sat\/vB for the next block/);
 });
 
 test('gas-price: successful read returns wei/gwei/fee_usd and canonical', async (t) => {

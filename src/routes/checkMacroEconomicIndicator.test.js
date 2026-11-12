@@ -103,13 +103,53 @@ test('MACRO_ECONOMIC_INDICATOR handles a 12,000+ char input without crashing', a
   assert.equal(res.status, 200);
 });
 
-test('MACRO_ECONOMIC_INDICATOR upstream failure returns a real error code', async (t) => {
+test('MACRO_ECONOMIC_INDICATOR both sources down answers 200 unavailable, never a 5xx', async (t) => {
   const base = startServer(t);
   stubWorldBank(t, { status: 500, body: [] });
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => (String(url).includes('imf.org') ? new Response('{}', { status: 503 }) : original(url, init));
+  t.after(() => { globalThis.fetch = original; });
   const res = await fetch(`${base}/macro-economic-indicator?country=Japan&indicator=GDP`);
   const json = await res.json();
-  assert.equal(res.status, 502);
-  assert.equal(json.status, 'error');
+  assert.equal(res.status, 200);
+  assert.equal(json.status, 'unavailable');
+  assert.equal(json.value, null);
+});
+
+test('MACRO_ECONOMIC_INDICATOR falls back to the IMF when the World Bank is down', async (t) => {
+  const base = startServer(t);
+  stubWorldBank(t, { status: 500, body: [] });
+  const original = globalThis.fetch;
+  const year = new Date().getUTCFullYear();
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('imf.org')) {
+      return new Response(JSON.stringify({ values: { LUR: { CAN: { [year - 2]: 6.4, [year - 1]: 6.9, [year]: 6.7 } } } }), { status: 200 });
+    }
+    return original(url, init);
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const res = await fetch(`${base}/macro-economic-indicator?country=Canada&economic_indicator=unemployment`);
+  const json = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(json.status, 'ok');
+  assert.equal(json.value, 6.9);
+  assert.equal(json.year, String(year - 1));
+  assert.match(json.summary, /IMF/);
+  assert.match(json.summary, /up 0\.50 percentage points/);
+});
+
+test('MACRO_ECONOMIC_INDICATOR summary carries the trend from the series', async (t) => {
+  const base = startServer(t);
+  stubWorldBank(t, [{ page: 1 }, [
+    { country: { value: 'Germany' }, date: '2025', value: 3.711 },
+    { country: { value: 'Germany' }, date: '2024', value: 3.4 },
+    { country: { value: 'Germany' }, date: '2023', value: 3.1 },
+  ]]);
+  const res = await fetch(`${base}/macro-economic-indicator?country=Germany&economic_indicator=unemployment`);
+  const json = await res.json();
+  assert.match(json.summary, /3\.71% in 2025/);
+  assert.match(json.summary, /up 0\.31 percentage points from 3\.40% in 2024/);
+  assert.equal(json.history.length, 3);
 });
 
 test('MACRO_ECONOMIC_INDICATOR POST works the same as GET', async (t) => {
