@@ -11,7 +11,7 @@ import { checkBudget } from './ankrRpc.js';
 const DEFILLAMA_CALL_TIMEOUT_MS = Number(process.env.DEFILLAMA_CALL_TIMEOUT_MS) || 8_000;
 const RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
 const PROTOCOL_CACHE_TTL_MS = Number(process.env.DEFILLAMA_PROTOCOL_CACHE_TTL_MS) || 10 * 60_000;
-const CHAIN_LIST_CACHE_TTL_MS = Number(process.env.DEFILLAMA_CHAIN_CACHE_TTL_MS) || 30_000;
+const CHAIN_LIST_CACHE_TTL_MS = Number(process.env.DEFILLAMA_CHAIN_CACHE_TTL_MS) || 10 * 60_000;
 const MAX_CACHE_ENTRIES = 500;
 
 const protocolCache = new Map();
@@ -111,6 +111,7 @@ export function resetDefiLlamaCache() {
   chainListCache = null;
   protocolListCache = null;
   priceCache.clear();
+  defiTotalCache = null;
 }
 
 // Live-checked 2026-08-30: DefiLlama's /tvl/{slug} takes its slug literally,
@@ -273,6 +274,7 @@ async function loadProtocolBody(rawSlug, slug) {
   for (const [name, data] of Object.entries(body?.chainTvls ?? {})) {
     if (Array.isArray(data?.tvl)) history[name.toLowerCase()] = data.tvl.slice(-10);
   }
+  const totalSeries = Array.isArray(body?.tvl) ? body.tvl.slice(-10) : null;
   const value = {
     name: body?.name ?? null,
     symbol: body?.symbol ?? null,
@@ -281,6 +283,7 @@ async function loadProtocolBody(rawSlug, slug) {
     chainsCount: Object.keys(body?.currentChainTvls ?? {}).filter((n) => !/-(borrowed|staking|pool2)$/i.test(n) && n !== 'borrowed' && n !== 'staking' && n !== 'pool2').length || null,
     current: Object.entries(body?.currentChainTvls ?? {}),
     history,
+    totalSeries,
   };
   protocolBodyCache.set(slug, { value, storedAt: Date.now() });
   if (protocolBodyCache.size > 60) protocolBodyCache.delete(protocolBodyCache.keys().next().value);
@@ -317,6 +320,46 @@ export async function getProtocolChainDetail(rawSlug, rawChainName) {
   };
 }
 
+// Context for a protocol asked about on its own, from the cached /protocol
+// response only. Never waits on the network: null when that response is not
+// already held (the common protocols are kept warm in the background).
+export function peekProtocolDetail(rawSlug) {
+  const trimmed = String(rawSlug).trim();
+  const slug = PROTOCOL_ALIASES[trimmed.toLowerCase()] ?? trimmed;
+  const hit = protocolBodyCache.get(slug);
+  if (!hit || Date.now() - hit.storedAt >= PROTOCOL_CACHE_TTL_MS) return null;
+  const b = hit.value;
+  return {
+    name: b.name,
+    symbol: b.symbol,
+    category: b.category,
+    url: b.url,
+    chainsCount: b.chainsCount,
+    change1dPct: changePct(b.totalSeries, 86_400 - 3_600),
+    change7dPct: changePct(b.totalSeries, 7 * 86_400 - 3_600),
+  };
+}
+
+let defiTotalCache = null;
+// Total value locked across all of DeFi (all chains, DefiLlama's own total),
+// with the 1 and 7 day change from the same daily series.
+export async function getDefiTotalTvl() {
+  if (defiTotalCache && Date.now() - defiTotalCache.storedAt < CHAIN_LIST_CACHE_TTL_MS) return defiTotalCache.value;
+  const res = await fetchDefiLlama('api.llama.fi', '/v2/historicalChainTvl');
+  if (res.status !== 200) throw new Error(`DefiLlama historicalChainTvl request failed: ${res.status}`);
+  const series = (await res.json()).filter((p) => typeof p?.tvl === 'number');
+  if (!series.length) throw new Error('DefiLlama historicalChainTvl returned no data');
+  const points = series.slice(-10).map((p) => ({ date: p.date, totalLiquidityUSD: p.tvl }));
+  const value = {
+    value: series[series.length - 1].tvl,
+    change1dPct: changePct(points, 86_400 - 3_600),
+    change7dPct: changePct(points, 7 * 86_400 - 3_600),
+    asOfUnix: series[series.length - 1].date,
+  };
+  defiTotalCache = { value, storedAt: Date.now() };
+  return value;
+}
+
 export async function getProtocolChainTvl(rawSlug, rawChainName) {
   return (await getProtocolChainDetail(rawSlug, rawChainName)).value;
 }
@@ -325,6 +368,8 @@ export async function getProtocolChainTvl(rawSlug, rawChainName) {
 // does not wait on the large /protocol response.
 const PREWARM_PROTOCOLS = ['aave', 'uniswap', 'curve-finance', 'lido', 'makerdao', 'compound-finance', 'pancakeswap', 'sushiswap', 'balancer', 'convex-finance'];
 export async function prewarmProtocolTvl() {
+  getChainTvl('Ethereum').catch(() => {});
+  getDefiTotalTvl().catch(() => {});
   let next = 0;
   const worker = async () => {
     while (next < PREWARM_PROTOCOLS.length) {

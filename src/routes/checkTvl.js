@@ -19,6 +19,8 @@ import { Router } from 'express';
 import {
   getProtocolTvl,
   getProtocolChainDetail,
+  peekProtocolDetail,
+  getDefiTotalTvl,
   getChainTvl,
   protocolDisplayName,
   ProtocolNotFoundError,
@@ -46,7 +48,7 @@ export function cleanChainName(value) {
 
 export function cleanProtocolName(value) {
   if (typeof value !== 'string') return value;
-  const cleaned = value.trim().replace(/[?.!]+$/, '').replace(/^(?:the)\s+/i, '')
+  const cleaned = value.trim().replace(/[?.!]+$/, '').replace(/^(?:(?:the|current|total|live|latest|present)\s+)+(?:of\s+)?(?:the\s+)?/i, '').replace(/^of\s+(?:the\s+)?/i, '')
     .replace(/\s+(?:protocol|dex|platform|dapp|finance protocol)$/i, '').trim();
   return cleaned || value;
 }
@@ -97,6 +99,7 @@ async function handleTvl(req, res) {
   // network on 2026-09-02 this endpoint failed every natural-language TVL
   // question put to it. Prose in the parameter is now treated as the
   // question it is.
+  let chainFromProtocol;
   const protocolIsProse = looksLikeSentence(rawProtocol);
   const usableProtocol = protocolIsProse ? null : rawProtocol;
   const question = !usableProtocol && !rawTvlChain
@@ -112,8 +115,55 @@ async function handleTvl(req, res) {
   // 2026-09-14 verifying the empty-parameter fix: protocol= with
   // query="What is the TVL of Uniswap?" refused, while omitting protocol
   // entirely answered correctly.
-  const protocol = cleanProtocolName(firstUsableValue(usableProtocol, split ? split[1].trim() : subject));
-  const tvlChain = rawTvlChain ?? (split ? cleanChainName(split[2]) : undefined);
+  let protocol = cleanProtocolName(firstUsableValue(usableProtocol, split ? split[1].trim() : subject));
+  let wholeDefi = false;
+  // "the TVL of the Solana blockchain" names a chain, and "all of DeFi" names
+  // the whole market; neither is a protocol.
+  if (typeof protocol === 'string' && !rawTvlChain) {
+    if (/^(?:all(?:\s+of)?\s+)?(?:de-?fi|decentralized finance)(?:\s+(?:combined|overall|total|as a whole|protocols))?$/i.test(protocol)) {
+      wholeDefi = true;
+      protocol = undefined;
+    } else if (/\s+(?:blockchain|network|chain|mainnet)$/i.test(protocol)) {
+      chainFromProtocol = cleanChainName(protocol);
+      protocol = undefined;
+    }
+  }
+  const tvlChain = rawTvlChain ?? chainFromProtocol ?? (split ? cleanChainName(split[2]) : undefined);
+
+  if (wholeDefi && !tvlChain) {
+    try {
+      const total = await getDefiTotalTvl();
+      const signedPct = (n) => `${n >= 0 ? 'up' : 'down'} ${Math.abs(n).toFixed(2)}%`;
+      const parts = [`DeFi has $${total.value.toFixed(2)} total value locked across all chains according to DefiLlama.`];
+      if (total.change1dPct !== null && total.change7dPct !== null) parts.push(`That is ${signedPct(total.change1dPct)} over the last day and ${signedPct(total.change7dPct)} over the last 7 days.`);
+      parts.push('Source: DefiLlama (api.llama.fi), read at request time.');
+      return res.json({
+        query_type: 'defi_total',
+        query: 'DeFi',
+        status: 'ok',
+        summary: parts.join(' '),
+        confidence: 1.0,
+        canonical: ['defi_total', Math.round(total.value)].join(':'),
+        tvl_usd: total.value,
+        change_1d_pct: total.change1dPct,
+        change_7d_pct: total.change7dPct,
+        source: 'DefiLlama',
+        as_of: new Date().toISOString(),
+      });
+    } catch (err) {
+      return res.json({
+        query_type: 'defi_total',
+        query: 'DeFi',
+        status: 'unavailable',
+        verdict: 'unavailable',
+        summary: 'DefiLlama did not answer in time for the DeFi total, so no total value locked is stated rather than an old figure guessed.',
+        confidence: 0.3,
+        tvl_usd: null,
+        error: err.message,
+        as_of: new Date().toISOString(),
+      });
+    }
+  }
 
   if (!protocol && !tvlChain) {
     return respondUnusableInput(
@@ -137,6 +187,7 @@ async function handleTvl(req, res) {
       tvlUsd = detail.value;
     } else {
       tvlUsd = protocol ? await getProtocolTvl(protocol) : await getChainTvl(tvlChain);
+      if (protocol) detail = peekProtocolDetail(protocol);
     }
   } catch (err) {
     if (err instanceof ProtocolNotFoundError || err instanceof ChainNotFoundError) {
@@ -211,16 +262,18 @@ async function handleTvl(req, res) {
   const extra = [];
   const signed = (n) => `${n >= 0 ? 'up' : 'down'} ${Math.abs(n).toFixed(2)}%`;
   if (detail) {
+    const scope = tvlChain ? `On ${tvlChain} it` : 'It';
     if (detail.change1dPct !== null && detail.change7dPct !== null) {
-      extra.push(`On ${tvlChain} it is ${signed(detail.change1dPct)} over the last day and ${signed(detail.change7dPct)} over the last 7 days.`);
+      extra.push(`${scope} is ${signed(detail.change1dPct)} over the last day and ${signed(detail.change7dPct)} over the last 7 days.`);
     } else if (detail.change1dPct !== null) {
-      extra.push(`On ${tvlChain} it is ${signed(detail.change1dPct)} over the last day.`);
+      extra.push(`${scope} is ${signed(detail.change1dPct)} over the last day.`);
     }
-    if (protocolTotalTvlUsd > 0 && tvlUsd >= 0) {
+    if (detail.chainsCount && !tvlChain) extra.push(`${protocolName} runs on ${detail.chainsCount} chains.`);
+    if (tvlChain && protocolTotalTvlUsd > 0 && tvlUsd >= 0) {
       const share = (tvlUsd / protocolTotalTvlUsd) * 100;
       extra.push(`That is ${share < 0.01 ? 'under 0.01' : share.toFixed(2)}% of ${protocolName}'s total value locked across all chains.`);
     }
-    if (detail.category) extra.push(`${protocolName} is a ${detail.category} protocol on DefiLlama.`);
+    if (detail.category) extra.push(`Its DefiLlama category is ${detail.category}.`);
   }
   extra.push('Source: DefiLlama (api.llama.fi), read at request time.');
   const summary = [headline, ...extra].join(' ');

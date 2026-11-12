@@ -227,5 +227,28 @@ test('tvl: "the Aave protocol on the Polygon network" is read as aave on Polygon
   assert.equal(body.tvl_usd, 134);
   assert.match(body.summary, /^Aave on Polygon has \$134\.00 TVL/);
   assert.match(body.summary, /up 11\.67% over the last day/);
-  assert.match(body.summary, /Lending protocol/);
+  assert.match(body.summary, /Its DefiLlama category is Lending/);
+});
+
+test('tvl: "all of DeFi" answers the market total and "the Solana blockchain" answers the chain', async (t) => {
+  resetDefiLlamaCache();
+  const day = 86400;
+  mockFetch(t, async (url) => {
+    if (url.includes('/v2/historicalChainTvl')) {
+      const pts = [];
+      for (let i = 0; i < 10; i += 1) pts.push({ date: 2_000_000 + i * day, tvl: 1000 + i * 10 });
+      return { status: 200, json: async () => pts };
+    }
+    if (url.includes('/v2/chains')) return { status: 200, json: async () => [{ name: 'Solana', tvl: 5000 }] };
+    return { status: 404, text: async () => 'not found' };
+  });
+  const base = startServer(t);
+  const defi = await (await fetch(`${base}/tvl?query=${encodeURIComponent('What is the total value locked across all of DeFi?')}`)).json();
+  assert.equal(defi.status, 'ok');
+  assert.equal(defi.query_type, 'defi_total');
+  assert.equal(defi.tvl_usd, 1090);
+  assert.match(defi.summary, /^DeFi has \$1090\.00 total value locked across all chains/);
+  const chain = await (await fetch(`${base}/tvl?query=${encodeURIComponent('What is the TVL of the Solana blockchain?')}`)).json();
+  assert.equal(chain.query_type, 'chain');
+  assert.equal(chain.tvl_usd, 5000);
 });
