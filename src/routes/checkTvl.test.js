@@ -210,3 +210,22 @@ test('tvl: a bare protocol slug is still passed through untouched', async (t) =>
   assert.equal((await res.json()).status, 'ok');
   assert.ok(requested.some((u) => u.includes('aave-v3')), 'the slug must be used as given');
 });
+
+test('tvl: "the Aave protocol on the Polygon network" is read as aave on Polygon', async (t) => {
+  resetDefiLlamaCache();
+  mockFetch(t, async (url) => {
+    if (url.includes('/protocol/')) {
+      return { status: 200, json: async () => ({ name: 'Aave', category: 'Lending', currentChainTvls: { Polygon: 134, Ethereum: 4000 }, chainTvls: { Polygon: { tvl: [{ date: 1000000, totalLiquidityUSD: 100 }, { date: 1000000 + 7 * 86400, totalLiquidityUSD: 120 }, { date: 1000000 + 8 * 86400, totalLiquidityUSD: 134 }] } } }) };
+    }
+    return { status: 200, text: async () => '5000' };
+  });
+  const base = startServer(t);
+  const res = await fetch(`${base}/tvl?query=${encodeURIComponent('What is the current Total Value Locked (TVL) for the Aave protocol on the Polygon network?')}`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.query, 'Aave:Polygon');
+  assert.equal(body.tvl_usd, 134);
+  assert.match(body.summary, /^Aave on Polygon has \$134\.00 TVL/);
+  assert.match(body.summary, /up 11\.67% over the last day/);
+  assert.match(body.summary, /Lending protocol/);
+});

@@ -198,3 +198,27 @@ test('MACRO_ECONOMIC_INDICATOR "economy growing" phrasing resolves to GDP growth
   const json = await res.json();
   assert.equal(json.status, 'ok');
 });
+
+test('MACRO_ECONOMIC_INDICATOR does not wait for a hanging World Bank when the IMF has answered', async (t) => {
+  const base = startServer(t);
+  __clearMacroCacheForTesting();
+  const original = globalThis.fetch;
+  const year = new Date().getUTCFullYear();
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith('https://api.worldbank.org')) {
+      return new Promise((resolve, reject) => init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
+    }
+    if (String(url).includes('imf.org')) {
+      return new Response(JSON.stringify({ values: { PCPIPCH: { JPN: { [year - 3]: 3.3, [year - 2]: 2.7, [year - 1]: 3.2 } } } }), { status: 200 });
+    }
+    return original(url, init);
+  };
+  t.after(() => { globalThis.fetch = original; __clearMacroCacheForTesting(); });
+  const started = Date.now();
+  const res = await fetch(`${base}/macro-economic-indicator?query=What+was+Japan+inflation+in+${year - 3}%3F`);
+  const json = await res.json();
+  assert.ok(Date.now() - started < 3_000, 'answered within the grace period, not the 5 second timeout');
+  assert.equal(json.status, 'ok');
+  assert.equal(json.value, 3.2);
+  assert.match(json.summary, new RegExp(`For ${year - 3} specifically, the annual figure was 3\.30%`));
+});

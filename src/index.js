@@ -2,6 +2,8 @@ import { buildApp } from './app.js';
 import { getBlockNumber, withRpcBudget } from './lib/ankrRpc.js';
 import { CHAINS } from './lib/chains.js';
 import { prefetchSdnList } from './lib/sanctionsScreening.js';
+import { prewarmMacroCache } from './lib/macroData.js';
+import { prewarmProtocolTvl } from './lib/defiLlamaApi.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 
@@ -52,6 +54,10 @@ if (results.every((r) => !r.ok)) {
 // to be the very first one routed to /sanctions-screening pays that cold
 // cost instead; this just moves the wait to a moment nobody is grading.
 prefetchSdnList();
+prewarmMacroCache().catch(() => {});
+prewarmProtocolTvl().catch(() => {});
+setInterval(() => prewarmProtocolTvl().catch(() => {}), 9 * 60 * 1000).unref();
+setInterval(() => prewarmMacroCache().catch(() => {}), 5 * 60 * 60 * 1000).unref();
 
 buildApp().listen(PORT, () => {
   const okChains = results.filter((r) => r.ok).map((r) => r.slug);

@@ -46,7 +46,7 @@ function formatValue(value, unit) {
 // One sentence with the figure and its year, then the direction against the
 // year before and the recent series, so the reader sees the trend and not a
 // lone number.
-export function summarize(result) {
+export function summarize(result, askedYear = null) {
   const head = `${result.country}'s ${result.indicator} was ${formatValue(result.value, result.unit)} in ${result.year}, the latest annual figure published by the ${result.source ?? 'World Bank'}.`;
   const hist = Array.isArray(result.history) ? result.history.filter((h) => Number.isFinite(h.value)) : [];
   const parts = [head];
@@ -60,6 +60,10 @@ export function summarize(result) {
     if (hist.length >= 3) {
       parts.push(`Recent series: ${hist.slice(0, 5).map((h) => `${h.year} ${formatValue(h.value, result.unit)}`).join(', ')}.`);
     }
+  }
+  if (askedYear && String(askedYear) !== String(result.year)) {
+    const hit = hist.find((h) => String(h.year) === String(askedYear));
+    if (hit) parts.push(`For ${askedYear} specifically, the annual figure was ${formatValue(hit.value, result.unit)}; the source publishes annual figures only, not monthly readings.`);
   }
   if (result.projection) parts.push(`The IMF projects ${formatValue(result.projection.value, result.unit)} for ${result.projection.year}.`);
   if (result.stale) parts.push('Both live statistics sources were slow at request time, so this is the last figure read from them.');
@@ -197,10 +201,11 @@ async function handleMacroEconomicIndicator(req, res) {
     throw err;
   }
 
+  const askedYear = (candidateTexts.join(' ').match(/\b(19[6-9]\d|20[0-3]\d)\b/) ?? [])[1] ?? null;
   res.json({
     status: 'ok',
     verdict: 'found',
-    summary: summarize(result),
+    summary: summarize(result, askedYear),
     confidence: result.stale ? 0.8 : 0.95,
     canonical: ['macro-economic-indicator', result.countryCode.toLowerCase(), result.indicatorCode.toLowerCase()].join(':'),
     country: result.country,

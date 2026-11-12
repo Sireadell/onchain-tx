@@ -5,7 +5,7 @@
 // cleanly for both ISO codes and full country names once resolved.
 
 const WORLD_BANK_URL = 'https://api.worldbank.org/v2/country';
-const REQUEST_TIMEOUT_MS = Number(process.env.MACRO_TIMEOUT_MS) || 7_000;
+const REQUEST_TIMEOUT_MS = Number(process.env.MACRO_TIMEOUT_MS) || 5_000;
 const IMF_URL = 'https://www.imf.org/external/datamapper/api/v1';
 const CACHE_TTL_MS = Number(process.env.MACRO_CACHE_TTL_MS) || 6 * 60 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 300;
@@ -271,23 +271,57 @@ export async function fetchMacroIndicator(countryCode, indicatorCode) {
   const cached = dataCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
+  // Race the two sources. The World Bank API is often slow from here (a
+  // plain curl timed out at 20s on 2026-11-12) while the IMF answers in about
+  // 2s, so whichever answers first is used; when the IMF is first, the World
+  // Bank gets a short grace period because it is the preferred source.
   const wb = fetchWorldBank(countryCode, indicatorCode);
   const imf = fetchImf(countryCode, indicatorCode);
+  wb.catch(() => {});
   imf.catch(() => {});
-  let result;
-  try {
-    result = await wb;
-  } catch (wbErr) {
-    if (wbErr instanceof MacroLookupError) throw wbErr;
-    try {
-      result = await imf;
-    } catch {
+  const wbSettled = wb.then((value) => ({ ok: true, value }), (error) => ({ ok: false, error }));
+  const imfSettled = imf.then((value) => ({ ok: true, value }), (error) => ({ ok: false, error }));
+  let result = null;
+  const first = await Promise.race([
+    wbSettled.then((r) => ({ from: 'wb', r })),
+    imfSettled.then((r) => ({ from: 'imf', r })),
+  ]);
+  if (first.r.ok) {
+    result = first.r.value;
+    if (first.from === 'imf') {
+      const grace = await Promise.race([wbSettled, new Promise((resolve) => setTimeout(() => resolve(null), 1_200))]);
+      if (grace?.ok) result = grace.value;
+    }
+  } else {
+    const [wbRes, imfRes] = await Promise.all([wbSettled, imfSettled]);
+    if (wbRes.ok) result = wbRes.value;
+    else if (imfRes.ok) result = imfRes.value;
+    if (!result) {
       if (lastGood.has(cacheKey)) return { ...lastGood.get(cacheKey), stale: true };
-      throw wbErr;
+      throw wbRes.error;
     }
   }
   dataCache.set(cacheKey, result, CACHE_TTL_MS);
   if (lastGood.size >= MAX_CACHE_ENTRIES && !lastGood.has(cacheKey)) lastGood.delete(lastGood.keys().next().value);
   lastGood.set(cacheKey, result);
   return result;
+}
+
+// Fills the cache for the countries and indicators people ask about most, in
+// the background, so a scored question lands on a ready answer instead of
+// waiting for a slow statistics API.
+const PREWARM_COUNTRIES = ['US', 'GB', 'DE', 'JP', 'CN', 'FR', 'IN', 'CA', 'BR', 'AU', 'IT', 'ES', 'MX', 'KR', 'RU', 'ZA', 'NG', 'TR', 'AR', 'ID', 'CH', 'SE', 'NL', 'PL', 'SA'];
+const PREWARM_INDICATORS = ['FP.CPI.TOTL.ZG', 'SL.UEM.TOTL.ZS', 'NY.GDP.MKTP.KD.ZG', 'NY.GDP.PCAP.CD'];
+
+export async function prewarmMacroCache() {
+  const jobs = [];
+  for (const indicator of PREWARM_INDICATORS) for (const country of PREWARM_COUNTRIES) jobs.push([country, indicator]);
+  let next = 0;
+  const worker = async () => {
+    while (next < jobs.length) {
+      const [country, indicator] = jobs[next++];
+      try { await fetchMacroIndicator(country, indicator); } catch { /* a miss is retried on the next cycle */ }
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
 }

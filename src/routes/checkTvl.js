@@ -18,7 +18,7 @@
 import { Router } from 'express';
 import {
   getProtocolTvl,
-  getProtocolChainTvl,
+  getProtocolChainDetail,
   getChainTvl,
   protocolDisplayName,
   ProtocolNotFoundError,
@@ -31,6 +31,25 @@ import { resolveChainLoose } from '../lib/chains.js';
 import { describeAddressMiss, ADDRESS_RE } from '../lib/addressContext.js';
 
 const router = Router();
+
+// A chain written as "the Polygon network" or "Ethereum mainnet" is the chain
+// "Polygon" or "Ethereum"; a protocol written as "the Aave protocol" is "Aave".
+// Found live 2026-11-12: a scored question read "for the Aave protocol on the
+// Polygon network" and was looked up as the chain "the Polygon network", so it
+// answered not_found.
+export function cleanChainName(value) {
+  if (typeof value !== 'string') return value;
+  const cleaned = value.trim().replace(/[?.!]+$/, '').replace(/^(?:the|on|in)\s+/i, '')
+    .replace(/\s+(?:network|chain|blockchain|mainnet|ecosystem|layer[\s-]?[12]|l[12])$/i, '').trim();
+  return cleaned || value;
+}
+
+export function cleanProtocolName(value) {
+  if (typeof value !== 'string') return value;
+  const cleaned = value.trim().replace(/[?.!]+$/, '').replace(/^(?:the)\s+/i, '')
+    .replace(/\s+(?:protocol|dex|platform|dapp|finance protocol)$/i, '').trim();
+  return cleaned || value;
+}
 
 export function extractTvlProtocol(question) {
   if (typeof question !== 'string') return null;
@@ -64,7 +83,7 @@ async function handleTvl(req, res) {
   // " Base " got the right number reported under a ragged name.
   const rawProtocol = typeof params?.protocol === 'string' ? params.protocol.trim() : params?.protocol;
   const suppliedChain = firstUsableValue(params?.tvl_chain, params?.chain);
-  const rawTvlChain = typeof suppliedChain === 'string' ? suppliedChain.trim() : suppliedChain;
+  const rawTvlChain = typeof suppliedChain === 'string' ? cleanChainName(suppliedChain) : suppliedChain;
   // Free-text fallback. "How much TVL does Curve have on Ethereum?" arrives
   // as a question rather than protocol=curve&tvl_chain=Ethereum, and this
   // route used to answer invalid_input to all of it. The question reduces
@@ -93,8 +112,8 @@ async function handleTvl(req, res) {
   // 2026-09-14 verifying the empty-parameter fix: protocol= with
   // query="What is the TVL of Uniswap?" refused, while omitting protocol
   // entirely answered correctly.
-  const protocol = firstUsableValue(usableProtocol, split ? split[1].trim() : subject);
-  const tvlChain = rawTvlChain ?? (split ? split[2].trim() : undefined);
+  const protocol = cleanProtocolName(firstUsableValue(usableProtocol, split ? split[1].trim() : subject));
+  const tvlChain = rawTvlChain ?? (split ? cleanChainName(split[2]) : undefined);
 
   if (!protocol && !tvlChain) {
     return respondUnusableInput(
@@ -107,13 +126,15 @@ async function handleTvl(req, res) {
   const query = protocol && tvlChain ? `${protocol}:${tvlChain}` : protocol ?? tvlChain;
 
   let tvlUsd;
+  let detail = null;
   let protocolTotalTvlUsd = null;
   try {
     if (protocol && tvlChain) {
-      [tvlUsd, protocolTotalTvlUsd] = await Promise.all([
-        getProtocolChainTvl(protocol, tvlChain),
-        getProtocolTvl(protocol),
+      [detail, protocolTotalTvlUsd] = await Promise.all([
+        getProtocolChainDetail(protocol, tvlChain),
+        getProtocolTvl(protocol).catch(() => null),
       ]);
+      tvlUsd = detail.value;
     } else {
       tvlUsd = protocol ? await getProtocolTvl(protocol) : await getChainTvl(tvlChain);
     }
@@ -181,9 +202,28 @@ async function handleTvl(req, res) {
   // all-chain total stays in protocol_total_tvl_usd and is never put in its
   // place (answering "Aave on Polygon" with Aave's total across every chain
   // states a number about a different question).
-  const summary = protocol && tvlChain
+  // The sentences after the figure add context in percentages and counts, never
+  // a second dollar amount, so the one dollar figure in the answer is the one
+  // that was asked for.
+  const headline = protocol && tvlChain
     ? `${protocolName} on ${tvlChain} has $${tvlUsd.toFixed(2)} TVL according to DefiLlama.`
     : `${protocolName ?? query} has $${tvlUsd.toFixed(2)} TVL according to DefiLlama.`;
+  const extra = [];
+  const signed = (n) => `${n >= 0 ? 'up' : 'down'} ${Math.abs(n).toFixed(2)}%`;
+  if (detail) {
+    if (detail.change1dPct !== null && detail.change7dPct !== null) {
+      extra.push(`On ${tvlChain} it is ${signed(detail.change1dPct)} over the last day and ${signed(detail.change7dPct)} over the last 7 days.`);
+    } else if (detail.change1dPct !== null) {
+      extra.push(`On ${tvlChain} it is ${signed(detail.change1dPct)} over the last day.`);
+    }
+    if (protocolTotalTvlUsd > 0 && tvlUsd >= 0) {
+      const share = (tvlUsd / protocolTotalTvlUsd) * 100;
+      extra.push(`That is ${share < 0.01 ? 'under 0.01' : share.toFixed(2)}% of ${protocolName}'s total value locked across all chains.`);
+    }
+    if (detail.category) extra.push(`${protocolName} is a ${detail.category} protocol on DefiLlama.`);
+  }
+  extra.push('Source: DefiLlama (api.llama.fi), read at request time.');
+  const summary = [headline, ...extra].join(' ');
   res.json({
     query_type: queryType,
     query,
@@ -193,6 +233,10 @@ async function handleTvl(req, res) {
     canonical: [queryType, query, Math.round(tvlUsd)].join(':'),
     tvl_usd: tvlUsd,
     chain_tvl_usd: protocol && tvlChain ? tvlUsd : null,
+    change_1d_pct: detail?.change1dPct ?? null,
+    change_7d_pct: detail?.change7dPct ?? null,
+    category: detail?.category ?? null,
+    source: 'DefiLlama',
     protocol_total_tvl_usd: protocolTotalTvlUsd,
     protocol: protocol ?? null,
     tvl_chain: tvlChain ?? null,

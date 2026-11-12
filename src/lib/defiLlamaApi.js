@@ -10,11 +10,15 @@ import { checkBudget } from './ankrRpc.js';
 
 const DEFILLAMA_CALL_TIMEOUT_MS = Number(process.env.DEFILLAMA_CALL_TIMEOUT_MS) || 8_000;
 const RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
-const PROTOCOL_CACHE_TTL_MS = Number(process.env.DEFILLAMA_PROTOCOL_CACHE_TTL_MS) || 30_000;
+const PROTOCOL_CACHE_TTL_MS = Number(process.env.DEFILLAMA_PROTOCOL_CACHE_TTL_MS) || 10 * 60_000;
 const CHAIN_LIST_CACHE_TTL_MS = Number(process.env.DEFILLAMA_CHAIN_CACHE_TTL_MS) || 30_000;
 const MAX_CACHE_ENTRIES = 500;
 
 const protocolCache = new Map();
+// Parsed /protocol/{slug} responses. That response is about 11 MB for a large
+// protocol and takes 3 to 17 seconds, so each one is parsed once, kept for the
+// cache lifetime and refreshed in the background by prewarmProtocolTvl.
+const protocolBodyCache = new Map();
 let chainListCache = null;
 let protocolListCache = null;
 const priceCache = new Map();
@@ -103,6 +107,7 @@ function isRetryableFailure(statusCode, errName) {
 
 export function resetDefiLlamaCache() {
   protocolCache.clear();
+  protocolBodyCache.clear();
   chainListCache = null;
   protocolListCache = null;
   priceCache.clear();
@@ -240,15 +245,21 @@ export async function getProtocolTvl(rawSlug) {
 // protocol TVL available separately. DefiLlama's /tvl/{slug} endpoint is
 // aggregate-only, so questions such as "Aave V3 on Ethereum" require the
 // richer /protocol/{slug} response and its currentChainTvls map.
-export async function getProtocolChainTvl(rawSlug, rawChainName) {
-  const trimmedSlug = String(rawSlug).trim();
-  const trimmedChain = String(rawChainName).trim();
-  const slug = PROTOCOL_ALIASES[trimmedSlug.toLowerCase()] ?? trimmedSlug;
-  const chainName = CHAIN_ALIASES[trimmedChain.toLowerCase()] ?? trimmedChain;
-  const key = `protocol-chain:${slug}:${chainName.toLowerCase()}`;
-  const hit = protocolCache.get(key);
-  if (hit && Date.now() - hit.storedAt < PROTOCOL_CACHE_TTL_MS) return hit.value;
+function changePct(points, secondsBack) {
+  if (!Array.isArray(points) || points.length < 2) return null;
+  const last = points[points.length - 1];
+  const target = last.date - secondsBack;
+  let ref = null;
+  for (let i = points.length - 2; i >= 0; i -= 1) {
+    if (points[i].date <= target) { ref = points[i]; break; }
+  }
+  if (!ref || !ref.totalLiquidityUSD) return null;
+  return ((last.totalLiquidityUSD - ref.totalLiquidityUSD) / ref.totalLiquidityUSD) * 100;
+}
 
+async function loadProtocolBody(rawSlug, slug) {
+  const hit = protocolBodyCache.get(slug);
+  if (hit && Date.now() - hit.storedAt < PROTOCOL_CACHE_TTL_MS) return hit.value;
   let res = await fetchDefiLlama('api.llama.fi', `/protocol/${encodeURIComponent(slug)}`);
   if (res.status !== 200) {
     const resolved = await resolveProtocolSlug(slug);
@@ -258,8 +269,33 @@ export async function getProtocolChainTvl(rawSlug, rawChainName) {
     throw new ProtocolNotFoundError(`no DefiLlama protocol found for slug '${rawSlug}'`);
   }
   const body = await res.json();
-  const entries = Object.entries(body?.currentChainTvls ?? {});
-  const match = entries.find(([name, value]) =>
+  const history = {};
+  for (const [name, data] of Object.entries(body?.chainTvls ?? {})) {
+    if (Array.isArray(data?.tvl)) history[name.toLowerCase()] = data.tvl.slice(-10);
+  }
+  const value = {
+    name: body?.name ?? null,
+    symbol: body?.symbol ?? null,
+    category: body?.category ?? null,
+    url: body?.url ?? null,
+    chainsCount: Object.keys(body?.currentChainTvls ?? {}).filter((n) => !/-(borrowed|staking|pool2)$/i.test(n) && n !== 'borrowed' && n !== 'staking' && n !== 'pool2').length || null,
+    current: Object.entries(body?.currentChainTvls ?? {}),
+    history,
+  };
+  protocolBodyCache.set(slug, { value, storedAt: Date.now() });
+  if (protocolBodyCache.size > 60) protocolBodyCache.delete(protocolBodyCache.keys().next().value);
+  return value;
+}
+
+// One protocol on one chain, with the context around the figure: the share of
+// the protocol's all-chain total it is, and the 1 day and 7 day change.
+export async function getProtocolChainDetail(rawSlug, rawChainName) {
+  const trimmedSlug = String(rawSlug).trim();
+  const trimmedChain = String(rawChainName).trim();
+  const slug = PROTOCOL_ALIASES[trimmedSlug.toLowerCase()] ?? trimmedSlug;
+  const chainName = CHAIN_ALIASES[trimmedChain.toLowerCase()] ?? trimmedChain;
+  const body = await loadProtocolBody(rawSlug, slug);
+  const match = body.current.find(([name, value]) =>
     !name.toLowerCase().endsWith('-borrowed')
     && name.toLowerCase() === chainName.toLowerCase()
     && typeof value === 'number'
@@ -267,10 +303,39 @@ export async function getProtocolChainTvl(rawSlug, rawChainName) {
   if (!match) {
     throw new ChainNotFoundError(`protocol '${rawSlug}' has no DefiLlama TVL for chain '${rawChainName}'`);
   }
-  const value = match[1];
-  protocolCache.set(key, { value, storedAt: Date.now() });
-  if (protocolCache.size > MAX_CACHE_ENTRIES) protocolCache.delete(protocolCache.keys().next().value);
-  return value;
+  const points = body.history[match[0].toLowerCase()];
+  return {
+    value: match[1],
+    chainLabel: match[0],
+    name: body.name,
+    symbol: body.symbol,
+    category: body.category,
+    url: body.url,
+    chainsCount: body.chainsCount,
+    change1dPct: changePct(points, 86_400 - 3_600),
+    change7dPct: changePct(points, 7 * 86_400 - 3_600),
+  };
+}
+
+export async function getProtocolChainTvl(rawSlug, rawChainName) {
+  return (await getProtocolChainDetail(rawSlug, rawChainName)).value;
+}
+
+// Fills the caches for the protocols people ask about most, so a question
+// does not wait on the large /protocol response.
+const PREWARM_PROTOCOLS = ['aave', 'uniswap', 'curve-finance', 'lido', 'makerdao', 'compound-finance', 'pancakeswap', 'sushiswap', 'balancer', 'convex-finance'];
+export async function prewarmProtocolTvl() {
+  let next = 0;
+  const worker = async () => {
+    while (next < PREWARM_PROTOCOLS.length) {
+      const slug = PREWARM_PROTOCOLS[next++];
+      try {
+        await loadProtocolBody(slug, PROTOCOL_ALIASES[slug] ?? slug);
+        await getProtocolTvl(slug);
+      } catch { /* retried on the next cycle */ }
+    }
+  };
+  await Promise.all([worker(), worker()]);
 }
 
 // Returns current TVL in USD for a chain name (e.g. "Ethereum", matched
