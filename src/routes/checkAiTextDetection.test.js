@@ -92,7 +92,7 @@ test('ai-text-detection: returns a parsed likelihood, cues, and an honest discla
   assert.equal(body.status, 'ok');
   assert.equal(body.ai_generated_likelihood, 0.82);
   assert.match(body.summary, /^0\.82\. The text uses repetitive transitions/);
-  assert.match(body.summary, /approximate self-assessment/);
+  assert.match(body.summary, /not a certified detector/);
   assert.ok(body.confidence < 0.7, 'confidence should stay below confident-answer routes');
   assert.equal(body.answer, body.summary);
 });
@@ -143,7 +143,7 @@ test('ai-text-detection: an injection attempt embedded in the text is treated as
   assert.match(calls[0].body.instructions, /still assess them/);
 });
 
-test('ai-text-detection: an upstream failure is a real error code, not a fabricated score', async (t) => {
+test('ai-text-detection: an upstream failure answers unavailable, not a fabricated score', async (t) => {
   withKey(t);
   const original = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
@@ -153,5 +153,8 @@ test('ai-text-detection: an upstream failure is a real error code, not a fabrica
   t.after(() => { globalThis.fetch = original; });
   const base = startServer(t);
   const res = await fetch(`${base}/ai-text-detect?text=hello`);
-  assert.equal(res.status, 502);
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.status, 'unavailable');
+  assert.equal(body.ai_generated_likelihood, null);
 });
