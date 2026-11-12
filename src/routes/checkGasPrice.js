@@ -14,7 +14,7 @@
 // shouldn't take out a signal that doesn't depend on it.
 
 import { Router } from 'express';
-import { getGasPrice, getBlockNumber, withRpcBudget } from '../lib/ankrRpc.js';
+import { getGasPrice, getBlockNumber, getBlockByNumber, withRpcBudget } from '../lib/ankrRpc.js';
 import { getCoinPrice } from '../lib/defiLlamaApi.js';
 import { DEFAULT_CHAIN, resolveChainLoose, resolveRpcChainLoose, rpcChainNames } from '../lib/chains.js';
 import { freeTextParam, firstUsableValue } from '../lib/entityExtract.js';
@@ -26,6 +26,19 @@ import {
 } from '../lib/nonEvmGas.js';
 
 const STANDARD_TRANSFER_GAS_UNITS = 21_000;
+const CHAIN_IDS = { eth: 1, base: 8453, arbitrum: 42161, optimism: 10, polygon: 137, avalanche: 43114 };
+
+// A plain word for what a standard transfer costs, so the answer states a
+// verdict and not only a number. Thresholds are on the USD cost of a
+// 21000-gas transfer, which is comparable across chains.
+export function feeLevel(feeUsd) {
+  if (!Number.isFinite(feeUsd)) return null;
+  if (feeUsd < 0.01) return 'very low';
+  if (feeUsd < 0.1) return 'low';
+  if (feeUsd < 1) return 'moderate';
+  if (feeUsd < 5) return 'high';
+  return 'very high';
+}
 
 const router = Router();
 
@@ -156,10 +169,12 @@ async function handleGasPrice(req, res) {
 
   let gasPriceHex;
   let blockNumberHex;
+  let latestBlock = null;
   try {
-    [gasPriceHex, blockNumberHex] = await Promise.all([
+    [gasPriceHex, blockNumberHex, latestBlock] = await Promise.all([
       getGasPrice(chain.segment),
       getBlockNumber(chain.segment).catch(() => null),
+      getBlockByNumber(chain.segment).catch(() => null),
     ]);
   } catch (err) {
     return unavailable(res, chain.label, err);
@@ -213,13 +228,41 @@ async function handleGasPrice(req, res) {
     ? `${chain.label} gas price: ${gas_price_gwei} gwei. A standard ${STANDARD_TRANSFER_GAS_UNITS}-gas transfer costs about $${fee_usd.toFixed(4)} USD. ${observedAt}`
     : `${chain.label} gas price: ${gas_price_gwei} gwei. ${observedAt}`;
 
+  // Context after the figure: what the latest block pays as base fee and tip,
+  // how full it is, and a plain level word. Read from the block header, so
+  // none of it is estimated.
+  const baseFeeWei = latestBlock?.baseFeePerGas ? safeBigIntFromHex(latestBlock.baseFeePerGas) : null;
+  const baseFeeGwei = baseFeeWei !== null ? Number(baseFeeWei) / 1e9 : null;
+  const tipGwei = baseFeeGwei !== null ? Math.max(0, gas_price_gwei - baseFeeGwei) : null;
+  const gasUsed = latestBlock?.gasUsed ? Number(safeBigIntFromHex(latestBlock.gasUsed)) : null;
+  const gasLimit = latestBlock?.gasLimit ? Number(safeBigIntFromHex(latestBlock.gasLimit)) : null;
+  const fullnessPct = gasUsed !== null && gasLimit ? (gasUsed / gasLimit) * 100 : null;
+  const txCount = Array.isArray(latestBlock?.transactions) ? latestBlock.transactions.length : null;
+  const level = feeLevel(fee_usd);
+  const chainId = CHAIN_IDS[chain.key] ?? null;
+  const more = [];
+  if (level) more.push(`Fee level: ${level} for a standard transfer on ${chain.label}.`);
+  if (baseFeeGwei !== null) {
+    more.push(`The latest block${block_number != null ? ` (number ${block_number})` : ''} has a base fee of ${baseFeeGwei} gwei, which leaves a priority tip of about ${tipGwei.toFixed(4)} gwei${fullnessPct !== null ? `, and it is ${fullnessPct.toFixed(1)}% full` : ''}${txCount !== null ? ` with ${txCount} transactions` : ''}.`);
+  } else if (block_number != null) {
+    more.push(`Read at ${chain.label} block ${block_number}.`);
+  }
+  if (chainId) more.push(`${chain.label} is chain ID ${chainId} and pays gas in ${chain.nativeSymbol}.`);
+  const fullSummary = [summary.slice(0, summary.length - observedAt.length).trim(), ...more, observedAt].join(' ');
+
   res.json({
     chain: chainParam,
     status: 'ok',
     verdict: 'found',
-    summary,
+    level,
+    summary: fullSummary,
     confidence: 1.0,
     canonical,
+    chain_id: chainId,
+    base_fee_gwei: baseFeeGwei,
+    priority_fee_gwei: tipGwei,
+    block_fullness_pct: fullnessPct,
+    symbol: chain.nativeSymbol,
     gas_price_wei,
     gas_price_gwei,
     fee_usd,

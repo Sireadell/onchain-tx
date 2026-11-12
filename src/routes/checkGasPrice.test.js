@@ -278,7 +278,7 @@ test('gas-price: price lookup failure still returns gas price, fee_usd null', as
   // The USD sentence drops out when pricing is unavailable, but the
   // observation time must survive on this branch too. Without it the
   // champion scorer returns 0 no matter how correct the gwei figure is.
-  assert.match(body.summary, /^Ethereum gas price: 1 gwei\. Observed at: [^ ]+Z\.$/);
+  assert.match(body.summary, /^Ethereum gas price: 1 gwei\. .*Observed at: [^ ]+Z\.$/);
   assert.ok(body.summary.includes(body.as_of));
 });
 
@@ -341,4 +341,24 @@ test('gas-price: Avalanche is served, not refused as unsupported', async (t) => 
   assert.notEqual(body.status, 'invalid_input');
   assert.equal(body.gas_price_wei, '25000000000');
   assert.equal(body.gas_price_gwei, 25);
+});
+
+test('gas-price: reports base fee, tip, block fullness and a fee level from the latest block', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  resetRpcCache();
+  resetDefiLlamaCache();
+  mockFetchWithPrice(t, async (url, options) => {
+    const { method } = JSON.parse(options.body);
+    let result = '0x100';
+    if (method === 'eth_gasPrice') result = '0x3b9aca00';
+    if (method === 'eth_getBlockByNumber') result = { baseFeePerGas: '0x2faf0800', gasUsed: '0x7a1200', gasLimit: '0xf42400', transactions: ['0x1', '0x2', '0x3'] };
+    return { ok: true, status: 200, json: async () => ({ jsonrpc: '2.0', id: 1, result }) };
+  }, 2000);
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/gas-price?chain=eth`)).json();
+  assert.equal(body.base_fee_gwei, 0.8);
+  assert.equal(body.level, 'low');
+  assert.match(body.summary, /Fee level: low/);
+  assert.match(body.summary, /base fee of 0\.8 gwei, which leaves a priority tip of about 0\.2000 gwei, and it is 50\.0% full with 3 transactions/);
+  assert.match(body.summary, /chain ID 1/);
 });
