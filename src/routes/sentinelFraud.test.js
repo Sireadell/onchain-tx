@@ -1,4 +1,5 @@
 import test from 'node:test';
+import '../sentinel/fetchShim.js';
 import assert from 'node:assert/strict';
 import { buildApp } from '../app.js';
 

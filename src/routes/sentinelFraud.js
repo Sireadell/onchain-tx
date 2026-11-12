@@ -1,6 +1,8 @@
 import express from 'express';
 import { respondUnusableInput } from '../lib/unusableInput.js';
 import { extractAddress, freeTextParam } from '../lib/entityExtract.js';
+import { handleWithBudget } from '../sentinel/routes/assessWallet.js';
+import { handleFraudQuery } from '../sentinel/routes/fraudQuery.js';
 
 const router = express.Router();
 const DEFAULT_SENTINEL_BASE_URL = 'https://telegraph-sentinel-40vp.onrender.com';
@@ -57,6 +59,33 @@ function respondSentinelUnavailable(res, detail) {
     confidence: 0,
   });
 }
+
+// Runs the in-process Sentinel handler with a minimal request and a response
+// that records what the handler sends, and returns it in the shape the proxy
+// code below expects: { status, ok, text }.
+function runEngine(path, method, target, body, signal) {
+  const query = Object.fromEntries(target.searchParams.entries());
+  const handler = path === '/fraud-query' ? handleFraudQuery : handleWithBudget;
+  return new Promise((resolve, reject) => {
+    let status = 200;
+    const done = (payload) => resolve({
+      status,
+      ok: status >= 200 && status < 300,
+      text: payload === undefined ? '' : JSON.stringify(payload),
+    });
+    const res = {
+      headersSent: false,
+      status(code) { status = code; return res; },
+      json(payload) { res.headersSent = true; done(payload); return res; },
+      sendStatus(code) { status = code; res.headersSent = true; done(undefined); return res; },
+    };
+    signal.addEventListener('abort', () => reject(Object.assign(new Error('timeout'), { name: 'AbortError' })));
+    Promise.resolve(handler({ method, query, body }, res)).catch(reject);
+  });
+}
+
+// Seam so tests can stand in for the engine.
+export const engine = { run: runEngine };
 
 async function proxySentinel(req, res, path) {
   const controller = new AbortController();
@@ -119,14 +148,11 @@ async function proxySentinel(req, res, path) {
       }
     }
 
-    const upstream = await fetch(target, {
-      method: req.method,
-      headers: req.method === 'POST' ? { 'content-type': 'application/json' } : undefined,
-      body: req.method === 'POST' ? JSON.stringify(outgoingBody) : undefined,
-      signal: controller.signal,
-    });
-
-    const raw = await upstream.text();
+    // The engine now lives inside this service (src/sentinel), so the
+    // request runs in-process instead of crossing the internet to a
+    // separate Sentinel deployment.
+    const upstream = await engine.run(path, req.method, target, outgoingBody, controller.signal);
+    const raw = upstream.text;
     if (!raw) {
       if (upstream.status === 400 || upstream.status === 422) {
         return respondUnusableInput(
