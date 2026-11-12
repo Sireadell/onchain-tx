@@ -39,6 +39,12 @@ function parseBlock(value, text) {
   if (raw !== undefined && !/^latest$/i.test(String(raw).trim())) {
     const digits = String(raw).replace(/[,_\s]/g, '');
     if (/^0x[0-9a-f]+$/i.test(digits) || /^\d+$/.test(digits)) return BigInt(digits).toString();
+    // The request builder writes large block numbers in exponent form
+    // ("1.8e+07"); found live, every such request was read at the latest block.
+    if (/^\d+(?:\.\d+)?e\+?\d+$/i.test(digits)) {
+      const n = Number(digits);
+      if (Number.isSafeInteger(n) && n > 0) return String(n);
+    }
   }
   const m = String(text ?? '').match(/\bblock(?:\s+(?:number|height))?\s*#?\s*([\d,_]{4,})/i);
   return m ? m[1].replace(/[,_]/g, '') : 'latest';
@@ -67,6 +73,67 @@ async function readSupply(chain, token, block) {
   return { supply: decodeUint(supplyHex), decimals: decodeUint(decimalsHex), symbol: decodeAbiString(symbolHex) };
 }
 
+// Native coins have no token contract and no totalSupply() to call.
+const NATIVE = {
+  eth: { id: 'ethereum', symbol: 'ETH', name: 'Ether' },
+  ether: { id: 'ethereum', symbol: 'ETH', name: 'Ether' },
+  ethereum: { id: 'ethereum', symbol: 'ETH', name: 'Ether' },
+  pol: { id: 'polygon-ecosystem-token', symbol: 'POL', name: 'POL' },
+  matic: { id: 'polygon-ecosystem-token', symbol: 'POL', name: 'POL' },
+  avax: { id: 'avalanche-2', symbol: 'AVAX', name: 'AVAX' },
+};
+
+async function nativeSupply(id) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6_000);
+  try {
+    const res = await fetch(`https://api.coingecko.com/api/v3/coins/${id}?localization=false&tickers=false&community_data=false&developer_data=false&sparkline=false`, { signal: controller.signal, headers: { Accept: 'application/json' } });
+    if (!res.ok) return null;
+    const body = await res.json();
+    const m = body?.market_data;
+    if (!Number.isFinite(m?.total_supply)) return null;
+    return { total: m.total_supply, circulating: m.circulating_supply ?? null, max: m.max_supply ?? null, updated: body.last_updated ?? null };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function answerNative(res, chain, native, block) {
+  const supply = await nativeSupply(native.id);
+  const blockNote = block !== 'latest'
+    ? ` A supply at block ${block} is not stated: native ${native.symbol} has no contract whose state can be read at a past block, and issuance minus burn per block is not reconstructed here.`
+    : '';
+  if (!supply) {
+    return res.json({
+      status: 'unavailable', verdict: 'unavailable', chain: chain.key, token: native.symbol, symbol: native.symbol,
+      summary: `${native.symbol} is the native coin of ${chain.label}, so it has no token contract or totalSupply() call; the supply tracker did not answer at request time, so no figure is stated.${blockNote}`,
+      confidence: 0.3, total_supply: null, block, checked_at: new Date().toISOString(),
+    });
+  }
+  const whole = Math.round(supply.total).toLocaleString('en-US');
+  return res.json({
+    status: 'ok',
+    verdict: 'found',
+    summary: `The total supply of ${native.symbol} (${native.name}, the native coin of ${chain.label}) is ${whole} ${native.symbol} as of ${supply.updated ?? 'request time'}${supply.max ? `, against a maximum of ${Math.round(supply.max).toLocaleString('en-US')}` : ', with no fixed maximum'}. Native ${native.symbol} has no token contract, so it is read from CoinGecko's supply tracker rather than a totalSupply() call.${blockNote}`,
+    confidence: block === 'latest' ? 0.9 : 0.6,
+    canonical: ['token-total-supply', chain.key, native.symbol.toLowerCase(), 'native', Math.round(supply.total)].join(':'),
+    chain: chain.key,
+    token: native.symbol,
+    symbol: native.symbol,
+    native: true,
+    decimals: 18,
+    total_supply: String(supply.total),
+    circulating_supply: supply.circulating,
+    max_supply: supply.max,
+    block: 'latest',
+    requested_block: block,
+    source: 'CoinGecko supply tracker',
+    checked_at: new Date().toISOString(),
+  });
+}
+
 async function handleTokenTotalSupply(req, res) {
   const params = (req.method === 'GET' ? req.query : req.body) ?? {};
   const text = freeTextParam(params) ?? '';
@@ -83,11 +150,14 @@ async function handleTokenTotalSupply(req, res) {
     const named = tokenFromText(`${tokenRaw ?? ''} ${text}`, chain.key);
     if (named?.address) { token = named.address; knownSymbol = named.symbol; }
   }
+  const block = parseBlock(firstUsableValue(params.block, params.block_number, params.blockNumber, params.height), text);
+
   if (!token) {
+    const word = String(tokenRaw ?? '').trim().toLowerCase();
+    const native = NATIVE[word] ?? (!tokenRaw ? NATIVE[(/\b(eth|ether|matic|pol|avax)\b/i.exec(text)?.[1] ?? '').toLowerCase()] : null);
+    if (native) return answerNative(res, chain, native, block);
     return respondUnusableInput(res, 'I cannot read a total supply because no token contract was supplied. Pass token as a 0x contract address, or a well-known symbol such as USDC.');
   }
-
-  const block = parseBlock(firstUsableValue(params.block, params.block_number, params.blockNumber, params.height), text);
 
   let read;
   let blockUsed = block;

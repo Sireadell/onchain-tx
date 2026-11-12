@@ -17,7 +17,7 @@ import { lookupMethodSignature } from '../lib/fourByte.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 import { extractTxHash, freeTextParam, firstUsableValue } from '../lib/entityExtract.js';
 import { amountToDecimalString } from '../lib/formatAmount.js';
-import { safeBigIntFromWei } from '../lib/safeBigInt.js';
+import { safeBigIntFromWei, safeBigIntFromHex } from '../lib/safeBigInt.js';
 import { knownTokenByAddress, readTokenMeta, decodeTokenTransfer } from '../lib/knownTokens.js';
 
 const router = Router();
@@ -37,6 +37,29 @@ export async function handleCheckTx(req, res) {
   // callers. An explicit but unrecognized chain is a validation error, not
   // a silent fallback.
   const chainParam = firstUsableValue(params?.chain, resolveChainLoose(question ?? '')?.key, DEFAULT_CHAIN);
+
+  // A 0x string of the wrong length is not a hash any chain could hold. Say
+  // that as the answer (no such transaction exists) rather than refusing.
+  const nearHash = typeof rawTxHash === 'string' ? /\b0x[0-9a-fA-F]{40,80}\b/.exec(rawTxHash)?.[0] : null;
+  if (!txHash && nearHash) {
+    const digits = nearHash.length - 2;
+    const label = resolveChainLoose(chainParam)?.label ?? chainParam;
+    return res.json({
+      tx_hash: nearHash,
+      chain: chainParam,
+      status: 'not_found',
+      verdict: 'not_found',
+      summary: `No transaction exists with hash ${nearHash} on ${label}: it has ${digits} hexadecimal characters where a transaction hash has exactly 64, so no block can contain it. A valid hash is 0x followed by 64 hexadecimal characters.`,
+      confidence: 0.95,
+      found: false,
+      hex_length: digits,
+      from: null,
+      to: null,
+      value_wei: null,
+      block_number: null,
+      receipt_status: null,
+    });
+  }
 
   if (!txHash) {
     const problem = rawTxHash
@@ -100,6 +123,20 @@ export async function handleCheckTx(req, res) {
   }
 
   const result = evaluateTransaction({ tx, receipt, currentBlockNumberHex });
+  let alsoChecked = [];
+  let foundElsewhere = null;
+  if (result.status === 'not_found') {
+    // A hash missing here is often a transaction on another chain. Look on
+    // the other indexed chains before saying it does not exist.
+    const others = rpcChainNames().map((n) => resolveRpcChainLoose(n)).filter((c) => c && c.key !== chain.key);
+    const hits = await Promise.all(others.map(async (c) => ({ c, tx: await getTransactionByHash(c.segment, txHash).catch(() => undefined) })));
+    alsoChecked = hits.filter((h) => h.tx !== undefined).map((h) => h.c.label);
+    foundElsewhere = hits.find((h) => h.tx)?.c ?? null;
+    const head = currentBlockNumberHex ? Number(safeBigIntFromHex(currentBlockNumberHex)) : null;
+    result.summary = foundElsewhere
+      ? `Transaction ${txHash} is not on ${chain.label}${head ? ` (checked up to block ${head})` : ''}; it exists on ${foundElsewhere.label}. Ask with chain=${foundElsewhere.key} for its status, sender, recipient and value.`
+      : `No transaction with hash ${txHash} exists on ${chain.label}${head ? ` as of block ${head}` : ''}${alsoChecked.length ? `, and it is not on ${alsoChecked.join(', ')} either` : ''}. A hash no node knows was never broadcast, was dropped before being mined, or is mistyped.`;
+  }
   const method_selector = tx?.input && tx.input !== '0x' ? tx.input.slice(0, 10).toLowerCase() : null;
   const method_signature = await lookupMethodSignature(tx?.input);
   const method = method_signature?.split('(')[0] ?? null;
@@ -181,6 +218,7 @@ export async function handleCheckTx(req, res) {
     block_hash: result.block_hash,
     receipt_status: result.receipt_status,
     ...(tokenTransfer ? { token_transfer: tokenTransfer } : {}),
+    ...(result.status === 'not_found' ? { found: false, also_checked: alsoChecked, found_on: foundElsewhere?.key ?? null } : {}),
   });
 }
 
