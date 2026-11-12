@@ -30,7 +30,10 @@ export function collectInput(params, keys) {
     if (value === null || value === undefined) continue;
     if (typeof value === 'object') value = JSON.stringify(value);
     value = String(value).trim();
-    if (!value) continue;
+    // The request builder fills params it has no value for with "<nil>",
+    // "null" or "N/A". Passed on, the model reads "output: <nil>" as a real
+    // (empty) answer and fails it, instead of judging what was asked.
+    if (!value || /^(<nil>|nil|null|undefined|none|n\/a|na|-)$/i.test(value)) continue;
     if (parts.some((p) => p.endsWith(value))) continue;
     parts.push(`${key}: ${value}`);
   }
@@ -57,7 +60,7 @@ function tidy(text, { keepCode }) {
 }
 
 export function makeLlmIntentRouter({
-  intent, canonical, prompt, keys, verdicts = [], maxTokens = 500, keepCode = false, emptyHint, extra = null,
+  intent, canonical, prompt, keys, verdicts = [], maxTokens = 500, keepCode = false, emptyHint, extra = null, prepare = null,
 }) {
   const router = Router();
 
@@ -77,19 +80,21 @@ export function makeLlmIntentRouter({
       });
     }
 
-    const { text: input } = capInput(raw);
+    const { text: input } = capInput(typeof prepare === 'function' ? prepare(raw, params) : raw);
     let result;
     try {
       result = await llmComplete(prompt, frameInput(input), {
         budgetMs: 20_000, maxTokens, disableSearch: true, temperature: 0.1, keepFormatting: keepCode,
       });
     } catch (err) {
-      const upstream = err instanceof LlmCompleteError;
-      return res.status(502).json({
-        status: 'error',
-        summary: upstream ? `${intent} is temporarily unavailable. Retry shortly.` : `${intent} failed`,
-        confidence: 0,
+      // A 200 with the fields named, never a 5xx: a 5xx is booked as no answer.
+      return res.json({
+        status: 'unavailable',
+        verdict: 'unavailable',
+        summary: `The ${intent.toLowerCase().replace(/_/g, ' ')} model did not answer at request time, so no judgment is stated rather than one guessed.`,
+        confidence: 0.2,
         error: err.message,
+        checked_at: new Date().toISOString(),
       });
     }
 

@@ -43,9 +43,24 @@ export const llmOutputEvaluationRouter = makeLlmIntentRouter({
   prompt: 'You evaluate the quality of a language model\'s answer. The input holds the original prompt or question, the model\'s output, and possibly a reference answer or criteria. '
     + 'Judge accuracy first, then completeness, relevance and clarity. Check factual claims against what is well established and flag any that are wrong or invented. '
     + 'Begin with exactly one rating word: Excellent, Good, Acceptable, Poor, or Fails, followed by a period, then "Score: N/10." and two or three sentences naming the specific strengths and errors. '
-    + 'If no model output is supplied, treat the scenario in the prompt itself as the answer under review: state whether it is supported by the facts given, whether it follows the instructions, and whether it is safe to accept, each as yes or no with one reason, then the rating and Score. Never rate it Fails only because no output was supplied. '
+    + 'If no model output is supplied, treat the scenario in the prompt itself as the answer under review: still begin with the rating word and "Score: N/10.", then state whether it is supported by the facts given, whether it follows the instructions, and whether it is safe to accept, each as yes or no with one reason. Never rate it Fails only because no output was supplied. '
+    + 'Make every strength and error specific to the case described (its domain, case number and issue, for example what a privacy-sensitive attachment, a scope change, a disputed payment milestone or a missing audit entry must have verified before the case can be accepted), never a generic remark. '
     + 'End with "Strengths:" followed by one or two short strengths separated by semicolons, then "Errors:" followed by one or two short errors or risks separated by semicolons (write "none found" if there are none).' + PLAIN,
-  extra: (summary) => splitStrengthsErrors(summary),
+  // With no model output in the request, the case itself is what is judged.
+  // Said in the input, not only in the prompt: told only in the prompt, the
+  // model still failed the case for having no output.
+  prepare: (raw, params) => {
+    const hasOutput = ['output', 'response', 'answer', 'model_output', 'completion'].some((k) => {
+      const v = String(params?.[k] ?? '').trim();
+      return v && !/^(<nil>|nil|null|undefined|none|n\/a)$/i.test(v) && !/placeholder/i.test(v);
+    });
+    return hasOutput ? raw : `${raw}
+note: No separate model output was supplied. Judge the case described in the prompt as the item under review: whether accepting it as described is supported, follows the instructions, and is safe, and what must be verified first for this specific case.`;
+  },
+  extra: (summary, { verdict }) => {
+    const m = /score:\s*(\d{1,2})\s*\/\s*10/i.exec(summary);
+    return { rating: verdict ?? null, score: m ? Number(m[1]) : null, ...splitStrengthsErrors(summary) };
+  },
   emptyHint: 'I cannot evaluate a model output because none was supplied. Pass the original prompt as prompt and the model answer as output.',
 });
 

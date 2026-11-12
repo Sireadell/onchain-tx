@@ -102,9 +102,17 @@ export const plagiarismRouter = judge({
 export const documentAuthenticityRouter = judge({
   intent: 'DOCUMENT_AUTHENTICITY', canonical: 'document-authenticity',
   role: 'You assess whether a document (certificate, invoice, contract, ID text or letter) is authentic.',
-  task: 'Check formatting consistency, impossible dates, number and checksum validity, issuer details that do not match, and wording typical of forgeries.',
-  verdicts: ['Authentic', 'Likely authentic', 'Suspicious', 'Likely forged'],
+  task: 'Check formatting consistency, impossible dates, number and checksum validity, issuer details that do not match, and wording typical of forgeries. '
+    + 'When only a request or a description is supplied (no document text, signature data, certificate chain or seal details), the verdict is Inconclusive: say which checks need what (a digital signature needs the signed file and its certificate chain, a seal needs the image or the notary register, a hash needs the file to recompute it). '
+    + 'A stated SHA-256 value that is not exactly 64 hexadecimal characters, or is an obvious placeholder pattern such as a1b2c3d4..., is a concrete red flag to name. '
+    + 'Say that it was judged from the text alone and no issuer or register was contacted.',
+  verdicts: ['Authentic', 'Likely authentic', 'Inconclusive', 'Suspicious', 'Likely forged'],
   keys: ['document', 'text', 'certificate', 'invoice', 'url'],
+  extra: (summary, { verdict }) => ({
+    authentic: verdict === 'Authentic' || verdict === 'Likely authentic',
+    evidence: summary.replace(/^[^.]*\.\s*/, '').split(/(?<=\.)\s+/).map((x) => x.trim()).filter((x) => x.length > 12).slice(0, 4),
+    method: 'Judged from the text supplied; no issuer, notary or register was contacted.',
+  }),
   emptyHint: 'I cannot assess a document because none was supplied. Pass its text or details as the document or query parameter.',
 });
 
@@ -324,8 +332,20 @@ export const optimalRouteRouter = judge({
 export const warehouseInventoryRouter = judge({
   intent: 'WAREHOUSE_INVENTORY', canonical: 'warehouse-inventory',
   role: 'You reconcile warehouse inventory figures.',
-  task: 'From the stock counts, movements, orders and locations supplied, work out the on-hand and available quantity, flag any discrepancy with its size, and say what to recount. You cannot see a live warehouse system, so base it only on the numbers given.',
+  task: 'From the stock counts, movements, orders and locations supplied, work out units available after allocations, days of cover at the stated demand, the reorder point (stated, or daily demand times lead time plus safety stock) and whether a replenishment order is due, flag any discrepancy with its size, and say what to recount. '
+    + 'You cannot see a live warehouse system, so base it only on the numbers given. '
+    + 'If no counts are supplied, begin with "Insufficient data." then name the SKU and location asked about and list exactly the figures a check needs (units on hand, allocated units, reorder point or daily demand and lead time, safety stock), and state that a warehouse system\'s own records are private and are not readable from here. Never apologise.',
+  verdicts: ['In stock', 'Reorder due', 'Stocked out', 'Discrepancy found', 'Insufficient data'],
   keys: ['inventory', 'stock', 'counts', 'sku', 'warehouse', 'movements'],
+  extra: (summary, { input, verdict }) => {
+    const sku = /\b(?:sku|item)\s*#?\s*([A-Z0-9][A-Z0-9-]{2,})/i.exec(input)?.[1] ?? null;
+    const site = /\b(?:in|at)\s+(?:the\s+)?([A-Z][\w:-]*(?:\s?[:A-Z][\w-]*)*)\s+(?:warehouse|fulfil?ment cent(?:er|re)|dc|distribution cent(?:er|re))/.exec(input)?.[1] ?? null;
+    const none = verdict === 'Insufficient data';
+    return {
+      sku, location: site, found: !none,
+      ...(none ? { on_hand: null, allocated: null, available: null, reorder_point: null, safety_stock: null, reorder_needed: null } : {}),
+    };
+  },
   emptyHint: 'I cannot reconcile inventory because no figures were supplied. Pass them as the inventory or query parameter.',
 });
 
