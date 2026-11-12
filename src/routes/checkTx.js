@@ -23,6 +23,29 @@ import { knownTokenByAddress, readTokenMeta, decodeTokenTransfer } from '../lib/
 const router = Router();
 
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
+const ERC20_TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+
+// Token movements recorded in the receipt: ERC-20 Transfer events, named when
+// the token is a well-known one. Read from the receipt, nothing estimated.
+export function describeTransferEvents(chainKey, receipt) {
+  const logs = Array.isArray(receipt?.logs) ? receipt.logs : [];
+  const events = logs.filter((l) => Array.isArray(l.topics) && l.topics.length === 3 && l.topics[0]?.toLowerCase() === ERC20_TRANSFER_TOPIC && typeof l.data === 'string' && l.data.length > 2);
+  const named = [];
+  let other = 0;
+  for (const log of events) {
+    const known = knownTokenByAddress(chainKey, log.address);
+    if (!known) { other += 1; continue; }
+    const raw = safeBigIntFromHex(log.data);
+    named.push({
+      token: log.address,
+      symbol: known.symbol,
+      amount: amountToDecimalString(raw, known.decimals),
+      from: `0x${log.topics[1].slice(26)}`,
+      to: `0x${log.topics[2].slice(26)}`,
+    });
+  }
+  return { total: events.length, named, other };
+}
 
 export async function handleCheckTx(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
@@ -191,6 +214,32 @@ export async function handleCheckTx(req, res) {
   // status:block_number:block_hash:receipt_status, `-` standing in for any
   // field that's null (not_found/pending never have a block). Matches the
   // convergent pattern used by other registered ONCHAIN_TX_LOOKUP miners.
+  let feeText = '';
+  let feeNative = null;
+  let gasUsedNum = null;
+  let confirmations = null;
+  let transferEvents = null;
+  if (tx && receipt && result.status !== 'not_found') {
+    const gasUsed = receipt.gasUsed ? safeBigIntFromHex(receipt.gasUsed) : null;
+    const priceHex = receipt.effectiveGasPrice ?? tx.gasPrice;
+    const price = priceHex ? safeBigIntFromHex(priceHex) : null;
+    const head = currentBlockNumberHex ? safeBigIntFromHex(currentBlockNumberHex) : null;
+    const blockNum = result.block_number != null ? BigInt(result.block_number) : null;
+    if (head !== null && blockNum !== null && head >= blockNum) confirmations = Number(head - blockNum) + 1;
+    if (gasUsed !== null) gasUsedNum = Number(gasUsed);
+    if (gasUsed !== null && price !== null) {
+      feeNative = amountToDecimalString(gasUsed * price, 18);
+      feeText = ` The fee was ${feeNative} ${chain.nativeSymbol} (${gasUsed} gas at ${Number(price) / 1e9} gwei).`;
+    }
+    transferEvents = describeTransferEvents(chain.key, receipt);
+    const bits = [];
+    for (const ev of transferEvents.named.slice(0, 5)) bits.push(`${ev.amount} ${ev.symbol} from ${ev.from} to ${ev.to}`);
+    const tokenText = transferEvents.total > 0 && !(tokenTransfer && transferEvents.total === 1)
+      ? ` The receipt records ${transferEvents.total} token transfer event${transferEvents.total === 1 ? '' : 's'}${bits.length ? `: ${bits.join('; ')}` : ''}${transferEvents.other ? `${bits.length ? '; plus ' : ', '}${transferEvents.other} for other tokens` : ''}.`
+      : '';
+    summary += tokenText + feeText + (confirmations !== null ? ` It has ${confirmations} confirmation${confirmations === 1 ? '' : 's'}.` : '');
+  }
+
   const canonical = [
     chainParam,
     txHash,
@@ -217,6 +266,9 @@ export async function handleCheckTx(req, res) {
     block_number: result.block_number,
     block_hash: result.block_hash,
     receipt_status: result.receipt_status,
+    ...(feeNative !== null ? { fee_native: feeNative, gas_used: gasUsedNum } : {}),
+    ...(confirmations !== null ? { confirmations } : {}),
+    ...(transferEvents && transferEvents.total > 0 ? { token_transfer_events: transferEvents.named, token_transfer_event_count: transferEvents.total } : {}),
     ...(tokenTransfer ? { token_transfer: tokenTransfer } : {}),
     ...(result.status === 'not_found' ? { found: false, also_checked: alsoChecked, found_on: foundElsewhere?.key ?? null } : {}),
   });

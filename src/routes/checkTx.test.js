@@ -271,3 +271,22 @@ test('a bare "0x" transaction value answers zero instead of dropping the request
   assert.equal(body.value_wei, '0');
   assert.ok(body.summary.includes('carried 0 ETH in native value'), body.summary);
 });
+
+test('describeTransferEvents names well-known tokens and counts the rest', async () => {
+  const { describeTransferEvents } = await import('./checkTx.js');
+  const topic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+  const pad = (a) => `0x${'0'.repeat(24)}${a}`;
+  const receipt = {
+    logs: [
+      { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', topics: [topic, pad('11'.repeat(20)), pad('22'.repeat(20))], data: '0x0f4240' },
+      { address: '0x1234567890123456789012345678901234567890', topics: [topic, pad('11'.repeat(20)), pad('22'.repeat(20))], data: '0x01' },
+      { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', topics: ['0xabc'], data: '0x01' },
+    ],
+  };
+  const out = describeTransferEvents('eth', receipt);
+  assert.equal(out.total, 2);
+  assert.equal(out.other, 1);
+  assert.equal(out.named[0].symbol, 'USDC');
+  assert.equal(out.named[0].amount, '1');
+  assert.equal(out.named[0].from, `0x${'11'.repeat(20)}`);
+});
