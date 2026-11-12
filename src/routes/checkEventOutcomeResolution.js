@@ -24,6 +24,7 @@ import { searchWeb, hasWebSearchProvider, WebSearchError } from '../lib/webSearc
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { firstUsableValue } from '../lib/entityExtract.js';
 import { resolveCryptoUpDown } from '../lib/cryptoUpDown.js';
+import { resolveOpenLigaCondition } from '../lib/openLigaDb.js';
 
 const router = Router();
 
@@ -81,6 +82,23 @@ async function handleEventOutcomeResolution(req, res) {
     return respondUnusableInput(res, `No event was named in ${quoteParam(rawQuery)}, so no outcome could be resolved. Pass the question with the specific event named.`);
   }
 
+  // A named OpenLigaDB match is settled from its own record, not from articles.
+  const football = await resolveOpenLigaCondition(query).catch(() => null);
+  if (football) {
+    const { summary, outcome, confidence, ...facts } = football;
+    return res.json({
+      query,
+      status: 'ok',
+      verdict: outcome,
+      summary,
+      outcome,
+      confidence,
+      ...facts,
+      canonical: ['event-outcome-resolution', 'openligadb', football.match_id, outcome].join(':'),
+      checked_at: new Date().toISOString(),
+    });
+  }
+
   // "<Coin> Up or Down - <window>" questions are settled by real minute prices,
   // which no article states, so they skip the web search when prices are readable.
   const upDown = await resolveCryptoUpDown(query).catch(() => null);
@@ -101,35 +119,41 @@ async function handleEventOutcomeResolution(req, res) {
     });
   }
 
-  if (!hasWebSearchProvider()) {
-    return res.status(503).json({
-      status: 'error',
-      summary: 'Event outcome resolution is not configured on this deployment.',
-      confidence: 0,
-      error: 'neither PERPLEXITY_API_KEY nor TAVILY_API_KEY is set',
-    });
-  }
+  // A 200 with the fields named, never a 5xx: a 5xx is booked as no answer.
+  const unavailable = (why) => res.json({
+    query,
+    status: 'unavailable',
+    verdict: 'unresolved',
+    outcome: 'unresolved',
+    summary: `Not resolved here: the live sources that settle ${quoteParam(rawQuery)} did not answer at request time, so no outcome is stated rather than one guessed.`,
+    confidence: 0.3,
+    sources: [],
+    error: why,
+    checked_at: new Date().toISOString(),
+  });
+
+  if (!hasWebSearchProvider()) return unavailable('no web search provider is configured');
 
   let result;
   try {
     result = await searchWeb(resolutionQuery(query), { topic: 'news', maxResults: readMaxResults(params) });
   } catch (err) {
-    if (err instanceof WebSearchError) {
-      return res.status(502).json({
-        status: 'error',
-        summary: `Sources are temporarily unavailable to resolve ${quoteParam(rawQuery)}. Retry shortly.`,
-        confidence: 0,
-        error: err.message,
-      });
-    }
-    return res.status(502).json({ status: 'error', summary: 'event outcome resolution failed', confidence: 0, error: err.message });
+    return unavailable(err instanceof WebSearchError ? err.message : 'event outcome resolution failed');
   }
 
   if (!result.answer) {
-    return respondUnusableInput(
-      res,
-      `No sources matched ${quoteParam(rawQuery)}, so no outcome could be resolved. Try rephrasing the question with the specific event named.`,
-    );
+    return res.json({
+      query,
+      status: 'not_found',
+      verdict: 'unresolved',
+      outcome: 'unresolved',
+      summary: `Not yet resolved from public sources: a live news and web search at request time found no report that settles ${quoteParam(rawQuery)}, so neither Yes nor No is asserted.`,
+      confidence: 0.5,
+      result_count: 0,
+      sources: result.results ?? [],
+      provider: result.provider ?? null,
+      checked_at: new Date().toISOString(),
+    });
   }
 
   const outcome = readOutcome(result.answer);
@@ -143,6 +167,7 @@ async function handleEventOutcomeResolution(req, res) {
   res.json({
     query,
     status: 'ok',
+    verdict: outcome ?? 'answered',
     summary: result.answer,
     outcome,
     source_note: sourceNote,

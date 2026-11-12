@@ -120,13 +120,13 @@ test('REGULATORY_FILING_MONITOR handles a 12,000+ char input without crashing', 
   assert.ok(json.status === 'ok' || json.status === 'invalid_input');
 });
 
-test('REGULATORY_FILING_MONITOR upstream failure returns a real error code', async (t) => {
+test('REGULATORY_FILING_MONITOR upstream failure answers 200 unavailable, never a 5xx', async (t) => {
   const base = startServer(t);
   stubFederalRegister(t, { status: 500, body: {} });
   const res = await fetch(`${base}/regulatory-filing-monitor?company=B.Braun`);
   const json = await res.json();
-  assert.equal(res.status, 502);
-  assert.equal(json.status, 'error');
+  assert.equal(res.status, 200);
+  assert.equal(json.status, 'unavailable');
 });
 
 test('REGULATORY_FILING_MONITOR POST works the same as GET', async (t) => {
@@ -146,4 +146,14 @@ test('REGULATORY_FILING_MONITOR unusable input refuses without crashing', async 
   const res = await fetch(`${base}/regulatory-filing-monitor?company=${encodeURIComponent('!!!')}`);
   const json = await res.json();
   assert.equal(res.status, 200);
+});
+
+import { parseCountQuestion } from './checkRegulatoryFilingMonitor.js';
+test('regulatory filings: a "how many" question is read as a count of one form in one year', () => {
+  assert.deepEqual(
+    parseCountQuestion('How many Form 10-K filings by Apple Inc. (CIK 320193) in calendar 2023 are on SEC EDGAR?'),
+    { form: '10-K', year: '2023', fiscal: false },
+  );
+  assert.equal(parseCountQuestion('How many Form 10q filings by Tesla in 2024?').form, '10-Q');
+  assert.equal(parseCountQuestion('What is the latest 10-K from Apple?'), null);
 });

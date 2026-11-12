@@ -63,8 +63,10 @@ test('event-outcome: an unconfigured deployment says so instead of failing silen
   withKeys(t, {});
   const base = startServer(t);
   const res = await fetch(`${base}/event-outcome?query=anything`);
-  assert.equal(res.status, 503);
-  assert.match((await res.json()).error, /PERPLEXITY_API_KEY/);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.status, 'unavailable');
+  assert.match(body.error, /no web search provider/);
 });
 
 test('event-outcome: resolves to the verdict, keeps the graded field to the outcome, names sources beside it', async (t) => {
@@ -113,4 +115,30 @@ test('event-outcome: event/market/text aliases are accepted and a wordless query
   const res = await fetch(`${base}/event-outcome?query=%3F`);
   assert.equal((await res.json()).status, 'invalid_input');
   assert.equal(calls.length, before);
+});
+
+test('EVENT_OUTCOME: an OpenLigaDB match condition is settled from the match record', async (t) => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.includes('api.openligadb.de/getmatchdata/72653')) {
+      return new Response(JSON.stringify({
+        matchID: 72653, matchDateTimeUTC: '2025-03-09T12:30:00Z', leagueName: '2. Fußball-Bundesliga 2024/2025',
+        group: { groupName: '25. Spieltag' }, matchIsFinished: true,
+        team1: { teamName: 'Preußen Münster', shortName: 'Münster' }, team2: { teamName: '1. FC Nürnberg', shortName: 'Nürnberg' },
+        matchResults: [{ resultTypeID: 1, resultOrderID: 1, pointsTeam1: 0, pointsTeam2: 0 }, { resultTypeID: 2, resultOrderID: 2, pointsTeam1: 0, pointsTeam2: 1 }],
+        goals: [{ goalGetterName: 'L. Schleimer', matchMinute: 82 }],
+      }), { status: 200 });
+    }
+    return original(url, init);
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const { resolveOpenLigaCondition } = await import('../lib/openLigaDb.js');
+  const yes = await resolveOpenLigaCondition("Was the condition '1. FC Nürnberg wins this match outright at full time' satisfied for the 2025-03-09 match between Preußen Münster and 1. FC Nürnberg (OpenLigaDB match 72653)?");
+  assert.equal(yes.outcome, 'yes');
+  assert.match(yes.summary, /Preußen Münster 0-1 1\. FC Nürnberg/);
+  const draw = await resolveOpenLigaCondition('Preußen Münster vs 1. FC Nürnberg, OpenLigaDB match 72653, full-time result, was it a draw?');
+  assert.equal(draw.outcome, 'no');
+  const home = await resolveOpenLigaCondition("Which outcome follows for the condition 'Preußen Münster wins this match outright at full time': YES or NO? OpenLigaDB match 72653");
+  assert.equal(home.outcome, 'no');
 });
