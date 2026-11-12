@@ -26,8 +26,16 @@ function both(router, fn) {
   return router;
 }
 
+// A 200 with the fields named, never a 5xx: a 5xx is booked as no answer.
 function fail(res, intent, err) {
-  return res.status(502).json({ status: 'error', summary: `${intent} is temporarily unavailable. Retry shortly.`, confidence: 0, error: String(err.message || err) });
+  return res.json({
+    status: 'unavailable',
+    verdict: 'unavailable',
+    summary: `The live source for ${intent.toLowerCase().replace(/_/g, ' ')} did not answer at request time, so no figure is stated rather than one guessed.`,
+    confidence: 0.2,
+    error: String(err?.message || err),
+    checked_at: now(),
+  });
 }
 
 function stripLead(text) {
@@ -43,22 +51,95 @@ function aqiBand(v) {
   if (v <= 300) return 'Very unhealthy';
   return 'Hazardous';
 }
+const AQI_ADVICE = {
+  Good: 'Air quality is satisfactory and poses little or no risk.',
+  Moderate: 'Acceptable for most people; unusually sensitive people should consider limiting long or heavy outdoor exertion.',
+  'Unhealthy for sensitive groups': 'People with heart or lung disease, older adults and children should reduce long or heavy outdoor exertion.',
+  Unhealthy: 'Everyone should reduce long or heavy outdoor exertion; sensitive groups should avoid it.',
+  'Very unhealthy': 'Everyone should avoid long or heavy outdoor exertion.',
+  Hazardous: 'Everyone should avoid all outdoor physical activity.',
+};
+
+const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+
+// A past day named in the question ("on October 26, 2023", "2024-07-25",
+// "yesterday"). Scored questions ask about past days and were answered with
+// the current reading.
+export function pastDateFromText(text, today = new Date()) {
+  const t = String(text ?? '');
+  let m = /\b(20\d{2})-(\d{2})-(\d{2})\b/.exec(t);
+  let date = m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+  if (!date) {
+    m = new RegExp(`\\b(${MONTHS.join('|')})\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(20\\d{2})\\b`, 'i').exec(t);
+    if (m) date = `${m[3]}-${String(MONTHS.indexOf(m[1].toLowerCase()) + 1).padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+  }
+  if (!date && /\byesterday\b/i.test(t)) date = new Date(today.getTime() - 86_400_000).toISOString().slice(0, 10);
+  if (!date) return null;
+  return date < today.toISOString().slice(0, 10) ? date : null;
+}
+
+function placeCandidates(raw) {
+  const base = stripLead(raw) || String(raw);
+  const cleaned = base
+    .replace(/\b(?:downtown|central|greater|metro(?:politan)?|the|area|region|city of|near .*$|around .*$)\b/gi, ' ')
+    .replace(/\s{2,}/g, ' ').trim();
+  const out = [base, cleaned];
+  // "Los Angeles, California" -> "Los Angeles"
+  if (base.includes(',')) out.push(base.split(',')[0].trim());
+
+  return [...new Set(out.filter((x) => x && x.length >= 2))];
+}
+
+const mean = (xs) => {
+  const v = xs.filter((x) => Number.isFinite(x));
+  return v.length ? Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 10) / 10 : null;
+};
+
 export const airQualityRouter = both(Router(), async (req, res) => {
   const p = params(req);
   const raw = get(p, ['city', 'location', 'place', 'query', 'q', 'question']);
   if (!raw) return respondUnusableInput(res, 'I cannot report air quality because no place was supplied. Pass a city as the city or query parameter.');
-  const place = stripLead(raw) || String(raw);
+  const question = get(p, ['query', 'q', 'question']) ?? '';
+  const pastDate = pastDateFromText(`${question} ${get(p, ['date', 'day']) ?? ''}`);
   try {
-    const g = await getJson(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(place)}&count=1&language=en&format=json`);
-    const hit = g?.results?.[0];
+    let hit = null;
+    let place = null;
+    for (const candidate of placeCandidates(raw)) {
+      const g = await getJson(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(candidate)}&count=1&language=en&format=json`);
+      hit = g?.results?.[0];
+      place = candidate;
+      if (hit) break;
+    }
     if (!hit) return respondUnusableInput(res, `I could not find a place called ${quoteParam(place)}. Try a city name.`);
+    if (pastDate) {
+      const where = [hit.name, hit.admin1, hit.country].filter(Boolean).join(', ');
+      const h = await getJson(`https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${hit.latitude}&longitude=${hit.longitude}&hourly=pm2_5,pm10,us_aqi,ozone,nitrogen_dioxide&start_date=${pastDate}&end_date=${pastDate}`);
+      const hourly = h?.hourly ?? {};
+      const pm25 = mean(hourly.pm2_5 ?? []);
+      const pm10 = mean(hourly.pm10 ?? []);
+      const aqis = (hourly.us_aqi ?? []).filter(Number.isFinite);
+      if (pm25 == null && !aqis.length) {
+        return res.json({ status: 'not_found', verdict: 'not_found', found: false, date: pastDate, location: where, pm2_5: null, pm10: null, us_aqi: null, summary: `No modelled air quality values are available for ${where} on ${pastDate}; the Open-Meteo archive (CAMS) starts in mid-2022.`, confidence: 0.6, source: 'Open-Meteo air quality archive', checked_at: now() });
+      }
+      const peak = aqis.length ? Math.max(...aqis) : null;
+      const band = peak != null ? aqiBand(peak) : null;
+      const summary = `On ${pastDate} in ${where}, PM2.5 averaged ${pm25} ug/m3 over the day and PM10 ${pm10} ug/m3, with the US AQI peaking at ${peak} (${band}). `
+        + `These are Open-Meteo's modelled hourly values (CAMS) for the city's coordinates (${hit.latitude}, ${hit.longitude}), not one monitoring station's measurement.`;
+      return res.json({
+        status: 'ok', verdict: 'found', found: true, summary, date: pastDate, location: where,
+        latitude: hit.latitude, longitude: hit.longitude, pm2_5: pm25, pm10, us_aqi: peak, category: band,
+        ozone_mean: mean(hourly.ozone ?? []), no2_mean: mean(hourly.nitrogen_dioxide ?? []), hours: aqis.length,
+        method: 'Open-Meteo air-quality model (CAMS), hourly values for the day', source: 'Open-Meteo air quality archive',
+        confidence: 0.8, canonical: ['air-quality', hit.name.toLowerCase(), pastDate].join(':'), checked_at: now(),
+      });
+    }
     const a = await getJson(`https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${hit.latitude}&longitude=${hit.longitude}&current=us_aqi,european_aqi,pm2_5,pm10,ozone,nitrogen_dioxide`);
     const c = a?.current;
     if (!c || c.us_aqi == null) return respondUnusableInput(res, `No air quality reading is available for ${hit.name} right now.`);
     const band = aqiBand(c.us_aqi);
     const where = [hit.name, hit.admin1, hit.country].filter(Boolean).join(', ');
-    const summary = `Air quality in ${where} is ${band}: US AQI ${c.us_aqi} (European AQI ${c.european_aqi}), PM2.5 ${c.pm2_5} ug/m3, PM10 ${c.pm10} ug/m3, ozone ${c.ozone} ug/m3, NO2 ${c.nitrogen_dioxide} ug/m3, as of ${c.time} UTC.`;
-    res.json({ status: 'ok', summary, answer: summary, us_aqi: c.us_aqi, european_aqi: c.european_aqi, category: band, pm2_5: c.pm2_5, pm10: c.pm10, location: where, source: 'Open-Meteo air quality', confidence: 0.9, canonical: ['air-quality', hit.name.toLowerCase()].join(':'), checked_at: now() });
+    const summary = `Air quality in ${where} is ${band}: US AQI ${c.us_aqi} (European AQI ${c.european_aqi}), PM2.5 ${c.pm2_5} ug/m3, PM10 ${c.pm10} ug/m3, ozone ${c.ozone} ug/m3, NO2 ${c.nitrogen_dioxide} ug/m3, as of ${c.time} UTC. ${AQI_ADVICE[band] ?? ''} Modelled values (Open-Meteo, CAMS) for the city's coordinates, not one monitoring station.`.trim();
+    res.json({ status: 'ok', verdict: 'found', found: true, summary, answer: summary, us_aqi: c.us_aqi, ozone: c.ozone, nitrogen_dioxide: c.nitrogen_dioxide, observed_at: c.time, latitude: hit.latitude, longitude: hit.longitude, european_aqi: c.european_aqi, category: band, pm2_5: c.pm2_5, pm10: c.pm10, location: where, source: 'Open-Meteo air quality', confidence: 0.9, canonical: ['air-quality', hit.name.toLowerCase()].join(':'), checked_at: now() });
   } catch (e) { fail(res, 'AIR_QUALITY_INDEX', e); }
 });
 
@@ -167,24 +248,78 @@ export const apiHealthRouter = healthHandler('API_HEALTH_CHECK', 'api-health-che
 export const uptimeRouter = healthHandler('SERVER_UPTIME_MONITOR', 'server-uptime-monitor');
 
 /* ---------- TWITTER_SEARCH ---------- */
+// X has no search without a paid API key, so real public posts are read from
+// Bluesky's public search and Hacker News (both keyless), next to whatever
+// x.com pages the web index holds. Found live 2026-11: the web-only version
+// took 15 to 35 seconds and usually led with "No X posts could be indexed".
+const SOCIAL_FILLER = /\b(latest|recent|current|upcoming|tweets?|twitter|x\/twitter|on x|posts?|reactions?|discussion|what (?:are|is) (?:people|everyone) saying|people|saying|about|the|regarding|on|of|for|search|find|show me)\b/gi;
+
+export function socialTerms(raw) {
+  const words = String(raw).replace(SOCIAL_FILLER, ' ').replace(/[^\p{L}\p{N}#@' -]+/gu, ' ').replace(/\s{2,}/g, ' ').trim();
+  return words || String(raw).trim();
+}
+
+async function blueskyPosts(term) {
+  const tries = [term, term.split(' ').filter((w) => !/^\d|^(st|nd|rd|th)$/i.test(w)).slice(0, 3).join(' ')];
+  for (const q of [...new Set(tries.filter(Boolean))]) {
+    const j = await getJson(`https://api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=${encodeURIComponent(q)}&limit=8&sort=top`, 7_000).catch(() => null);
+    const posts = (j?.posts ?? []).filter((x) => x?.record?.text);
+    if (posts.length) {
+      return posts.slice(0, 5).map((x) => ({
+        platform: 'Bluesky',
+        author: `@${x.author?.handle}`,
+        text: String(x.record.text).replace(/\s+/g, ' ').slice(0, 220),
+        posted_at: x.record.createdAt ?? x.indexedAt ?? null,
+        likes: x.likeCount ?? 0,
+        reposts: x.repostCount ?? 0,
+        url: `https://bsky.app/profile/${x.author?.handle}/post/${String(x.uri).split('/').pop()}`,
+      }));
+    }
+  }
+  return [];
+}
+
+async function hnPosts(term) {
+  let j = await getJson(`https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(term)}&tags=story&hitsPerPage=3`, 6_000).catch(() => null);
+  if (!j?.hits?.length) {
+    const short = term.split(' ').filter((w) => !/^\d/.test(w)).slice(0, 2).join(' ');
+    if (short && short !== term) j = await getJson(`https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(short)}&tags=story&hitsPerPage=3`, 5_000).catch(() => null);
+  }
+  return (j?.hits ?? []).filter((h) => h?.title).map((h) => ({
+    platform: 'Hacker News', author: h.author ? `@${h.author}` : null, text: h.title, posted_at: h.created_at ?? null,
+    likes: h.points ?? 0, reposts: null, url: `https://news.ycombinator.com/item?id=${h.objectID}`,
+  }));
+}
+
+async function xPosts(term) {
+  if (!hasWebSearchProvider()) return [];
+  const r = await searchWeb(`${term} (site:x.com OR site:twitter.com)`, { topic: 'news', maxResults: 6, budgetMs: 7_000 }).catch(() => null);
+  return (r?.results || []).filter((x) => /(^|\.)(x|twitter)\.com/i.test(x.url || '')).slice(0, 4).map((x) => ({
+    platform: 'X', author: /x\.com\/([^/]+)/i.exec(x.url)?.[1] ? `@${/x\.com\/([^/]+)/i.exec(x.url)[1]}` : null,
+    text: String(x.snippet || x.title || '').replace(/\s+/g, ' ').slice(0, 220), posted_at: null, likes: null, reposts: null, url: x.url,
+  }));
+}
+
 export const twitterSearchRouter = both(Router(), async (req, res) => {
   const p = params(req);
   const raw = get(p, ['query', 'q', 'search', 'topic', 'hashtag', 'user', 'handle', 'question']);
   if (!raw) return respondUnusableInput(res, 'I cannot search posts because no search term was supplied. Pass it as the query parameter.');
-  if (!hasWebSearchProvider()) return res.status(503).json({ status: 'error', summary: 'Post search is not configured on this deployment.', confidence: 0 });
-  const term = String(raw).replace(/^\s*(?:search\s+)?(?:twitter|x|tweets?)\s+(?:for|about)?\s*/i, '').trim() || String(raw);
+  const term = socialTerms(raw);
   try {
-    let r = await searchWeb(`${term} (site:x.com OR site:twitter.com)`, { topic: 'news', maxResults: 6 });
-    let posts = (r.results || []).filter((x) => /(^|\.)(x|twitter)\.com/i.test(x.url || '')).slice(0, 6);
-    if (!posts.length) {
-      r = await searchWeb(`what are people saying on Twitter X about ${term}`, { topic: 'news', maxResults: 6 });
-      posts = (r.results || []).filter((x) => /(^|\.)(x|twitter)\.com/i.test(x.url || '')).slice(0, 6);
-    }
-    if (!posts.length) r = await searchWeb(term, { topic: 'news', maxResults: 6 });
+    const [x, bsky, hn] = await Promise.all([xPosts(term), blueskyPosts(term), hnPosts(term)]);
+    const posts = [...x, ...bsky, ...hn];
+    const byPlatform = posts.reduce((acc, q) => ({ ...acc, [q.platform]: (acc[q.platform] ?? 0) + 1 }), {});
+    const line = (q, i) => `${i + 1}. ${q.author ?? q.platform} on ${q.platform}${q.posted_at ? ` (${String(q.posted_at).slice(0, 10)}${q.likes != null ? `, ${q.likes} likes` : ''})` : ''}: "${q.text}"`;
     const summary = posts.length
-      ? `Public posts on X about ${quoteParam(term)}: ${posts.map((x) => `${(x.title || x.content || '').replace(/\s+/g, ' ').slice(0, 140)} (${x.url})`).join(' | ')}`
-      : (r.answer ? `No X posts could be indexed directly; current public discussion: ${String(r.answer)}` : `No public X posts were found for ${quoteParam(term)}.`);
-    res.json({ status: 'ok', summary, answer: summary, result_count: posts.length, results: posts, source: 'web index of x.com', confidence: posts.length ? 0.75 : 0.3, canonical: ['twitter-search', term.toLowerCase()].join(':'), checked_at: now() });
+      ? `${posts.length} public posts found about "${term}" (${Object.entries(byPlatform).map(([k, v]) => `${v} on ${k}`).join(', ')}). ${posts.slice(0, 6).map(line).join(' ')}${x.length ? '' : ' X itself has no public search without a paid API key, so posts were read from Bluesky and Hacker News.'}`
+      : `No public posts about "${term}" were found on Bluesky, Hacker News or in the web index of x.com at request time. X itself has no public search without a paid API key.`;
+    res.json({
+      status: posts.length ? 'ok' : 'not_found', verdict: posts.length ? 'found' : 'not_found', found: posts.length > 0,
+      summary, answer: summary, query: term, result_count: posts.length, by_platform: byPlatform,
+      latest_at: posts.map((q) => q.posted_at).filter(Boolean).sort().pop() ?? null, results: posts,
+      source: 'Bluesky public search, Hacker News (Algolia), web index of x.com',
+      confidence: posts.length ? 0.8 : 0.5, canonical: ['twitter-search', term.toLowerCase()].join(':'), checked_at: now(),
+    });
   } catch (e) { fail(res, 'TWITTER_SEARCH', e); }
 });
 
