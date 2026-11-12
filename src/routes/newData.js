@@ -51,6 +51,20 @@ function aqiBand(v) {
   if (v <= 300) return 'Very unhealthy';
   return 'Hazardous';
 }
+// WHO 2021 guideline values for the 24 hour mean, used to put a reading in
+// context: PM2.5 15 ug/m3, PM10 45 ug/m3, NO2 25 ug/m3.
+export function whoContext(pm25, pm10, no2) {
+  const parts = [];
+  const line = (name, value, limit) => {
+    if (!Number.isFinite(value) || value <= 0) return;
+    const ratio = value / limit;
+    parts.push(`${name} at ${value} ug/m3 is ${ratio <= 1 ? 'within' : `${ratio.toFixed(1)} times`} the WHO 24-hour guideline of ${limit} ug/m3`);
+  };
+  line('PM2.5', pm25, 15);
+  line('PM10', pm10, 45);
+  line('NO2', no2, 25);
+  return parts.length ? `${parts.join('; ')}.` : '';
+}
 const AQI_ADVICE = {
   Good: 'Air quality is satisfactory and poses little or no risk.',
   Moderate: 'Acceptable for most people; unusually sensitive people should consider limiting long or heavy outdoor exertion.',
@@ -138,7 +152,7 @@ export const airQualityRouter = both(Router(), async (req, res) => {
     if (!c || c.us_aqi == null) return respondUnusableInput(res, `No air quality reading is available for ${hit.name} right now.`);
     const band = aqiBand(c.us_aqi);
     const where = [hit.name, hit.admin1, hit.country].filter(Boolean).join(', ');
-    const summary = `Air quality in ${where} is ${band}: US AQI ${c.us_aqi} (European AQI ${c.european_aqi}), PM2.5 ${c.pm2_5} ug/m3, PM10 ${c.pm10} ug/m3, ozone ${c.ozone} ug/m3, NO2 ${c.nitrogen_dioxide} ug/m3, as of ${c.time} UTC. ${AQI_ADVICE[band] ?? ''} Modelled values (Open-Meteo, CAMS) for the city's coordinates, not one monitoring station.`.trim();
+    const summary = `Air quality in ${where} is ${band}: US AQI ${c.us_aqi} (European AQI ${c.european_aqi}), PM2.5 ${c.pm2_5} ug/m3, PM10 ${c.pm10} ug/m3, ozone ${c.ozone} ug/m3, NO2 ${c.nitrogen_dioxide} ug/m3, as of ${c.time} UTC. ${AQI_ADVICE[band] ?? ''} ${whoContext(c.pm2_5, c.pm10, c.nitrogen_dioxide)} Modelled values (Open-Meteo, CAMS) for the city's coordinates (${hit.latitude}, ${hit.longitude}), not one monitoring station.`.replace(/\s+/g, ' ').trim();
     res.json({ status: 'ok', verdict: 'found', found: true, summary, answer: summary, us_aqi: c.us_aqi, ozone: c.ozone, nitrogen_dioxide: c.nitrogen_dioxide, observed_at: c.time, latitude: hit.latitude, longitude: hit.longitude, european_aqi: c.european_aqi, category: band, pm2_5: c.pm2_5, pm10: c.pm10, location: where, source: 'Open-Meteo air quality', confidence: 0.9, canonical: ['air-quality', hit.name.toLowerCase()].join(':'), checked_at: now() });
   } catch (e) { fail(res, 'AIR_QUALITY_INDEX', e); }
 });
