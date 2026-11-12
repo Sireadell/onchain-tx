@@ -29,6 +29,8 @@ import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 import { extractAddress, freeTextParam, firstUsableValue } from '../lib/entityExtract.js';
 import { amountToDecimalString, amountToRoundedString } from '../lib/formatAmount.js';
 import { safeBigIntFromHex } from '../lib/safeBigInt.js';
+import { findEnsName, resolveEnsName } from '../lib/ensResolve.js';
+import { getCoinPrice } from '../lib/defiLlamaApi.js';
 
 const router = Router();
 
@@ -124,7 +126,9 @@ function hexToNumberOrNull(hex) {
   return Number.isSafeInteger(n) ? n : null;
 }
 
-function respondNativeBalance(res, { address, chainParam, chain, balanceHex, countHex, codeHex, blockHex, explorerBase }) {
+const CHAIN_IDS = { eth: 1, base: 8453, arbitrum: 42161, optimism: 10, polygon: 137, avalanche: 43114 };
+
+function respondNativeBalance(res, { address, chainParam, chain, balanceHex, countHex, codeHex, blockHex, explorerBase, usdPrice = null, ensName = null }) {
   const balance_wei = safeBigIntFromHex(balanceHex).toString();
   const balance_native = Number(balance_wei) / 1e18;
   const transaction_count = hexToNumberOrNull(countHex);
@@ -141,10 +145,22 @@ function respondNativeBalance(res, { address, chainParam, chain, balanceHex, cou
     summary += ` It is ${is_contract ? 'a smart contract' : 'an ordinary wallet (externally owned account)'}${transaction_count != null ? ` with ${transaction_count} transaction${transaction_count === 1 ? '' : 's'} sent` : ''}.`;
   }
 
+  if (ensName) summary = `The ENS name ${ensName} points to ${address}. ${summary}`;
+  const balance_usd = usdPrice != null && Number.isFinite(usdPrice) ? Number(((Number(balance_wei) / 1e18) * usdPrice).toFixed(2)) : null;
+  if (balance_usd !== null && funded) summary += ` At the current price of ${usdPrice} USD per ${chain.nativeSymbol} that balance is worth about ${balance_usd} USD.`;
+  const detail = [];
+  if (block_number != null) detail.push(`read at ${chain.label} block ${block_number}`);
+  const chainId = chain.chainId ?? CHAIN_IDS[chain.key];
+  if (chainId) detail.push(`chain ID ${chainId}`);
+  if (detail.length) summary += ` Balance ${detail.join(', ')}.`;
+  if (explorerBase) summary += ` Explorer: ${explorerBase}/address/${address}.`;
+
   res.json({
     summary,
     status: 'ok',
     verdict: funded ? 'funded' : 'empty',
+    ...(ensName ? { ens_name: ensName } : {}),
+    balance_usd,
     chain: chainParam,
     address,
     found: true,
@@ -172,7 +188,7 @@ function respondRpcFailure(res, err) {
   return res.status(502).json({ status: 'error', summary: 'upstream RPC call failed', confidence: 1.0, error: err.message });
 }
 
-async function handleNativeBalance(req, res, address, chainParam, chain) {
+async function handleNativeBalance(req, res, address, chainParam, chain, ensName = null) {
   // The balance is the answer and its failure is reported as before. The
   // nonce, contract flag and block number are extras read alongside it, and
   // any of them failing leaves that one field null.
@@ -183,22 +199,25 @@ async function handleNativeBalance(req, res, address, chainParam, chain) {
     return respondRpcFailure(res, err);
   }
   const withExtras = extrasAllowed();
-  const [codeR, blockR, countR] = withExtras
+  const [codeR, blockR, countR, priceR] = withExtras
     ? await Promise.allSettled([
       getCode(chain.segment, address),
       getBlockNumber(chain.segment),
       ankrTransactionCount(chain.segment, address),
+      chain.nativeCoingeckoId ? getCoinPrice(`coingecko:${chain.nativeCoingeckoId}`) : Promise.reject(new Error('no price id')),
     ])
-    : [{ status: 'rejected' }, { status: 'rejected' }, { status: 'rejected' }];
+    : [{ status: 'rejected' }, { status: 'rejected' }, { status: 'rejected' }, { status: 'rejected' }];
   return respondNativeBalance(res, {
     address, chainParam, chain, balanceHex,
     codeHex: settled(codeR), blockHex: settled(blockR), countHex: settled(countR),
     explorerBase: EXPLORERS[chain.key],
+    usdPrice: priceR.status === 'fulfilled' ? priceR.value?.priceUsd ?? null : null,
+    ensName,
   });
 }
 
 // Sepolia and Base Sepolia: free public RPC, no Ankr key involved.
-async function handleTestnetBalance(req, res, address, chainParam, net, token) {
+async function handleTestnetBalance(req, res, address, chainParam, net, token, ensName = null) {
   let balanceHex;
   try {
     balanceHex = token
@@ -233,6 +252,7 @@ async function handleTestnetBalance(req, res, address, chainParam, net, token) {
     address, chainParam, chain: net, balanceHex,
     countHex: settled(countR), codeHex: settled(codeR), blockHex: settled(blockR),
     explorerBase: net.explorer,
+    ensName,
   });
 }
 
@@ -305,7 +325,14 @@ export async function handleWalletBalance(req, res) {
   // rather than rejecting outright. Does not resolve ENS names or
   // tickers — only an address already present but wrapped in other text.
   // See entityExtract.js.
-  const address = rawAddress && ADDRESS_RE.test(rawAddress) ? rawAddress : extractAddress(rawAddress);
+  let address = rawAddress && ADDRESS_RE.test(rawAddress) ? rawAddress : extractAddress(rawAddress);
+  // A question that names an ENS name (vitalik.eth) instead of an address.
+  let ensName = null;
+  if (!address) {
+    const name = findEnsName(rawAddress) ?? findEnsName(question);
+    const resolved = name ? await resolveEnsName(name) : null;
+    if (resolved) { address = resolved; ensName = name; }
+  }
   const token = rawToken ? (ADDRESS_RE.test(rawToken) ? rawToken : extractAddress(rawToken)) : null;
 
   if (!address) {
@@ -372,11 +399,11 @@ export async function handleWalletBalance(req, res) {
   // the safeBigIntFromHex fix above addresses for the one cause found live.
   // This is the general safety net for any cause not yet seen.
   try {
-    if (testnet) return await handleTestnetBalance(req, res, address, chainParam, testnet, token);
+    if (testnet) return await handleTestnetBalance(req, res, address, chainParam, testnet, token, ensName);
     if (token) {
       return await handleTokenBalance(req, res, address, chainParam, chain, token);
     }
-    return await handleNativeBalance(req, res, address, chainParam, chain);
+    return await handleNativeBalance(req, res, address, chainParam, chain, ensName);
   } catch (err) {
     if (res.headersSent) throw err;
     return res.status(502).json({ status: 'error', summary: 'wallet balance lookup failed', confidence: 1.0, error: err.message });
