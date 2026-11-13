@@ -207,7 +207,9 @@ const MAX_LOGGED_BODY_CHARS = 500;
 const requestLogMiddleware = (req, res, next) => {
   const start = Date.now();
   const question = extractRequestText(req);
-  console.log(`[req] ${new Date().toISOString()} ${req.method} ${req.originalUrl}${question ? ` question=${JSON.stringify(question)}` : ''}`);
+  const forwarded = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim();
+  const agent = String(req.headers['user-agent'] ?? '').slice(0, 60);
+  console.log(`[req] ${new Date().toISOString()} ${req.method} ${req.originalUrl} from=${forwarded || req.ip} ua=${JSON.stringify(agent)}${question ? ` question=${JSON.stringify(question)}` : ''}`);
 
   const sendJson = res.json.bind(res);
   let responseBody;
