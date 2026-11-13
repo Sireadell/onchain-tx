@@ -280,7 +280,7 @@ function publicRecordRouter({ canonical, judgeRouter, lookup }) {
   const router = Router();
   router.use(async (req, res, next) => {
     const params = (req.method === 'GET' ? req.query : req.body) ?? {};
-    const found = await lookup(params).catch(() => null);
+    const found = await Promise.resolve().then(() => lookup(params)).catch(() => null);
     if (!found) return judgeRouter(req, res, next);
     const { summary, verdict, ...facts } = found;
     return res.json({
