@@ -125,6 +125,15 @@ export function parseInstruction(input) {
   // told to translate the quoted part only.
   const tail = raw.match(new RegExp(`\\b(?:in|into|to)\\s+${LANG_GROUP}\\s*[.?!]*$`, 'i'));
   if (tail) return { text: raw, target: normaliseLanguage(tail[1]) };
+  // "Can you translate the following phrase into German for me: 'The quick
+  // brown fox ...'?", found refused live 2026-11-16: the language sits mid
+  // sentence. Take it, and the quoted part as the text when there is one.
+  const mid = raw.match(new RegExp(`\\b(?:into|to)\\s+${LANG_GROUP}\\b`, 'i'));
+  const midTarget = mid && normaliseLanguage(mid[1]);
+  if (midTarget) {
+    const quoted = raw.match(/["“‘«']([^"”’»]{2,}?)["”’»']\s*[.?!]*\s*$/);
+    return { text: quoted ? quoted[1].trim() : raw, target: midTarget };
+  }
   return { text: null, target: null };
 }
 

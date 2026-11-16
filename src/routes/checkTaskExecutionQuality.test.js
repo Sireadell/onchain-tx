@@ -51,13 +51,18 @@ test('task-execution-quality: missing task and result answered with guidance, no
   assert.equal((await res.json()).status, 'invalid_input');
 });
 
-test('task-execution-quality: missing result alone is refused with a specific message', async (t) => {
+test('task-execution-quality: a task with no delivered work is judged as unevidenced, not refused', async (t) => {
   withKey(t);
+  stubPerplexity(t, 'VERDICT: fails | REASON: No delivered work or evidence was supplied, so the case is not shown to be complete.');
   const base = startServer(t);
-  const res = await fetch(`${base}/task-execution-quality?task=${encodeURIComponent('Write a haiku about the sea')}`);
-  const body = await res.json();
-  assert.equal(body.status, 'invalid_input');
-  assert.match(body.summary, /no result to assess/);
+  const q = 'For a hospital equipment supply agreement, case 7 concerns a failed retry. judge whether the delivered work is correct, complete, and evidenced.';
+  for (const url of [`${base}/task-execution-quality?task=${encodeURIComponent(q)}`, `${base}/task-execution-quality?query=${encodeURIComponent(q)}`]) {
+    const body = await (await fetch(url)).json();
+    assert.equal(body.status, 'ok');
+    assert.equal(body.verdict, 'fails');
+    assert.equal(body.evidence_supplied, false);
+    assert.equal(body.result, null);
+  }
 });
 
 test('task-execution-quality: a satisfying result is graded satisfies', async (t) => {

@@ -9,7 +9,7 @@ import { Router } from 'express';
 import { firstUsableValue, freeTextParam } from '../lib/entityExtract.js';
 import { respondUnusableInput } from '../lib/unusableInput.js';
 import { getJson, upstreamDown, paramsOf } from '../lib/liveJson.js';
-import { resolveLocation } from '../lib/weatherForecast.js';
+import { resolveLocation, osmLookup } from '../lib/weatherForecast.js';
 import { parseCoordinates } from '../lib/questionParse.js';
 
 const router = Router();
@@ -51,11 +51,8 @@ export function placePhrases(text) {
 
 async function findPlace(text) {
   for (const q of placePhrases(text)) {
-    try {
-      const hits = await getJson(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`, { timeoutMs: 6000 });
-      const hit = hits?.[0];
-      if (hit) return { lat: Number(Number(hit.lat).toFixed(4)), lon: Number(Number(hit.lon).toFixed(4)), place: q };
-    } catch { /* try the next phrase */ }
+    const hit = await osmLookup(q);
+    if (hit) return { lat: Number(hit.latitude.toFixed(4)), lon: Number(hit.longitude.toFixed(4)), place: q };
   }
   return null;
 }

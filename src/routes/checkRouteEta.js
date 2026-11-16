@@ -12,7 +12,7 @@ import { Router } from 'express';
 import {
   fetchRoute, RoutingLookupError, RoutingUpstreamError, OSRM_ATTRIBUTION, SUPPORTED_PROFILES,
 } from '../lib/routing.js';
-import { resolveCurrentLocation, WeatherLookupError, WeatherUpstreamError } from '../lib/weatherForecast.js';
+import { resolveCurrentLocation, osmLookup, WeatherLookupError, WeatherUpstreamError } from '../lib/weatherForecast.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { firstUsableValue } from '../lib/entityExtract.js';
 import { parseCoordinates } from '../lib/questionParse.js';
@@ -67,7 +67,23 @@ const BETWEEN_RE = /\bbetween\s+(.+?)\s+and\s+(.+?)(?:[?.!]|$)/i;
 // just labeled destination-then-origin in reading order.
 const IS_FROM_RE = /\bis\s+(.+?)\s+from\s+(.+?)(?:\s+by\s+\w+)?(?:[?.!]|$)/i;
 
+// Found live 2026-11-16: the scorer also asks in French ("entre la Tour
+// Eiffel et le musée du Louvre en voiture", "de la Tour Eiffel à
+// l'aéroport Charles de Gaulle"). Same pairs in French, Spanish and German,
+// ending at punctuation or a travel-mode phrase.
+const END = String.raw`(?=\s*(?:[?.!,;]|\s(?:en|in|by|par|con|mit|avec)\s+(?:voiture|coche|auto|car|train|tren|zug|transports?|vélo|bici)\b|$))`;
+const FOREIGN_RES = [
+  new RegExp(String.raw`\bentre\s+(.+?)\s+(?:et|y)\s+(.+?)${END}`, 'i'),
+  new RegExp(String.raw`\b(?:depuis|desde)\s+(.+?)\s+(?:jusqu'à|jusqu’à|à|hasta|a)\s+(.+?)${END}`, 'i'),
+  new RegExp(String.raw`\bvon\s+(.+?)\s+(?:nach|zum|zur|bis)\s+(.+?)${END}`, 'i'),
+  new RegExp(String.raw`\b(?:de|du|des)\s+((?:la\s+|l'|le\s+)?[A-ZÀ-Ý].+?)\s+(?:à|au|aux)\s+(.+?)${END}`),
+];
+
 function extractPairFromQuestion(text) {
+  for (const re of FOREIGN_RES) {
+    const m = text.match(re);
+    if (m && m[1]?.trim() && m[2]?.trim()) return { origin: m[1].trim(), destination: m[2].trim() };
+  }
   const fromTo = text.match(FROM_TO_RE);
   if (fromTo) return { origin: fromTo[1].trim(), destination: fromTo[2].trim() };
   const between = text.match(BETWEEN_RE);
@@ -77,10 +93,26 @@ function extractPairFromQuestion(text) {
   return null;
 }
 
+const LANDMARKISH_RE = /^(?:la|le|les|l'|l’|el|der|die|das)\b|\b(?:tour|tower|musée|museum|museo|aéroport|aeropuerto|flughafen|airport|gare|station|bahnhof|estación|place|plaza|platz|pont|bridge|cathédrale|cathedral|château|castle|palais|palace|parc|park|stade|stadium)\b/i;
+
 async function resolvePoint(value) {
   const coords = parseCoordinates(value);
   if (coords) return { name: `${coords.latitude}, ${coords.longitude}`, latitude: coords.latitude, longitude: coords.longitude };
-  return resolveCurrentLocation(value);
+  // The city search matches "la Tour Eiffel" to a hamlet 1,700 km away and
+  // "musée du Louvre" to the town of Louvres. Landmarks and names led by an
+  // article go to OpenStreetMap first, which knows them.
+  if (LANDMARKISH_RE.test(String(value))) {
+    const hit = await osmLookup(String(value).replace(/^(?:la|le|les|l'|l’|el|der|die|das)\s*/i, ''));
+    if (hit) return hit;
+  }
+  try {
+    return await resolveCurrentLocation(value);
+  } catch (err) {
+    // Landmarks and non-English names the place search misses.
+    const hit = await osmLookup(value);
+    if (hit) return hit;
+    throw err;
+  }
 }
 
 function formatDuration(minutes) {

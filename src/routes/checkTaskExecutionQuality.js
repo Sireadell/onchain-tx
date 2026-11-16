@@ -102,6 +102,19 @@ async function handleTaskExecutionQuality(req, res) {
     }
   }
 
+  // Found live 2026-11-16: most scorer questions arrive as one sentence with
+  // no delivered work in it ("For a hospital supply agreement, case 7
+  // concerns a failed retry. judge whether the delivered work is correct,
+  // complete, and evidenced."), and 21 of 27 were refused. That is still
+  // gradable: with nothing delivered, the work is not shown to be correct,
+  // complete or evidenced, so the model judges the case on that basis.
+  let noResultSupplied = false;
+  if (!task && !result && typeof questionRaw === 'string' && questionRaw.trim()) task = questionRaw.trim();
+  if (task && !result) {
+    result = 'No delivered work, output, or evidence was included with this request. Judge the case as described: work that is not shown is not evidenced.';
+    noResultSupplied = true;
+  }
+
   if (!task && !result) {
     return respondUnusableInput(
       res,
@@ -173,7 +186,8 @@ async function handleTaskExecutionQuality(req, res) {
     verdict: parsed.verdict,
     reason: parsed.reason,
     task: taskText.slice(0, 500),
-    result: resultText.slice(0, 500),
+    result: noResultSupplied ? null : resultText.slice(0, 500),
+    evidence_supplied: !noResultSupplied,
     checked_at: new Date().toISOString(),
   });
 }

@@ -97,7 +97,18 @@ function placeCandidates(raw) {
   const cleaned = base
     .replace(/\b(?:downtown|central|greater|metro(?:politan)?|the|area|region|city of|near .*$|around .*$)\b/gi, ' ')
     .replace(/\s{2,}/g, ' ').trim();
-  const out = [base, cleaned];
+  const out = [];
+  // Found live 2026-11-16: "What is the current PM2.5 level in London, UK?"
+  // and "PM2.5 and PM10 reading for the downtown Los Angeles area" were
+  // refused, since stripLead only removes "air quality" wording. The
+  // capitalised place after in/for/of comes first now.
+  for (const m of String(raw).matchAll(/\b(?:in|for|of|at|near|around)\s+(?:the\s+)?(?:downtown\s+|central\s+|greater\s+)?([A-Z][\w.'-]*(?:,?\s+[A-Z][\w.'-]*)*)/g)) {
+    const place = m[1].replace(/\s+(?:Area|Region)$/, '').trim();
+    if (/^(?:PM\d|AQI|NO2|O3|SO2|CO|US|EPA|WHO)\b/.test(place)) continue;
+    out.push(place);
+    if (place.includes(',')) out.push(place.split(',')[0].trim());
+  }
+  out.push(base, cleaned);
   // "Los Angeles, California" -> "Los Angeles"
   if (base.includes(',')) out.push(base.split(',')[0].trim());
 
@@ -253,6 +264,16 @@ function healthHandler(intent, kind) {
       const summary = `${state}. ${parsed.hostname} answered ${okN} of 3 probes${avg != null ? ` with an average of ${avg} ms` : ''}; last HTTP status ${runs[runs.length - 1].status || 'no response'}. Checked ${now()}.`;
       res.json({ status: 'ok', summary, answer: summary, state, probes_ok: okN, probes: runs, avg_latency_ms: avg, confidence: 0.9, canonical: [kind, parsed.hostname].join(':'), checked_at: now() });
     } catch (e) {
+      // Found live 2026-11-16: scorer questions name hosts that do not exist
+      // ("https://app.example.com/login", the retired api.coindesk.com). A
+      // name with no DNS record is a real, checkable result: nothing can
+      // reach it, so it is down. Private-address refusals stay refusals.
+      if (e instanceof ProbeError && /DNS lookup failed/.test(e.message)) {
+        let host = found;
+        try { host = new URL(url).hostname; } catch { /* keep the raw match */ }
+        const summary = `Down. ${host} does not resolve in DNS, so no server answers at that address and 0 of 3 probes could connect. Checked ${now()}.`;
+        return res.json({ status: 'ok', summary, answer: summary, state: 'Down', probes_ok: 0, probes: [], avg_latency_ms: null, dns_resolves: false, confidence: 0.9, canonical: [kind, host].join(':'), checked_at: now() });
+      }
       if (e instanceof ProbeError) return respondUnusableInput(res, `I cannot probe ${quoteParam(raw)}: ${e.message}.`);
       fail(res, intent, e);
     }

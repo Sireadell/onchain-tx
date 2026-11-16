@@ -296,11 +296,26 @@ const LANDMARK_RE = /\b(?:airport|international|tower|museum|cathedral|church|pa
 
 async function geocodeOsm(input) {
   if (!LANDMARK_RE.test(String(input ?? ''))) return null;
+  return osmLookup(input);
+}
+
+// Same OpenStreetMap lookup without the landmark-word gate, for callers that
+// already know the value is a place (route-eta origins and destinations,
+// which arrive in any language: "la Tour Eiffel", "musée du Louvre").
+// Nominatim allows one request a second. An origin and destination looked up
+// back to back got the second one refused, so calls are spaced out.
+let osmQueue = Promise.resolve();
+const OSM_SPACING_MS = 1_100;
+
+export async function osmLookup(input) {
   const q = String(input ?? '').replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
   if (!q) return null;
   const cacheKey = `osm:${q.toLowerCase()}`;
   const cached = geocodeCache.get(cacheKey);
   if (cached !== undefined) return cached;
+  const turn = osmQueue;
+  osmQueue = turn.then(() => new Promise((r) => setTimeout(r, OSM_SPACING_MS)));
+  await turn;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 6_000);
   try {
