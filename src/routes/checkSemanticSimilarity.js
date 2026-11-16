@@ -7,7 +7,7 @@ import {
   llmComplete, hasLlmProvider, LlmCompleteError, capInput, frameInput,
 } from '../lib/llmComplete.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
-import { firstUsableValue } from '../lib/entityExtract.js';
+import { firstUsableValue, freeTextParam } from '../lib/entityExtract.js';
 
 const router = Router();
 
@@ -49,10 +49,14 @@ function buildUserContent(text1, text2) {
 const LABELED_RE = /^\s*(?:text\s*1|sentence\s*1|string\s*1|text\s*a|a)\s*:\s*(.+?)\s*(?:text\s*2|sentence\s*2|string\s*2|text\s*b|b)\s*:\s*(.+)$/is;
 const COMPARE_RE = /^\s*compare(?:\s+the\s+meaning\s+of)?\s*:?\s*(.+?)\s*(?:versus|vs\.?|and)\s*:?\s*(.+)$/is;
 const HOW_SIMILAR_RE = /^\s*how\s+(?:similar|close\s+in\s+meaning)\s+(?:are|is)\s*:?\s*(.+?)\s+and\s+(.+?)\??$/is;
+// Found live 2026-11-16: every scorer question for this intent reads
+// "What is the cosine similarity between 'X' and 'Y'?" sent as `query`, and
+// all of them were refused. Two quoted texts joined by and/vs are the pair.
+const QUOTED_PAIR_RE = /["'‘“](.+?)["'’”]\s*,?\s*(?:and|vs\.?|versus|with|to)\s+["'‘“](.+?)["'’”]\s*[?.!]?\s*$/is;
 
 function splitSingleValue(value) {
   const text = String(value).trim();
-  for (const re of [LABELED_RE, COMPARE_RE, HOW_SIMILAR_RE]) {
+  for (const re of [LABELED_RE, QUOTED_PAIR_RE, COMPARE_RE, HOW_SIMILAR_RE]) {
     const match = text.match(re);
     if (match && match[1]?.trim() && match[2]?.trim()) {
       return { text1: match[1].trim(), text2: match[2].trim() };
@@ -69,6 +73,9 @@ async function handleSemanticSimilarity(req, res) {
   let rawText2 = firstUsableValue(
     params?.text2, params?.b, params?.sentence2, params?.string2, params?.textB, params?.second,
   );
+
+  // Neither text param arrived: the whole question sits in a free-text field.
+  if (!rawText1 && !rawText2) rawText1 = freeTextParam(params);
 
   // Exactly one value arrived: it may be the whole question with both texts
   // inside it ("compare X and Y", "text1: X text2: Y"), so try to split it

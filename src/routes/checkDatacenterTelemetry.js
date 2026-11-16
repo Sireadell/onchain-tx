@@ -59,6 +59,26 @@ async function handle(req, res) {
     out.generator_ready = [fuelOk, testOk].every((x) => x !== false);
     findings.push(`generator ${out.generator_ready ? 'ready' : 'NOT ready'}${v.fuelPct != null ? `, fuel ${v.fuelPct}%` : ''}${v.testDays != null ? `, last test ${v.testDays} days ago` : ''}`);
   }
+  // A real question about a named facility ("the Zurich Empa data hall")
+  // with no readings is answerable: its live telemetry is private. Found
+  // 2026-11-16: the scorer asks this way, half our refusals went unrescued,
+  // and the leader answers exactly this as a not_found verdict.
+  const question = freeTextParam(params);
+  if (!findings.length && question && /\b(?:pue|power|inlet|temperature|generator|ups|cooling|humidity|data\s*(?:center|centre|hall))\b/i.test(question)) {
+    const summary = 'Not found: a facility\'s live datacenter telemetry (PUE, power draw, inlet temperature, generator and UPS status) is private and not published in any public feed, so none can be reported for this site. Send the readings (total_kw and it_kw, inlet_c, generator_fuel_pct or generator_test_days) and I will grade them against the ASHRAE 18 to 27 C range and standard PUE bands.';
+    return res.json({
+      status: 'not_found',
+      summary,
+      verdict: 'not_found',
+      found: false,
+      confidence: 0.5,
+      pue: null,
+      inlet_c: null,
+      generator_ready: null,
+      canonical: 'datacenter-telemetry:not_found',
+      checked_at: new Date().toISOString(),
+    });
+  }
   if (!findings.length) {
     return respondUnusableInput(res, 'No datacenter readings found. Send total_kw and it_kw for PUE, inlet_c for thermal, and generator_fuel_pct or generator_test_days for generator readiness. I do not have a public datacenter feed, so I only audit values you give me.');
   }

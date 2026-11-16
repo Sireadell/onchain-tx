@@ -186,3 +186,23 @@ test('semantic-similarity: a genuinely single, unsplittable text is still refuse
   const body = await res.json();
   assert.equal(body.status, 'invalid_input');
 });
+
+test('semantic-similarity: the scorer phrasing sent as query is split into the two quoted texts', async (t) => {
+  withKey(t);
+  const calls = stubPerplexity(t, '0.82. Paraphrase.');
+  const base = startServer(t);
+  const cases = [
+    ["What is the cosine similarity between 'The quick brown fox jumps over the lazy dog' and 'A fast, dark-colored fox leaps above a sleepy canine'?", 'The quick brown fox jumps over the lazy dog', 'A fast, dark-colored fox leaps above a sleepy canine'],
+    ["What is the cosine similarity between the sentences 'The quick brown fox jumps over the lazy dog.' and 'A speedy brown fox leaps over a sleepy canine.'?", 'The quick brown fox jumps over the lazy dog.', 'A speedy brown fox leaps over a sleepy canine.'],
+    ['How similar are "The cat\'s toy is red" and "A crimson plaything belongs to the cat"?', "The cat's toy is red", 'A crimson plaything belongs to the cat'],
+  ];
+  for (const [q, a, b] of cases) {
+    const res = await fetch(`${base}/semantic-similarity?query=${encodeURIComponent(q)}`);
+    const body = await res.json();
+    assert.equal(body.status, 'ok', q);
+    assert.equal(body.text1, a);
+    assert.equal(body.text2, b);
+    assert.equal(body.similarity, 0.82);
+  }
+  assert.equal(calls.length, cases.length);
+});

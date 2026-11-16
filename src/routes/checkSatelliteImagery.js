@@ -9,6 +9,8 @@ import { Router } from 'express';
 import { firstUsableValue, freeTextParam } from '../lib/entityExtract.js';
 import { respondUnusableInput } from '../lib/unusableInput.js';
 import { getJson, upstreamDown, paramsOf } from '../lib/liveJson.js';
+import { resolveLocation } from '../lib/weatherForecast.js';
+import { parseCoordinates } from '../lib/questionParse.js';
 
 const router = Router();
 
@@ -18,6 +20,43 @@ export function readPoint(params, text) {
   if (Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) return { lat, lon };
   const m = String(text ?? '').match(/(-?\d{1,2}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)/);
   if (m && Math.abs(Number(m[1])) <= 90 && Math.abs(Number(m[2])) <= 180) return { lat: Number(m[1]), lon: Number(m[2]) };
+  return null;
+}
+
+// The place a question is about: "around the Hoover Dam", "of the downtown
+// Seattle area", "Tesla Gigafactory in Austin, Texas". Most specific first,
+// then the part after " in " ("Austin, Texas") as a broader fallback.
+const PLACE_RE = /\b(?:around|of|at|near|over|for|in)\s+(?:the\s+)?(?:new\s+|recent\s+|downtown\s+)?([A-Z][\w.'-]*(?:[\s,]+(?:of\s+|de\s+)?[A-Z][\w.'-]*)*)/g;
+
+export function placePhrases(text) {
+  const out = [];
+  const push = (v) => {
+    const s = String(v ?? '').replace(/\s+(?:area|region|site|facility)$/i, '').replace(/[,\s]+$/, '').trim();
+    if (s && !/^(?:Landsat|Sentinel|NASA|MODIS|What|Show)\b/.test(s) && !out.includes(s)) out.push(s);
+  };
+  const src = String(text ?? '');
+  for (const m of src.matchAll(PLACE_RE)) {
+    // "Tesla Gigafactory in Austin, Texas": the name alone matched the
+    // Berlin plant, so the "in <place>" that follows comes first.
+    const after = src.slice(m.index + m[0].length).match(/^\s+in\s+([A-Z][\w.'-]*(?:,?\s+[A-Z][\w.'-]*)*)/);
+    if (after) {
+      push(`${m[1]}, ${after[1]}`);
+      push(after[1]);
+    }
+    push(m[1]);
+  }
+  for (const m of String(text ?? '').matchAll(/\bin\s+([A-Z][\w.'-]*(?:,?\s+[A-Z][\w.'-]*)*)/g)) push(m[1]);
+  return out.slice(0, 3);
+}
+
+async function findPlace(text) {
+  for (const q of placePhrases(text)) {
+    try {
+      const hits = await getJson(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`, { timeoutMs: 6000 });
+      const hit = hits?.[0];
+      if (hit) return { lat: Number(Number(hit.lat).toFixed(4)), lon: Number(Number(hit.lon).toFixed(4)), place: q };
+    } catch { /* try the next phrase */ }
+  }
   return null;
 }
 
@@ -42,7 +81,22 @@ export function nearbyEvents(events, point, radiusKm) {
 
 async function handle(req, res) {
   const params = paramsOf(req);
-  const point = readPoint(params, freeTextParam(params));
+  const text = freeTextParam(params);
+  let point = readPoint(params, text);
+  // Found live 2026-11-16: most refusals here named a place ("Hoover Dam",
+  // "Austin, Texas") or wrote "47.6062° N, 122.3321° W". The weather
+  // geocoder already reads both, so use it before giving up.
+  if (!point && text) {
+    const coords = parseCoordinates(text);
+    if (coords) point = { lat: coords.latitude, lon: coords.longitude };
+  }
+  if (!point && text) point = await findPlace(text);
+  if (!point && text) {
+    try {
+      const hit = await resolveLocation(text);
+      if (hit) point = { lat: Number(hit.latitude.toFixed(4)), lon: Number(hit.longitude.toFixed(4)), place: hit.name };
+    } catch { /* no place found, refused below */ }
+  }
   if (!point) return respondUnusableInput(res, 'Send lat and lon (for example lat=34.05 lon=-118.24) to analyse satellite-visible events near a point.');
   const radius = Math.min(Math.max(Number(firstUsableValue(params.radius_km, params.radius)) || 300, 10), 2000);
   let events;
@@ -58,7 +112,7 @@ async function handle(req, res) {
     : `No open NASA-tracked natural events (wildfire, storm, flood, volcano) within ${radius} km in the last 30 days.`;
   res.json({
     status: 'ok',
-    summary: `Near ${point.lat}, ${point.lon}: ${lead} Latest NASA GIBS true-colour imagery is dated ${imageDate}. No image classification was run.`,
+    summary: `Near ${point.place ? `${point.place} (${point.lat}, ${point.lon})` : `${point.lat}, ${point.lon}`}: ${lead} Latest NASA GIBS true-colour imagery is dated ${imageDate}. No image classification was run.`,
     confidence: 0.7,
     canonical: `satellite-imagery:${point.lat.toFixed(2)},${point.lon.toFixed(2)}:${radius}`,
     latitude: point.lat,

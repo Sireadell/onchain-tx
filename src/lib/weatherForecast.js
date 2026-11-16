@@ -292,7 +292,7 @@ export async function withQuestionFallback(run, text, fallbackText) {
 // back as no location found. OpenStreetMap Nominatim asks for an
 // identifying User-Agent and at most one request a second; this runs only
 // after every Open-Meteo candidate has missed, so traffic stays tiny.
-const LANDMARK_RE = /\b(?:airport|international|tower|museum|cathedral|church|palace|castle|stadium|arena|station|terminal|port|harbou?r|bridge|park|beach|island|islands|banks|coast|bay|peninsula|lake|river|mount|mountain|valley|canyon|county|university|college|hospital|monument|square|landmark)\b/i;
+const LANDMARK_RE = /\b(?:airport|international|tower|museum|cathedral|church|palace|castle|stadium|arena|station|terminal|port|harbou?r|bridge|park|beach|island|islands|banks|coast|bay|peninsula|lake|river|mount|mountain|valley|canyon|county|university|college|hospital|monument|square|landmark|dam|reservoir|glacier|desert|forest|gigafactory)\b/i;
 
 async function geocodeOsm(input) {
   if (!LANDMARK_RE.test(String(input ?? ''))) return null;
