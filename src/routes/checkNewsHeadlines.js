@@ -18,6 +18,7 @@ import { Router } from 'express';
 import { searchWeb, hasWebSearchProvider, WebSearchError } from '../lib/webSearch.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { firstUsableValue } from '../lib/entityExtract.js';
+import { searchNews } from '../lib/googleNews.js';
 
 const router = Router();
 
@@ -132,10 +133,15 @@ export function isWithinWindow(published, window, now = Date.now()) {
   if (!published) return true;
   const at = Date.parse(String(published).replace(/(\d)(st|nd|rd|th)\b/, '$1'));
   if (!Number.isFinite(at)) return true;
-  const m = String(window).match(/(\d+)\s+(hours?|days?)/);
-  const spanMs = m ? Number(m[1]) * (m[2].startsWith('hour') ? 3_600_000 : 86_400_000) : 3 * 86_400_000;
-  return now - at <= spanMs + 86_400_000;
+  return now - at <= windowMs(window) + 86_400_000;
 }
+
+function windowMs(window) {
+  const m = String(window).match(/(\d+)\s+(hours?|days?)/);
+  return m ? Number(m[1]) * (m[2].startsWith('hour') ? 3_600_000 : 86_400_000) : 3 * 86_400_000;
+}
+
+const VIDEO_RE = /youtube\.com|youtu\.be|tiktok\.com|#shorts\b/i;
 
 function normalise(text) {
   return String(text).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -216,8 +222,7 @@ async function handleNewsHeadlines(req, res) {
 
   let result;
   try {
-    const span = String(window).match(/(\d+)\s+(hours?|days?)/);
-    const days = span ? Math.max(1, Math.ceil(Number(span[1]) / (span[2].startsWith('hour') ? 24 : 1))) : 3;
+    const days = Math.max(1, Math.ceil(windowMs(window) / 86_400_000));
     result = await searchWeb(headlinesQuery(topic, count, window), { topic: 'news', maxResults: Math.max(count, 8), days });
   } catch (err) {
     if (err instanceof WebSearchError) {
@@ -241,12 +246,24 @@ async function handleNewsHeadlines(req, res) {
     .map((h) => ({ ...h, url: findUrl(h.title, results) }));
   let listedBy = 'model';
 
-  // Fallback when the line did not parse (Tavily's own answer is free
-  // prose): the result titles, which for Tavily's news index are real
-  // articles rather than section pages.
+  // Fallback when the line did not parse or every entry was old: the free
+  // Google and Bing news feeds, which carry a real outlet and date for each
+  // story. Only then the search result titles, minus video clips (a "news
+  // in 60 seconds" upload is not a headline) and repeats.
   if (!headlines.length) {
+    const days = Math.max(1, Math.ceil(windowMs(window) / 86_400_000));
+    const feed = await searchNews(topic, { recentDays: days, limit: count }).catch(() => []);
+    headlines = feed
+      .filter((a) => a.title && isWithinWindow(a.published_at, window))
+      .slice(0, count)
+      .map((a) => ({ title: a.title, source: a.source ?? null, published: a.published_at ? a.published_at.slice(0, 10) : null, url: a.url ?? null }));
+    listedBy = 'feeds';
+  }
+  if (!headlines.length) {
+    const seen = new Set();
     headlines = results
-      .filter((r) => r.title && isWithinWindow(r.published, window))
+      .filter((r) => r.title && isWithinWindow(r.published, window) && !VIDEO_RE.test(`${r.url ?? ''} ${r.title}`))
+      .filter((r) => { const k = normalise(r.title); if (seen.has(k)) return false; seen.add(k); return true; })
       .slice(0, count)
       .map((r) => ({ title: r.title, source: null, published: r.published ?? null, url: r.url ?? null }));
     listedBy = 'results';

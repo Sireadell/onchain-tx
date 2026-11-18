@@ -23,10 +23,13 @@ function withKey(t, value = 'tvly-test-key') {
   });
 }
 
-function stubTavily(t, body) {
+const EMPTY_RSS = '<rss><channel></channel></rss>';
+
+function stubTavily(t, body, rss = EMPTY_RSS) {
   const original = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, init) => {
+    if (/^https:\/\/(?:news\.google\.com|www\.bing\.com)/.test(String(url))) return new Response(rss, { status: 200 });
     if (!String(url).startsWith('https://api.tavily.com')) return original(url, init);
     calls.push({ url: String(url), body: JSON.parse(init.body) });
     return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -179,4 +182,22 @@ test('news-headlines: a headline dated well before the window is dropped', async
   assert.equal(isWithinWindow('Dec. 25, 2025', 'the last 3 days', now), false);
   assert.equal(isWithinWindow('17 November 2026', 'the last 3 days', now), true);
   assert.equal(isWithinWindow(null, 'the last 3 days', now), true);
+});
+
+test('news-headlines: when every listed story is old, the dated news feeds answer instead of video clips', async (t) => {
+  withKey(t);
+  const now = new Date();
+  const rss = `<rss><channel><item><title>Chipmaker unveils new AI processor - Reuters</title><link>https://news.google.com/t1</link><pubDate>${now.toUTCString()}</pubDate><source url="https://reuters.com">Reuters</source></item></channel></rss>`;
+  stubTavily(t, {
+    answer: '"Big Tech Stocks Today" (ts2.tech, 20 December 2025)',
+    results: [
+      { title: 'TECH NEWS - THE LAST 12 HOURS #Shorts', url: 'https://www.youtube.com/watch?v=x', content: 'x', score: 0.9 },
+    ],
+  }, rss);
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/news-headlines?question=${encodeURIComponent("What are today's top technology headlines?")}`)).json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.headlines[0].title, 'Chipmaker unveils new AI processor');
+  assert.equal(body.headlines[0].source, 'Reuters');
+  assert.ok(!/Shorts|2025/.test(body.summary));
 });
