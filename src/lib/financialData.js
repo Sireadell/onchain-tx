@@ -162,7 +162,63 @@ export function resolveMetric(raw) {
   return null;
 }
 
+// Every metric a question names, in the order it names them ("revenue and net
+// income"). Each match is blanked out before the next word list is tried, so
+// "operating profit" is not also read as a net profit.
+export function resolveMetrics(raw) {
+  let text = String(raw ?? '').toLowerCase().replace(/[_-]/g, ' ');
+  const hits = [];
+  for (const [key, re] of METRIC_WORDS) {
+    const m = text.match(re);
+    if (!m) continue;
+    hits.push({ key, at: m.index });
+    text = text.slice(0, m.index) + ' '.repeat(m[0].length) + text.slice(m.index + m[0].length);
+  }
+  return hits.sort((a, b) => a.at - b.at).map((h) => h.key);
+}
+
 export const resolvePeriod = (raw) => (/\bquarter|quarterly|\bq[1-4]\b/i.test(String(raw ?? '')) ? 'quarter' : 'annual');
+
+const QUARTER_WORDS = { first: 1, second: 2, third: 3, fourth: 4, '1st': 1, '2nd': 2, '3rd': 3, '4th': 4 };
+const fullYear = (y) => (y.length === 2 ? 2000 + Number(y) : Number(y));
+
+// The period a question names, if any: "Q1 2024", "2024 Q1", "first quarter of
+// fiscal 2023", "FY24", "2022". fiscal is true when the question says fiscal or
+// FY, which means the company's own year rather than the calendar one.
+export function resolveTarget(raw) {
+  const text = String(raw ?? '');
+  const fiscal = /\b(fy|fiscal)\b|\bfy'?\d{2}/i.test(text);
+  let m = text.match(/\bq([1-4])\s*(?:of\s+)?(?:fy|fiscal(?:\s+year)?)?\s*'?((?:19|20)\d{2}|\d{2})\b/i);
+  if (m) return { year: fullYear(m[2]), quarter: Number(m[1]), fiscal };
+  m = text.match(/\b(?:fy\s*)?((?:19|20)\d{2})\s*q([1-4])\b/i);
+  if (m) return { year: fullYear(m[1]), quarter: Number(m[2]), fiscal };
+  m = text.match(/\b(first|second|third|fourth|1st|2nd|3rd|4th)\s+(?:fiscal\s+)?quarter\s+(?:of\s+)?(?:(?:fiscal|fy)\s*(?:year\s+)?)?'?((?:19|20)\d{2})\b/i);
+  if (m) return { year: fullYear(m[2]), quarter: QUARTER_WORDS[m[1].toLowerCase()], fiscal };
+  m = text.match(/\b(?:fy|fiscal(?:\s+year)?)\s*'?((?:19|20)\d{2}|\d{2})\b/i);
+  if (m) return { year: fullYear(m[1]), quarter: null, fiscal: true };
+  // A bare year only counts as the period after "in", "for", "during" and the
+  // like, or as the last word: "2000 employees" or "filed in 2024" is not one.
+  m = text.match(/\b(?:in|for|during|of|year)\s+((?:19|20)\d{2})\b(?!\s+(?:employees|people|staff|units|shares))/i)
+    ?? text.match(/\b((?:19|20)\d{2})\s*[?.!]?\s*$/);
+  if (m && !/\bfiled\s+(?:in\s+)?$/i.test(text.slice(0, m.index + m[0].indexOf(m[1])))) {
+    return { year: Number(m[1]), quarter: null, fiscal };
+  }
+  return null;
+}
+
+// Whether a filed fact belongs to the asked period. SEC's "frame" places each
+// figure in the calendar period it best lines up with (CY2024Q1, CY2023, and
+// an I suffix for balance-sheet dates); fy/fp name the company's fiscal period
+// of the filing it came from, which also repeats earlier years for comparison,
+// so the newest period end within it is the one meant.
+function targetMatcher(target, metric) {
+  const { year, quarter } = target;
+  const instant = metric.kind !== 'flow';
+  const frame = `CY${year}${quarter ? `Q${quarter}` : instant ? 'Q4' : ''}${instant ? 'I' : ''}`;
+  const byFrame = (f) => f.frame === frame;
+  const byFiscal = (f) => Number(f.fy) === year && f.fp === (quarter ? `Q${quarter}` : 'FY');
+  return { byFrame, byFiscal };
+}
 
 const ANNUAL_FORMS = /^(10-K|20-F|40-F)(\/A)?$/;
 const QUARTER_FORMS = /^10-Q(\/A)?$/;
@@ -172,7 +228,7 @@ const days = (a, b) => (Date.parse(b) - Date.parse(a)) / 86_400_000;
 // a balance-sheet date for the rest. A 10-K also repeats the two prior years,
 // so the newest period end wins, and a later re-filing of the same period wins
 // over the original.
-export function pickFact(facts, metric, period) {
+export function pickFact(facts, metric, period, target = null) {
   const formOk = (f) => (metric.anyForm ? /^(10-K|10-Q|20-F|40-F)/.test(f.form) : (period === 'quarter' ? QUARTER_FORMS : ANNUAL_FORMS).test(f.form));
   const spanOk = (f) => {
     if (metric.kind !== 'flow') return true;
@@ -182,7 +238,16 @@ export function pickFact(facts, metric, period) {
   };
   const usable = (facts ?? []).filter((f) => Number.isFinite(f?.val) && f.end && formOk(f) && spanOk(f));
   usable.sort((a, b) => (b.end.localeCompare(a.end)) || String(b.filed ?? '').localeCompare(String(a.filed ?? '')));
-  return usable[0] ?? null;
+  if (!target) return usable[0] ?? null;
+  // A named period: the company's own fiscal one when the question says so,
+  // the calendar one otherwise, each falling back to the other.
+  const { byFrame, byFiscal } = targetMatcher(target, metric);
+  const order = target.fiscal ? [byFiscal, byFrame] : [byFrame, byFiscal];
+  for (const match of order) {
+    const hit = usable.find(match);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 async function conceptFacts(cik, taxonomy, tag, unit) {
@@ -194,14 +259,17 @@ async function conceptFacts(cik, taxonomy, tag, unit) {
 // One metric for one company. Companies change which tag they report under
 // over the years, so every candidate tag is read and the one with the newest
 // period wins.
-export async function fetchMetric(company, metricKey, period) {
+export async function fetchMetric(company, metricKey, period, target = null) {
   const metric = METRICS[metricKey];
   const found = await Promise.all(metric.tags.map(async ([taxonomy, tag]) => {
     const facts = await conceptFacts(company.cik, taxonomy, tag, metric.unit);
-    const fact = pickFact(facts, metric, period);
+    const fact = pickFact(facts, metric, period, target);
     return fact ? { tag, fact } : null;
   }));
-  const best = found.filter(Boolean).sort((a, b) => b.fact.end.localeCompare(a.fact.end))[0];
+  // For a named period every tag holds the same period, so the first-listed
+  // (most specific) tag wins rather than the newest end.
+  const hits = found.filter(Boolean);
+  const best = target ? hits[0] : hits.sort((a, b) => b.fact.end.localeCompare(a.fact.end))[0];
   if (!best) return null;
   const { fact } = best;
   return {

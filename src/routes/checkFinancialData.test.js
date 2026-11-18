@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import { forwardAsyncErrors, errorHandler } from '../app.js';
 import router from './checkFinancialData.js';
-import { __clearFinancialCacheForTesting, pickFact, METRICS, resolveCompany, resolveMetric, resolvePeriod, formatValue } from '../lib/financialData.js';
+import { __clearFinancialCacheForTesting, pickFact, METRICS, resolveCompany, resolveMetric, resolvePeriod, resolveTarget, resolveMetrics, formatValue } from '../lib/financialData.js';
 
 function startServer(t) {
   const app = express();
@@ -173,4 +173,61 @@ test('company, metric and period words are read from questions', async (t) => {
   assert.equal(resolveMetric('how big is the company'), null);
   assert.equal(resolvePeriod('Q3 results'), 'quarter');
   assert.equal(formatValue(-2500000, 'USD'), '-$2.50 million');
+});
+
+test('reads the period a question names', () => {
+  assert.deepEqual(resolveTarget('Tesla Q1 2024 net income'), { year: 2024, quarter: 1, fiscal: false });
+  assert.deepEqual(resolveTarget('revenue 2023 Q3'), { year: 2023, quarter: 3, fiscal: false });
+  assert.deepEqual(resolveTarget('Apple revenue for the second quarter of fiscal 2024'), { year: 2024, quarter: 2, fiscal: true });
+  assert.deepEqual(resolveTarget('Apple revenue FY23'), { year: 2023, quarter: null, fiscal: true });
+  assert.deepEqual(resolveTarget('Microsoft total assets 2022'), { year: 2022, quarter: null, fiscal: false });
+  assert.equal(resolveTarget('Tesla net income'), null);
+});
+
+test('a named quarter picks that quarter, not the newest one', () => {
+  const q = (end, start, val, frame, fy, fp) => ({ form: '10-Q', start, end, val, frame, fy, fp, filed: end });
+  const facts = [
+    q('2026-09-30', '2026-07-01', 30, 'CY2026Q3', 2026, 'Q3'),
+    q('2024-03-31', '2024-01-01', 11, 'CY2024Q1', 2024, 'Q1'),
+    q('2023-03-31', '2023-01-01', 10, 'CY2023Q1', 2024, 'Q1'),
+  ];
+  assert.equal(pickFact(facts, METRICS.net_income, 'quarter').val, 30);
+  assert.equal(pickFact(facts, METRICS.net_income, 'quarter', { year: 2024, quarter: 1, fiscal: false }).val, 11);
+  // Fiscal: the newest period end inside the filings for that fiscal quarter.
+  assert.equal(pickFact(facts, METRICS.net_income, 'quarter', { year: 2024, quarter: 1, fiscal: true }).val, 11);
+  assert.equal(pickFact(facts, METRICS.net_income, 'quarter', { year: 2031, quarter: 3, fiscal: false }), null);
+});
+
+test('every metric a question names is read, in its order', () => {
+  assert.deepEqual(resolveMetrics("What was Tesla's net income and total revenue for Q1 2024?"), ['net_income', 'revenue']);
+  assert.deepEqual(resolveMetrics('total assets and liabilities for Microsoft'), ['total_assets', 'total_liabilities']);
+  assert.deepEqual(resolveMetrics('operating profit'), ['operating_income']);
+  assert.deepEqual(resolveMetrics('hello'), []);
+});
+
+test('a question naming two metrics answers both for the same filing', async (t) => {
+  stubSec(t);
+  const base = startServer(t);
+  const j = await (await fetch(`${base}/financial-data?query=${encodeURIComponent('Apple revenue and net income fiscal 2024')}`)).json();
+  assert.equal(j.status, 'ok');
+  assert.match(j.summary, /revenue of \$391\.0\d billion and net income of \$93\.7\d billion for the fiscal year ended 2024-09-28/);
+  assert.equal(j.requested_period, 'fiscal 2024');
+});
+
+test('a crypto market question never falls back to an unrelated company filer', async (t) => {
+  const keys = ['TAVILY_API_KEY', 'PERPLEXITY_API_KEY', 'GROQ_API_KEY', 'GEMINI_API_KEY'];
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  for (const k of keys) delete process.env[k];
+  t.after(() => { for (const k of keys) if (saved[k] !== undefined) process.env[k] = saved[k]; });
+  stubSec(t, { tickers: { 0: { cik_str: 1, ticker: 'POOL', title: 'POOL CORP' } } });
+  const base = startServer(t);
+  const j = await (await fetch(`${base}/financial-data?query=${encodeURIComponent('Can a 10 ETH sell order clear the WETH/USDC pool with under 1% slippage?')}`)).json();
+  assert.equal(j.status, 'unavailable');
+  assert.doesNotMatch(j.summary, /POOL CORP/);
+});
+
+test('a year that is not a period is not read as one', () => {
+  assert.equal(resolveTarget('Which company with 2000 employees had the most revenue?'), null);
+  assert.equal(resolveTarget('Apple revenue from the 10-K filed in 2024'), null);
+  assert.deepEqual(resolveTarget('Apple revenue in 2023'), { year: 2023, quarter: null, fiscal: false });
 });

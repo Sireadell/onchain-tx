@@ -62,3 +62,21 @@ test('an empty question is unusable input', async (t) => {
   const j = await (await fetch(`${base}/question-answering`)).json();
   assert.equal(j.status, 'invalid_input');
 });
+
+test('source pages are listed as numbered citations, without repeats or bad links', async () => {
+  const { citationsFrom } = await import('./checkQuestionAnswering.js');
+  const out = citationsFrom([
+    { title: 'Things Fall Apart', url: 'https://en.wikipedia.org/wiki/Things_Fall_Apart' },
+    { title: 'dup', url: 'https://en.wikipedia.org/wiki/Things_Fall_Apart' },
+    { title: 'no link', url: 'javascript:alert(1)' },
+    { url: 'https://www.britannica.com/topic/Things-Fall-Apart' },
+    { title: 'C', url: 'https://c.example/a' },
+    { title: 'D', url: 'https://d.example/a' },
+  ]);
+  assert.deepEqual(out, [
+    { n: 1, title: 'Things Fall Apart', url: 'https://en.wikipedia.org/wiki/Things_Fall_Apart' },
+    { n: 2, title: 'https://www.britannica.com/topic/Things-Fall-Apart', url: 'https://www.britannica.com/topic/Things-Fall-Apart' },
+    { n: 3, title: 'C', url: 'https://c.example/a' },
+  ]);
+  assert.deepEqual(citationsFrom(undefined), []);
+});

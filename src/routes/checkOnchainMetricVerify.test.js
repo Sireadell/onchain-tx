@@ -82,6 +82,9 @@ test('a native balance at a block', async (t) => {
   const j = await ask(startServer(t), `What was the ETH balance of ${wallet} at block 18,000,000?`);
   assert.match(j.summary, /balance of .* on Ethereum at block 18,000,000 is 1 ETH/);
   assert.equal(calls[0].method, 'eth_getBalance');
+  assert.equal(j.found, true);
+  assert.match(j.method, /Read directly from a node on Ethereum at block 18,000,000/);
+  assert.equal(j.checked_at, undefined, 'the timestamp is left out of the reply');
 });
 
 test('a bare address with a block reads its native balance, and Gwei is given when asked', async (t) => {
