@@ -5,7 +5,8 @@
 // direct holder-count method) — see blockscoutApi.js.
 
 import { Router } from 'express';
-import { getTokenInfo, TokenNotFoundError } from '../lib/blockscoutApi.js';
+import { getTokenInfo, searchTokenByName, TokenNotFoundError } from '../lib/blockscoutApi.js';
+import { tokenFromText } from './checkTokenTotalSupply.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { CHAINS, DEFAULT_CHAIN, resolveChainLoose } from '../lib/chains.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
@@ -16,6 +17,29 @@ const router = Router();
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
+// The token a question names when it gives no address: "how many holders
+// does Chainlink have on Ethereum" -> "Chainlink". Chain words and filler
+// ("token", "coin", "the") are dropped. Null when no name can be read.
+export function tokenNameFromQuestion(text) {
+  const t = String(text ?? '').replace(/[?!.]+\s*$/, '').trim();
+  const patterns = [
+    /holders?\s+(?:count\s+)?(?:does|do|of|for|in)\s+(.+?)(?:\s+(?:have|has|got)\b|$)/i,
+    /(?:how many|number of)\s+(?:people|wallets|addresses|accounts)\s+(?:hold|own)\s+(.+)$/i,
+    /^(?:how many\s+)?(.+?)\s+(?:token\s+)?holders?\b/i,
+  ];
+  for (const re of patterns) {
+    const m = t.match(re);
+    if (!m) continue;
+    const name = m[1]
+      .replace(/\s+(?:on|in)\s+(?:the\s+)?[a-z ]+?(?:\s+(?:chain|network|mainnet))?$/i, '')
+      .replace(/^(?:the|a)\s+/i, '')
+      .replace(/\s+(?:token|tokens|coin|coins|stablecoin)$/i, '')
+      .trim();
+    if (name && name.length <= 40 && !/^(?:how many|the|it|this)$/i.test(name)) return name;
+  }
+  return null;
+}
+
 export async function handleTokenHolders(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
   // Same free-text fallback as the other on-chain routes: the engine
@@ -24,12 +48,22 @@ export async function handleTokenHolders(req, res) {
   const question = freeTextParam(params);
   const rawToken = firstUsableValue(params?.token, question);
   // Exact match first; if that fails, pull a contract address out of
-  // whatever was sent instead of rejecting outright — this does not (and
-  // cannot reliably) resolve a ticker like "USDC" to an address, only an
-  // address already present but wrapped in other text. See
-  // entityExtract.js.
-  const token = rawToken && ADDRESS_RE.test(rawToken) ? rawToken : extractAddress(rawToken);
+  // whatever was sent instead of rejecting outright. See entityExtract.js.
+  let token = rawToken && ADDRESS_RE.test(rawToken) ? rawToken : extractAddress(rawToken);
   const chainParam = firstUsableValue(params?.chain, resolveChainLoose(question ?? '')?.key, DEFAULT_CHAIN);
+
+  // No address: resolve a named token, the well-known table first and then
+  // Blockscout's search on the asked chain.
+  if (!token && rawToken) {
+    const named = resolveChainLoose(chainParam);
+    const known = named ? tokenFromText(rawToken, named.key) : null;
+    if (known?.address) token = known.address;
+    else if (named) {
+      const name = tokenNameFromQuestion(rawToken) ?? (rawToken.trim().split(/\s+/).length <= 3 ? rawToken.trim() : null);
+      const found = name ? await searchTokenByName(named.blockscoutHost, name) : null;
+      if (found) token = found.address;
+    }
+  }
 
   if (!token) {
     const problem = rawToken
@@ -37,7 +71,7 @@ export async function handleTokenHolders(req, res) {
       : 'no token contract address was supplied';
     return respondUnusableInput(
       res,
-      `I cannot count holders because ${problem}. I need the token's contract address, which is 42 characters long: "0x" followed by 40 hexadecimal characters. A token name or ticker will not work here. Pass the contract address as the token parameter and I will return its holder count.`,
+      `I cannot count holders because ${problem}. I need the token's contract address, which is 42 characters long: "0x" followed by 40 hexadecimal characters. Name a widely traded token (for example USDC or Chainlink) or pass the contract address as the token parameter and I will return its holder count.`,
     );
   }
 

@@ -90,7 +90,10 @@ function shortBrief(text) {
   return t.length <= 80 ? t : `${t.slice(0, 77).trimEnd()}...`;
 }
 
-function articlesAnswer(query, articles, ai) {
+function articlesAnswer(query, found, ai) {
+  // The two feeds are interleaved by their own ranking, so the first article
+  // is often not the newest. The answer calls it "the latest", so it must be.
+  const articles = [...found].sort((a, b) => (Number(b.published_unix) || 0) - (Number(a.published_unix) || 0));
   const top = articles[0];
   const topic = cleanNewsQuery(query).length > 80 ? 'this topic' : `"${cleanNewsQuery(query)}"`;
   const lead = ai?.answer ? ai.answer.trim() : `The latest reported story on ${topic} is ${describe(top)}.`;

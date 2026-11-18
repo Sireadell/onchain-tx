@@ -35,11 +35,16 @@ function stubTavily(t, body) {
   return calls;
 }
 
+// Dates relative to now, so the stories stay inside the 3-day window.
+const dayLabel = (back) => new Date(Date.now() - back * 86_400_000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+const D1 = dayLabel(0);
+const D2 = dayLabel(1);
+
 // The shape the model is asked for: a one-line list of "Headline" (Source,
 // date) entries. The result list carries the URLs the entries are matched to.
 const TAVILY_LIST = {
   query: 'headlines about the election',
-  answer: '"Election update: results expected tonight" (Example News, 16 September 2026); "Candidates make final push" (Example Wire, 15 September 2026)',
+  answer: `"Election update: results expected tonight" (Example News, ${D1}); "Candidates make final push" (Example Wire, ${D2})`,
   results: [
     { title: 'Election update: results expected tonight | Example News', url: 'https://example.com/a', content: 'x', score: 0.9 },
     { title: 'Candidates make final push', url: 'https://example.com/b', content: 'y', score: 0.8 },
@@ -81,11 +86,11 @@ test('news-headlines: parses the headline list, matches URLs, and leads the grad
   assert.deepEqual(body.headlines[0], {
     title: 'Election update: results expected tonight',
     source: 'Example News',
-    published: '16 September 2026',
+    published: D1,
     url: 'https://example.com/a',
   });
   assert.equal(body.headlines[1].url, 'https://example.com/b');
-  assert.match(body.summary, /^Recent coverage of election includes: "Election update: results expected tonight" \(Example News, 16 September 2026\); "Candidates make final push"/);
+  assert.ok(body.summary.startsWith(`Recent coverage of election includes: "Election update: results expected tonight" (Example News, ${D1}); "Candidates make final push"`));
   assert.equal(calls[0].body.topic, 'news');
   assert.match(calls[0].body.query, /List the 6 most recent news headlines about election/);
 });
@@ -161,4 +166,17 @@ test('news-headlines: no headlines found is an answer, not a failure', async (t)
   const res = await fetch(`${base}/news-headlines?topic=asdkjhasdkjh`);
   assert.equal(res.status, 200);
   assert.equal((await res.json()).status, 'invalid_input');
+});
+
+test('news-headlines: reads the subject of a "what are today\'s top X headlines" question', async () => {
+  const { extractTopic } = await import('./checkNewsHeadlines.js');
+  assert.equal(extractTopic("What are today's top technology headlines?").topic, 'technology');
+});
+
+test('news-headlines: a headline dated well before the window is dropped', async () => {
+  const { isWithinWindow } = await import('./checkNewsHeadlines.js');
+  const now = Date.parse('2026-11-18T20:00:00Z');
+  assert.equal(isWithinWindow('Dec. 25, 2025', 'the last 3 days', now), false);
+  assert.equal(isWithinWindow('17 November 2026', 'the last 3 days', now), true);
+  assert.equal(isWithinWindow(null, 'the last 3 days', now), true);
 });

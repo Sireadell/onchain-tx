@@ -144,3 +144,27 @@ export async function getTokenInfo(host, tokenAddress, ankrChain) {
   }
   return value;
 }
+
+// Token name or ticker to contract address, for questions like "how many
+// holders does Chainlink have". Blockscout's search returns scam copies too
+// (fake "ChainLink Token" ERC-1155s), so only ERC-20s with a market price are
+// kept and the one with the largest market cap wins. Null when nothing priced
+// matches, so the caller can still ask for the address.
+export async function searchTokenByName(host, name) {
+  const q = String(name ?? '').trim();
+  if (!q) return null;
+  let body;
+  try {
+    body = await fetchBlockscout(host, `/api/v2/search?q=${encodeURIComponent(q)}`);
+  } catch {
+    return null;
+  }
+  const wanted = q.toLowerCase();
+  const priced = (body?.items ?? []).filter(
+    (i) => i.type === 'token' && i.token_type === 'ERC-20' && i.exchange_rate != null && i.address_hash
+      && [i.name, i.symbol].some((v) => String(v ?? '').toLowerCase() === wanted),
+  );
+  if (!priced.length) return null;
+  priced.sort((a, b) => Number(b.circulating_market_cap ?? 0) - Number(a.circulating_market_cap ?? 0));
+  return { address: priced[0].address_hash, symbol: priced[0].symbol ?? null };
+}

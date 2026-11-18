@@ -233,3 +233,22 @@ test('news-search: Bing results are merged with Google and duplicates dropped', 
   assert.equal(body.result_count, 3);
   assert.ok(body.sources.some((s) => s.url === 'https://example.com/new'));
 });
+
+test('news-search: the story called "the latest" is the newest one, not the first ranked', async (t) => {
+  withKey(t);
+  const original = globalThis.fetch;
+  const older = '<rss><channel><item><title>Fed holds rates - WSJ</title><link>https://news.google.com/c1</link><pubDate>Thu, 12 Nov 2026 10:00:00 GMT</pubDate><source url="https://wsj.com">WSJ</source></item></channel></rss>';
+  const newer = '<rss><channel><item><title>Fed signals a hike - Reuters</title><link>https://www.bing.com/c2</link><pubDate>Wed, 18 Nov 2026 10:00:00 GMT</pubDate><source url="https://reuters.com">Reuters</source></item></channel></rss>';
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith('https://news.google.com')) return new Response(older, { status: 200 });
+    if (String(url).startsWith('https://www.bing.com')) return new Response(newer, { status: 200 });
+    if (String(url).startsWith('https://api.tavily.com')) throw new Error('paid search must not run');
+    return original(url, init);
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/news-search?query=Federal+Reserve+rates`)).json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.headline, body.articles[0].title);
+  assert.ok(Number(body.articles[0].published_unix) >= Number(body.articles[body.articles.length - 1].published_unix));
+});

@@ -243,6 +243,7 @@ async function callTavily(query, options) {
         // so a list of links with no sentence over it scores near zero.
         include_answer: 'advanced',
         max_results: options.maxResults,
+        ...(options.days ? { days: options.days } : {}),
         include_raw_content: false,
         include_images: false,
     }, controller.signal);
@@ -267,6 +268,7 @@ async function callTavily(query, options) {
       // mistake of treating it as the full text.
       snippet: typeof r.content === 'string' ? r.content : '',
       score: Number.isFinite(r.score) ? r.score : null,
+      published: r.published_date ?? null,
     }));
 
     const answer = (typeof body?.answer === 'string' && body.answer.trim())

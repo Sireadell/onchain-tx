@@ -33,6 +33,9 @@ const MAX_COUNT = 10;
 const LEAD_RE = /^\s*(?:(?:what|which)\s+are\s+|give\s+me\s+|show\s+me\s+|list\s+|find\s+|get\s+|tell\s+me\s+|search\s+(?:the\s+news\s+)?for\s+)?(?:the\s+)?(?:today'?s\s+|this\s+week'?s\s+|current\s+|latest\s+|recent\s+|breaking\s+|top\s+)*(?:news\s+)?headlines?\s*(?:about|on|for|regarding|of|from|in|covering)?\s*/i;
 const TOP_X_RE = /^\s*(?:top|latest|today'?s|current)\s+(.+?)\s+(?:news\s+)?headlines?\b/i;
 const X_HEADLINES_RE = /^\s*(.+?)\s+(?:top\s+)?(?:news\s+)?headlines?\b/i;
+// "What are today's top technology headlines?" names its subject between
+// the time words and "headlines".
+const WH_X_RE = /^\s*(?:what|which)\s+are\s+(?:the\s+)?(?:(?:today'?s|this\s+week'?s|current|latest|recent|breaking|top|biggest|main)\s+)*(.+?)\s+(?:news\s+)?headlines?\b/i;
 const TAIL_RE = /\s*(?:today|right\s+now|now|currently|this\s+week)?\s*[,.?!]*\s*(?:as\s+a\s+(?:headline\s+)?list[.?!]*)?\s*$/i;
 const WINDOW_RE = /\s*(?:in|from|for|over)?\s*(?:the\s+)?(?:last|past)\s+(\d+)?\s*(hours?|hrs?|days?|week|24|48|72)\b\s*/i;
 
@@ -67,9 +70,11 @@ export function extractTopic(raw) {
   if (lead !== text) {
     topic = lead;
   } else {
+    const wh = text.match(WH_X_RE);
     const top = text.match(TOP_X_RE);
     const x = text.match(X_HEADLINES_RE);
-    if (top) topic = top[1];
+    if (wh) topic = wh[1];
+    else if (top) topic = top[1];
     else if (x) topic = x[1];
   }
 
@@ -119,6 +124,17 @@ function parseHeadlines(answer) {
     if (title) out.push({ title, source: source || null, published: published || null });
   }
   return out;
+}
+
+// True when a headline's date falls inside "the last N days/hours", with a
+// day of slack for time zones. An unreadable or missing date passes.
+export function isWithinWindow(published, window, now = Date.now()) {
+  if (!published) return true;
+  const at = Date.parse(String(published).replace(/(\d)(st|nd|rd|th)\b/, '$1'));
+  if (!Number.isFinite(at)) return true;
+  const m = String(window).match(/(\d+)\s+(hours?|days?)/);
+  const spanMs = m ? Number(m[1]) * (m[2].startsWith('hour') ? 3_600_000 : 86_400_000) : 3 * 86_400_000;
+  return now - at <= spanMs + 86_400_000;
 }
 
 function normalise(text) {
@@ -200,7 +216,9 @@ async function handleNewsHeadlines(req, res) {
 
   let result;
   try {
-    result = await searchWeb(headlinesQuery(topic, count, window), { topic: 'news', maxResults: Math.max(count, 8) });
+    const span = String(window).match(/(\d+)\s+(hours?|days?)/);
+    const days = span ? Math.max(1, Math.ceil(Number(span[1]) / (span[2].startsWith('hour') ? 24 : 1))) : 3;
+    result = await searchWeb(headlinesQuery(topic, count, window), { topic: 'news', maxResults: Math.max(count, 8), days });
   } catch (err) {
     if (err instanceof WebSearchError) {
       return res.status(502).json({
@@ -214,7 +232,11 @@ async function handleNewsHeadlines(req, res) {
   }
 
   const results = result.results ?? [];
+  // A headline dated well before the asked window is old news, whatever the
+  // model was told. Undated ones stay, since most outlets omit the date.
+  const fresh = (h) => isWithinWindow(h.published, window);
   let headlines = parseHeadlines(result.answer ?? '')
+    .filter(fresh)
     .slice(0, count)
     .map((h) => ({ ...h, url: findUrl(h.title, results) }));
   let listedBy = 'model';
@@ -224,9 +246,9 @@ async function handleNewsHeadlines(req, res) {
   // articles rather than section pages.
   if (!headlines.length) {
     headlines = results
-      .filter((r) => r.title)
+      .filter((r) => r.title && isWithinWindow(r.published, window))
       .slice(0, count)
-      .map((r) => ({ title: r.title, source: null, published: null, url: r.url ?? null }));
+      .map((r) => ({ title: r.title, source: null, published: r.published ?? null, url: r.url ?? null }));
     listedBy = 'results';
   }
 

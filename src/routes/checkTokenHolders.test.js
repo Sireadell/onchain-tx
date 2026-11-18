@@ -102,3 +102,50 @@ test('token-holders: a Blockscout bot-check 403 falls back to the Ankr holder co
   assert.equal(body.holders_count, 4321);
   assert.match(body.summary, /has 4321 holders/);
 });
+
+test('token-holders: reads the token name out of a question', async () => {
+  const { tokenNameFromQuestion } = await import('./checkTokenHolders.js');
+  assert.equal(tokenNameFromQuestion('How many holders does USDC on Ethereum have?'), 'USDC');
+  assert.equal(tokenNameFromQuestion('Number of holders of the PEPE token'), 'PEPE');
+  assert.equal(tokenNameFromQuestion('How many people hold Shiba Inu?'), 'Shiba Inu');
+  assert.equal(tokenNameFromQuestion('What is the holder count of Ondo?'), 'Ondo');
+});
+
+test('token-holders: a well-known ticker resolves without a search', async (t) => {
+  resetBlockscoutCache();
+  const seen = [];
+  mockFetch(t, async (url) => {
+    seen.push(String(url));
+    return new Response(JSON.stringify({ holders_count: 9606312, name: 'USD Coin', symbol: 'USDC', decimals: '6' }), { status: 200 });
+  });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/token-holders?question=${encodeURIComponent('How many holders does USDC on Ethereum have?')}`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.holders_count, 9606312);
+  assert.ok(seen.some((u) => u.includes('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48')));
+  assert.ok(!seen.some((u) => u.includes('/search')));
+});
+
+test('token-holders: an unlisted name is found by search, skipping unpriced copies', async (t) => {
+  resetBlockscoutCache();
+  const real = '0x' + 'b'.repeat(40);
+  mockFetch(t, async (url) => {
+    const u = String(url);
+    if (u.includes('/search')) {
+      return new Response(JSON.stringify({ items: [
+        { type: 'token', token_type: 'ERC-20', name: 'Ondo', symbol: 'ONDO', address_hash: TOKEN, exchange_rate: null },
+        { type: 'token', token_type: 'ERC-20', name: 'Ondo', symbol: 'ONDO', address_hash: real, exchange_rate: '0.8', circulating_market_cap: '2500000000' },
+      ] }), { status: 200 });
+    }
+    if (u.includes(real)) return new Response(JSON.stringify({ holders_count: 223412, name: 'Ondo', symbol: 'ONDO' }), { status: 200 });
+    return new Response('{}', { status: 404 });
+  });
+  const base = startServer(t);
+
+  const res = await fetch(`${base}/token-holders?question=${encodeURIComponent('What is the holder count of Ondo?')}`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.holders_count, 223412);
+});
