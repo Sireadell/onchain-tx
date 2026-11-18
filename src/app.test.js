@@ -53,6 +53,24 @@ test('the graded answer is a full sentence, not a bare status word', async (t) =
   assert.ok(body.answer.length > 40, 'the graded answer must carry real content');
 });
 
+test('checked_at is left out of replies except on the endpoints that keep it', async (t) => {
+  const { checkedAtMiddleware } = await import('./app.js');
+  const app = express();
+  app.use(checkedAtMiddleware);
+  const reply = (req, res) => res.json({ status: 'ok', summary: 'x', checked_at: '2026-01-01T00:00:00Z' });
+  app.get('/fraud-risk', reply);
+  app.get('/crypto-price', reply);
+  app.get('/code-review', reply);
+  const base = startServer(t, app);
+
+  const dropped = await (await fetch(`${base}/fraud-risk?query=a`)).json();
+  assert.deepEqual(dropped, { status: 'ok', summary: 'x' });
+  for (const path of ['/crypto-price', '/code-review']) {
+    const kept = await (await fetch(`${base}${path}`)).json();
+    assert.equal(kept.checked_at, '2026-01-01T00:00:00Z', `${path} keeps its stamp`);
+  }
+});
+
 // The app had no error-handling middleware at all, so an exception in any
 // route left the request hanging with no response ever sent, and Telegraph's
 // grader recorded that as a timeout rather than an error. These cover both

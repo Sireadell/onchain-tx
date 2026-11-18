@@ -6,7 +6,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import { forwardAsyncErrors, errorHandler } from '../app.js';
-import { kycLivenessRouter } from './newIntents.js';
+import { kycLivenessRouter, fraudRiskRouter } from './newIntents.js';
+import { KEEP_LAYOUT } from '../lib/llmIntentRoute.js';
 import { llmOutputEvaluationRouter, splitStrengthsErrors } from './llmIntents.js';
 import summarizeRouter, { deps, looksLikeSourcelessRequest } from './checkTextSummarization.js';
 import generateRouter, { looksLikePaperRequest } from './checkTextGeneration.js';
@@ -230,4 +231,31 @@ test('grammar: parseIssue handles a fix with no arrow', () => {
   assert.equal(issue.error, null);
   assert.equal(issue.message, 'added a missing comma');
   assert.equal(issue.type, 'punctuation');
+});
+
+test('graded layout: verdict is the short answer, reasons once in summary, method line, no timestamp or cost', async (t) => {
+  withKey(t);
+  stubPerplexity(t, 'Medium risk. The email domain is a known disposable provider. The IP is in a documentation range.');
+  const app = express();
+  app.use('/fraud', forwardAsyncErrors(fraudRiskRouter));
+  const server = app.listen(0);
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const body = await (await fetch(`${base}/fraud?query=${encodeURIComponent('fraud risk for a signup from 198.51.100.10 with a mailinator.com email?')}`)).json();
+  assert.deepEqual(Object.keys(body), ['status', 'verdict', 'answer', 'found', 'confidence', 'summary', 'method']);
+  assert.equal(body.verdict, 'Medium risk');
+  assert.equal(body.answer, 'Medium risk');
+  assert.match(body.summary, /disposable provider/);
+  assert.equal(body.checked_at, undefined);
+  assert.equal(body.cost_usd, undefined);
+});
+
+test('graded layout: an intent ranked first keeps its older layout', async (t) => {
+  withKey(t);
+  stubPerplexity(t, 'Inconclusive. Nothing was inspected.');
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/kyc?query=${encodeURIComponent('Is this a live person?')}`)).json();
+  assert.equal(KEEP_LAYOUT.has('KYC_BIOMETRIC_LIVENESS'), true);
+  assert.ok(body.checked_at);
+  assert.equal(body.answer, body.summary);
 });

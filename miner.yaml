@@ -2580,6 +2580,66 @@ endpoints:
               "What does the live source say about this?".
     description: >
       MINING_HASHPRICE_VERIFY. Answers "what is the Bitcoin hashprice", "mining revenue per PH/s per day at block 800000". Computes expected revenue per unit of hashrate per day from the block reward and network difficulty of one block. Params: height (optional, a block number or latest).
+  - path: /tts
+    external_path: /tts
+    method: GET
+    intents: [TEXT_TO_SPEECH_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
+    description: >
+      TEXT_TO_SPEECH. Speaks the given text (up to 1,200 characters) with a Gemini speech model and returns a playable WAV link, duration, voice (Kore default, Puck, Charon, Fenrir, Aoede, Leda, Orus, Zephyr) and the text. Params: text, or the whole request as query.
+  - path: /transcribe
+    external_path: /transcribe
+    method: GET
+    intents: [SPEECH_TO_TEXT_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
+    description: >
+      SPEECH_TO_TEXT. Transcript and detected language of the speech in an audio file at a public URL (MP3, WAV, OGG, FLAC or M4A, up to 8 MB), written by a Gemini speech model. Nothing is transcribed without audio. Params: audio_url, or a URL inside query.
+  - path: /port-audit
+    external_path: /port-audit
+    method: GET
+    intents: [PORT_SCAN_AUDIT_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
+    description: >
+      PORT_SCAN_AUDIT. Open ports, exposed services, risky services (Telnet, SMB, RDP, databases, Redis, Docker API) and fingerprint-matched CVEs for a host (IPv4 address, domain or URL) from Shodan InternetDB, Shodan's public index of internet-wide scans. Passive: no connection is made to the host, so the answer is Shodan's latest observation. Params: host, or query.
+  - path: /transit-lock
+    external_path: /transit-lock
+    method: GET
+    intents: [TRAVEL_TRANSIT_LOCK_GENERAL]
+    params:
+      query:
+        required:
+          - name: query
+            type: string
+            intents: ['*']
+            description: >
+              The full question in plain language, kept verbatim, for example
+              "What does the live source say about this?".
+    description: >
+      TRAVEL_TRANSIT_LOCK. A fare, seat or booking lock lives only in the airline's or agency's reservation record, so it is never claimed as locked. For a route given by airport codes, the current METAR flight category at each airport is reported from aviationweather.gov, flagging instrument conditions that threaten a tight connection. Params: booking or route, or query.
 
 input_schema:
   type: object
@@ -3890,6 +3950,10 @@ semantics:
     - SERVER_UPTIME_MONITOR_GENERAL
     - TWITTER_SEARCH_GENERAL
     - EMBEDDING_GENERATION_GENERAL
+    - TEXT_TO_SPEECH_GENERAL
+    - SPEECH_TO_TEXT_GENERAL
+    - PORT_SCAN_AUDIT_GENERAL
+    - TRAVEL_TRANSIT_LOCK_GENERAL
 
 docs:
   repository: https://github.com/Sireadell/onchain-tx

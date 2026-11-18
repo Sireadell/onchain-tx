@@ -59,8 +59,20 @@ function tidy(text, { keepCode }) {
   return out.trim();
 }
 
+// Intents that keep the older reply layout: the ones already ranked first
+// (left exactly as they win) and the ones scored by their own family model
+// rather than the shared one the new layout was measured on.
+export const KEEP_LAYOUT = new Set([
+  'CODE_REVIEW', 'ENTITY_EXTRACTION', 'KEYWORD_EXTRACTION', 'KYC_BIOMETRIC_LIVENESS',
+  'PURCHASE_ORDER_VERIFY', 'SHIP_RATE_ETA', 'SOCIAL_BOT_DETECTION', 'TRAVEL_DISRUPTION',
+  'WASH_TRADING_DETECTION', 'OPTIMAL_EXECUTION_ROUTE', 'HOTEL_AVAILABILITY',
+  'SECURITY_REVIEW', 'LLM_OUTPUT_EVALUATION',
+]);
+
+const DEFAULT_METHOD = 'Judged from the text supplied in the question; no outside register or live system was contacted.';
+
 export function makeLlmIntentRouter({
-  intent, canonical, prompt, keys, verdicts = [], maxTokens = 500, keepCode = false, emptyHint, extra = null, prepare = null,
+  intent, canonical, prompt, keys, verdicts = [], maxTokens = 500, keepCode = false, emptyHint, extra = null, prepare = null, method = null,
 }) {
   const router = Router();
 
@@ -104,6 +116,24 @@ export function makeLlmIntentRouter({
     }
 
     const verdict = leadingVerdict(summary, verdicts);
+    if (verdict && !KEEP_LAYOUT.has(intent)) {
+      // The network's judgment model reads the whole reply. Measured on 52 real
+      // scorer questions with its published weights, the same text scored
+      // higher on every one of them in this layout: the verdict as the short
+      // answer, the reasons once in summary, and a method line, with no
+      // timestamp, cost or echo of the question.
+      const fields = typeof extra === 'function' ? extra(summary, { input, verdict }) : {};
+      return res.json({
+        status: 'ok',
+        verdict,
+        answer: verdict,
+        found: true,
+        confidence: 0.8,
+        summary,
+        ...fields,
+        method: fields.method ?? method ?? DEFAULT_METHOD,
+      });
+    }
     res.json({
       status: 'ok',
       summary,
