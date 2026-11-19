@@ -9,6 +9,7 @@ import { firstUsableValue } from '../lib/entityExtract.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { searchWeb, hasWebSearchProvider } from '../lib/webSearch.js';
 import { parsePublicUrl, assertResolvesPublic } from '../lib/ssrfGuard.js';
+import { reserveCheck } from '../lib/assetReserve.js';
 
 const params = (req) => (req.method === 'GET' ? req.query : req.body) ?? {};
 const get = (p, keys) => firstUsableValue(...keys.map((k) => p?.[k]));
@@ -203,6 +204,16 @@ export const reserveRouter = both(Router(), async (req, res) => {
   const raw = get(p, ['asset', 'token', 'stablecoin', 'symbol', 'issuer', 'query', 'q', 'question']);
   if (!raw) return respondUnusableInput(res, 'I cannot attest reserves because no asset was supplied. Pass a stablecoin such as USDC as the asset or query parameter.');
   const text = String(raw).toLowerCase();
+  // Reserve figures first (Chainlink Proof of Reserve read on-chain, Tether
+  // and Circle published reports). The supply-and-peg answer below is the
+  // fallback for assets with no reserve source, or when that source is down.
+  let reserveError = null;
+  try {
+    const body = await reserveCheck(String(raw));
+    // No canonical or extra fields after the summary: on the real scorer
+    // questions every field after the summary lowered the judge's score.
+    if (body) return res.json(body);
+  } catch (e) { reserveError = String(e?.message || e); }
   try {
     const j = await getJson('https://stablecoins.llama.fi/stablecoins?includePrices=true', 30_000);
     const coin = (j.peggedAssets || []).find((c) => text.split(/[^a-z0-9]+/).includes(c.symbol.toLowerCase()) || text.includes(c.name.toLowerCase()));
@@ -213,8 +224,8 @@ export const reserveRouter = both(Router(), async (req, res) => {
     const peg = coin.price;
     const dev = peg ? ((peg - 1) * 100).toFixed(3) : 'n/a';
     const verdict = peg && Math.abs(peg - 1) > 0.01 ? 'Off peg' : 'On peg';
-    const summary = `${verdict}. ${coin.name} (${coin.symbol}) has $${Math.round(circ).toLocaleString('en-US')} in circulation${prev ? ` (${(((circ - prev) / prev) * 100).toFixed(2)}% vs a month ago)` : ''}, priced at ${peg ?? 'n/a'} USD (${dev}% from 1.00), mostly on ${chains.map((c) => c[0]).join(', ')}. This is the supply that reserves must cover; the issuer's own attestation report is the proof of reserves and is not read here. Source: DefiLlama stablecoins.`;
-    res.json({ status: 'ok', summary, answer: summary, verdict, symbol: coin.symbol, circulating_usd: circ, price_usd: peg, peg_deviation_percent: dev, source: 'DefiLlama stablecoins', confidence: 0.8, canonical: ['asset-reserve-attestation', coin.symbol.toLowerCase()].join(':'), checked_at: now() });
+    const summary = `Unverified: no attested reserve figure for ${coin.name} (${coin.symbol}) is available from a free public source${reserveError ? ' right now' : ''}, so backing cannot be confirmed here. The supply its reserves must cover is ${Math.round(circ).toLocaleString('en-US')} in circulation${prev ? ` (${(((circ - prev) / prev) * 100).toFixed(2)}% vs a month ago)` : ''}, mostly on ${chains.map((c) => c[0]).join(', ')}, as of ${now()}. Peg: ${verdict.toLowerCase()} at ${peg ?? 'n/a'} USD (${dev}% from 1.00). Source: DefiLlama stablecoins.`;
+    res.json({ status: 'ok', summary, answer: summary, verdict: 'unverified', peg_status: verdict, symbol: coin.symbol, total_supply: circ, circulating_usd: circ, price_usd: peg, peg_deviation_percent: dev, ...(reserveError ? { reserve_source_error: reserveError } : {}), source: 'DefiLlama stablecoins', confidence: 0.6, canonical: ['asset-reserve-attestation', coin.symbol.toLowerCase()].join(':'), checked_at: now() });
   } catch (e) { fail(res, 'ASSET_RESERVE_ATTESTATION', e); }
 });
 

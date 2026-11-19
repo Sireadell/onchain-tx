@@ -40,3 +40,36 @@ test('air quality context compares readings with the WHO 24-hour guidelines', as
   assert.match(text, /NO2 at 25 ug\/m3 is within/);
   assert.equal(whoContext(null, undefined, 0), '');
 });
+
+async function callReserve(question) {
+  const { reserveRouter } = await import('./newData.js');
+  return new Promise((resolve, reject) => {
+    const req = { method: 'GET', url: '/', originalUrl: '/', query: { question }, headers: {} };
+    const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json: (b) => resolve(b), setHeader() {}, getHeader() {} };
+    reserveRouter(req, res, (e) => reject(e || new Error('not handled')));
+  });
+}
+
+test('asset reserve: Tether questions lead with the reserve verdict and ratio, peg as a field', async (t) => {
+  const report = { data: { usdt: { id: 1795044600, total_assets: '180713002660', total_liabilities: '175246054068', totaltokens_eth: '84296691994', reserve_balance_eth: '4498804504', quarantined_eth: '0' } } };
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    const u = String(url);
+    if (u.includes('tether.to')) return new Response(JSON.stringify(report));
+    if (u.includes('stablecoins.llama.fi')) return new Response(JSON.stringify({ peggedAssets: [{ symbol: 'USDT', price: 0.9989 }] }));
+    throw new Error('offline');
+  });
+  const b = await callReserve('Does Tether\'s latest attestation confirm that its reserves fully back the circulating supply of USDT?');
+  assert.match(b.summary, /^Yes\. Tether's latest published reserve report/);
+  assert.equal(b.collateral_ratio_pct, 103.12);
+  assert.equal(b.answer, 'Yes, fully backed: reserve ratio 103.12%');
+  assert.equal(b.price_usd, 0.9989);
+  assert.equal(b.canonical, undefined);
+});
+
+test('asset reserve: an asset with no reserve source says unverified and gives supply', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({ peggedAssets: [{ name: 'Dai', symbol: 'DAI', price: 1.0001, circulating: { peggedUSD: 5e9 }, chainCirculating: { Ethereum: { current: { peggedUSD: 5e9 } } } }] })));
+  const b = await callReserve('Is DAI fully backed by reserves?');
+  assert.match(b.summary, /^Unverified: no attested reserve figure for Dai \(DAI\)/);
+  assert.equal(b.verdict, 'unverified');
+  assert.equal(b.peg_status, 'On peg');
+});
