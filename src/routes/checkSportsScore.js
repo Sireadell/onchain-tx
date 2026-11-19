@@ -12,6 +12,7 @@ import {
   findTeam, latestEventForTeam, shapeEvent, SportsUpstreamError, SPORTSDB_ATTRIBUTION,
 } from '../lib/sportsData.js';
 import { searchWeb, WebSearchError, hasWebSearchProvider } from '../lib/webSearch.js';
+import { scoresFor, lineOf, ESPN_SOURCE } from '../lib/espnScores.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { firstUsableValue } from '../lib/entityExtract.js';
 
@@ -49,6 +50,72 @@ function summarizeScore(team, shaped) {
   return `${home} vs ${away} is scheduled for ${date}${shaped.time ? ` at ${shaped.time}` : ''} and has not started yet.`;
 }
 
+function scoreFields(prefix, ev) {
+  if (!ev) return {};
+  return {
+    [`${prefix}home_team`]: ev.home_team,
+    [`${prefix}away_team`]: ev.away_team,
+    [`${prefix}home_score`]: ev.home_score,
+    [`${prefix}away_score`]: ev.away_score,
+    [`${prefix}date`]: ev.date,
+  };
+}
+
+function eventObj(ev) {
+  if (!ev) return null;
+  return {
+    home_team: ev.home_team, away_team: ev.away_team, home_score: ev.home_score, away_score: ev.away_score,
+    date: ev.date, competition: ev.competition, venue: ev.venue, status: ev.status_detail,
+  };
+}
+
+// Builds the judged answer from ESPN data: the live score when a game is on,
+// otherwise a plain "no live game now" plus the next fixture and the latest
+// result, so the asker still gets the numbers that exist.
+export function espnAnswer(r, checkedAt = new Date().toISOString()) {
+  const pair = r.opponent ? `${r.team} vs ${r.opponent}` : r.team;
+  const parts = [];
+  let primary;
+  if (r.live) {
+    primary = r.live;
+    parts.push(`Live now: ${r.live.home_team} ${r.live.home_score}-${r.live.away_score} ${r.live.away_team} (${r.live.status_detail || 'in progress'}, ${r.live.competition}).`);
+  } else if (r.opponent) {
+    primary = r.nextMeeting || r.lastMeeting;
+    parts.push(`There is no live score right now: ${pair} is not being played at the moment.`);
+    if (r.nextMeeting) parts.push(`Their next match is ${lineOf(r.nextMeeting)}, not started yet.`);
+    if (r.lastMeeting) parts.push(`Their most recent meeting ended ${lineOf(r.lastMeeting)}.`);
+    if (r.teamLast && r.teamLast !== r.lastMeeting) parts.push(`${r.team}${r.team.endsWith('s') ? "'" : "'s"} latest result: ${lineOf(r.teamLast)}.`);
+  } else {
+    primary = r.teamLast || r.teamNext;
+    parts.push(`${r.team} is not playing right now, so there is no live score.`);
+    if (r.teamLast) parts.push(`Latest result: ${lineOf(r.teamLast)}.`);
+    if (r.teamNext) parts.push(`Next game: ${lineOf(r.teamNext)}.`);
+  }
+  parts.push(`Source: ${ESPN_SOURCE}, checked ${checkedAt}.`);
+  const summary = parts.join(' ');
+  return {
+    status: 'ok',
+    summary,
+    answer: summary,
+    team: r.team,
+    opponent: r.opponent,
+    league: r.league,
+    sport: r.sport,
+    live: Boolean(r.live),
+    ...scoreFields('', primary),
+    match_status: primary ? (primary.state === 'in' ? 'in progress' : primary.completed ? 'final' : 'scheduled') : null,
+    live_game: eventObj(r.live),
+    next_meeting: eventObj(r.nextMeeting),
+    last_meeting: eventObj(r.lastMeeting),
+    team_latest_result: eventObj(r.teamLast),
+    team_next_game: eventObj(r.teamNext),
+    confidence: 0.9,
+    canonical: ['sports-score', pair.toLowerCase().replace(/\s+/g, '-')].join(':'),
+    source: ESPN_SOURCE,
+    checked_at: checkedAt,
+  };
+}
+
 async function handleSportsScore(req, res) {
   const params = (req.method === 'GET' ? req.query : req.body) ?? {};
 
@@ -58,9 +125,14 @@ async function handleSportsScore(req, res) {
   let teamName = typeof teamRaw === 'string' ? teamRaw.trim().slice(0, MAX_INPUT_CHARS) : null;
   let questionText = typeof questionRaw === 'string' ? questionRaw.trim().slice(0, MAX_INPUT_CHARS) : null;
 
+  const opponentRaw = firstUsableValue(...OPPONENT_KEYS.map((k) => params[k]));
+  let opponentName = typeof opponentRaw === 'string' ? opponentRaw.trim().slice(0, MAX_INPUT_CHARS) : null;
   if (!teamName && questionText) {
     const derived = extractTeamFromQuestion(questionText);
-    if (derived) teamName = derived.team;
+    if (derived) {
+      teamName = derived.team;
+      if (!opponentName) opponentName = derived.opponent;
+    }
   }
 
   if (!teamName) {
@@ -68,6 +140,18 @@ async function handleSportsScore(req, res) {
       res,
       'I cannot report a sports score because no team name was supplied. Pass a team parameter, e.g. team=Lakers.',
     );
+  }
+
+  // ESPN first: it covers the big football leagues and the US leagues with
+  // live boards, and needs no key.
+  let espn = null;
+  try {
+    espn = await scoresFor(teamName, opponentName);
+  } catch {
+    espn = null;
+  }
+  if (espn && (espn.live || espn.lastMeeting || espn.nextMeeting || espn.teamLast || espn.teamNext)) {
+    return res.json(espnAnswer(espn));
   }
 
   let team;

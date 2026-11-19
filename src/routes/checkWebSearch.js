@@ -14,6 +14,7 @@ import { Router } from 'express';
 import { searchWeb, hasWebSearchProvider, WebSearchError } from '../lib/webSearch.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { firstUsableValue } from '../lib/entityExtract.js';
+import { exactSourceAnswer, exactSourceBody } from '../lib/exactSources.js';
 
 const router = Router();
 
@@ -51,6 +52,11 @@ async function handleWebSearch(req, res) {
       'I cannot run a web search because no question was supplied. Pass the question as the query parameter and I will answer it from live web sources, with the sources named.',
     );
   }
+
+  // A Wikipedia revision or DOI record question has one exact answer in a
+  // public API. A web search answers it from the current page or not at all.
+  const exact = await exactSourceAnswer(String(rawQuery));
+  if (exact) return res.json(exactSourceBody(exact, rawQuery));
 
   // A provider outage is our fault and keeps a real failure code, but a
   // missing key is a deployment mistake that would otherwise show up as a

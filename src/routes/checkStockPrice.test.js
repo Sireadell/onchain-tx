@@ -517,3 +517,42 @@ test('stock-price: a company name with a trailing noise word still resolves', as
   assert.deepEqual(searched, ['Apple stock', 'Apple']);
   assert.equal(body.summary, 'Apple Inc. (AAPL) is $319.97 USD.');
 });
+
+// Round 14 sent this wording and it was refused as "does not appear to ask
+// for a company share price": no stock word, and Microsoft was not followed
+// by "price". A ticker in brackets with price wording is a share price ask.
+test('stock-price: "trading price for Microsoft Corporation (MSFT)" is looked up as MSFT', async (t) => {
+  const seen = [];
+  mockFetch(t, async (url) => {
+    seen.push(url);
+    return { status: 404, json: async () => ({ chart: { result: null, error: { code: 'Not Found' } } }) };
+  });
+  const base = startServer(t);
+  for (const q of [
+    'What is the current trading price for Microsoft Corporation (MSFT) in USD?',
+    "What's the current trading price for Microsoft Corporation (MSFT)?",
+  ]) {
+    const res = await fetch(`${base}/stock-price?q=${encodeURIComponent(q)}`);
+    const body = await res.json();
+    assert.equal(body.status, 'not_found', q);
+    assert.equal(body.query, 'MSFT', q);
+  }
+  assert.ok(seen.some((u) => u.includes('MSFT')));
+});
+
+test('stock-price: company suffix with price wording reaches lookup, crypto in brackets does not', async (t) => {
+  let calls = 0;
+  mockFetch(t, async () => {
+    calls += 1;
+    return { status: 404, json: async () => ({ chart: { result: null, error: { code: 'Not Found' } } }) };
+  });
+  const base = startServer(t);
+  const res = await fetch(`${base}/stock-price?q=${encodeURIComponent('What is the current trading price for NVIDIA Corporation (NVDA)?')}`);
+  const body = await res.json();
+  assert.equal(body.status, 'not_found');
+  assert.equal(body.query, 'NVDA');
+  const before = calls;
+  const crypto = await fetch(`${base}/stock-price?q=${encodeURIComponent('What is the current price of Bitcoin (BTC)?')}`);
+  assert.equal((await crypto.json()).status, 'invalid_input');
+  assert.equal(calls, before);
+});

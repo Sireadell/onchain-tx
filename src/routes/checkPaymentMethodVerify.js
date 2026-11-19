@@ -56,6 +56,199 @@ const NETWORK_RULES = [
 const PAYMENT_APPS = ['paypal', 'venmo', 'cash app', 'cashapp', 'zelle', 'apple pay', 'google pay', 'samsung pay', 'stripe', 'square', 'alipay', 'wechat pay', 'klarna', 'afterpay'];
 
 const BIN_RE = /\b(\d{6,16})\b/;
+const ROUTING_RE = /\b(?:routing|aba|rtn|ach)\b[^0-9]{0,40}?(\d{9})\b/i;
+const CARD_DIGITS_RE = /\b\d(?:[ -]?\d){5,18}\b/g;
+const LAST4_RE = /\b(?:ending|ends)\s+(?:in|with)\s+(\d{4})\b|\blast\s+(?:4|four)(?:\s+digits)?\s*(?:of\s+)?(?:is|are|:)?\s*(\d{4})\b/i;
+const TOKEN_RE = /\b(tok|pm|card|src|ba|btok|seti|pi)_[A-Za-z0-9]{4,}\b/;
+const LOOKUP_TIMEOUT_MS = 5_000;
+
+// Issuer names people write, mapped to a word that appears in the issuer
+// name the BIN and routing directories return.
+const ISSUERS = [
+  ['chase', 'chase'], ['jpmorgan', 'chase'], ['bank of america', 'bank of america'], ['wells fargo', 'wells fargo'],
+  ['citibank', 'citi'], ['citi', 'citi'], ['capital one', 'capital one'], ['us bank', 'u.s. bank'], ['u.s. bank', 'u.s. bank'],
+  ['pnc', 'pnc'], ['truist', 'truist'], ['td bank', 'td bank'],
+  ['barclays', 'barclays'], ['hsbc', 'hsbc'], ['goldman sachs', 'goldman'], ['synchrony', 'synchrony'],
+  ['navy federal', 'navy federal'], ['usaa', 'usaa'], ['santander', 'santander'], ['citizens', 'citizens'],
+];
+
+export function luhnValid(digits) {
+  let sum = 0;
+  let dbl = false;
+  for (let i = digits.length - 1; i >= 0; i -= 1) {
+    let n = Number(digits[i]);
+    if (dbl) { n *= 2; if (n > 9) n -= 9; }
+    sum += n;
+    dbl = !dbl;
+  }
+  return digits.length >= 12 && sum % 10 === 0;
+}
+
+// ABA routing check digit: weights 3, 7, 1 over the nine digits, and the
+// first two digits must be a real Federal Reserve prefix (00 to 32, or
+// 61 to 72 for electronic and thrift numbers).
+export function abaValid(rn) {
+  if (!/^\d{9}$/.test(rn)) return false;
+  const d = rn.split('').map(Number);
+  const sum = 3 * (d[0] + d[3] + d[6]) + 7 * (d[1] + d[4] + d[7]) + (d[2] + d[5] + d[8]);
+  const prefix = Number(rn.slice(0, 2));
+  return sum % 10 === 0 && (prefix <= 32 || (prefix >= 61 && prefix <= 72) || prefix === 80);
+}
+
+function claimedIssuer(text) {
+  const lower = text.toLowerCase();
+  const hit = ISSUERS.find(([name]) => new RegExp(`\\b${name.replace(/[.]/g, '\\.')}\\b`).test(lower));
+  if (hit) {
+    const at = lower.indexOf(hit[0]);
+    return { label: text.slice(at, at + hit[0].length), key: hit[1] };
+  }
+  const m = text.match(/\bissued by\s+(?:the\s+)?([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})/);
+  if (m) return { label: m[1], key: m[1].toLowerCase().replace(/\s+bank$/, '') };
+  return null;
+}
+
+function claimedNetwork(text) {
+  const lower = text.toLowerCase();
+  return NETWORK_RULES.map((r) => r.name).find((n) => lower.includes(n.toLowerCase())) ?? null;
+}
+
+async function getJsonQuiet(url, headers = {}) {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS), headers: { Accept: 'application/json', ...headers } });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+// BIN directory: HandyAPI first (no key), binlist.net second.
+async function lookupBin(bin) {
+  const h = await getJsonQuiet(`https://data.handyapi.com/bin/${bin}`);
+  if (h && h.Status === 'SUCCESS' && h.Scheme) {
+    return { scheme: h.Scheme, issuer: h.Issuer || null, type: h.Type || null, country: h.Country?.Name || null, source: 'HandyAPI BIN directory' };
+  }
+  const b = await getJsonQuiet(`https://lookup.binlist.net/${bin}`, { 'Accept-Version': '3' });
+  if (b && (b.scheme || b.bank?.name)) {
+    return { scheme: b.scheme || null, issuer: b.bank?.name || null, type: b.type || null, country: b.country?.name || null, source: 'binlist.net' };
+  }
+  return null;
+}
+
+async function lookupRouting(rn) {
+  const j = await getJsonQuiet(`https://bankrouting.io/api/v1/aba/${rn}`);
+  if (j?.status === 'success' && j.data?.bank_name) return { bank: j.data.bank_name, city: j.data.city || null, state: j.data.state || null };
+  return null;
+}
+
+const titleCase = (s) => String(s).toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase()).replace(/\bN\.a\b/g, 'N.A');
+
+// Answers a free-text verification question in one pass: card digits
+// (network, directory issuer, Luhn for full numbers), a routing number
+// (check digit and bank), last four digits, or a processor token, and
+// checks each claim the question makes (network, issuing bank) against
+// what was found. Returns null when the text holds none of these.
+export async function verifyFromQuestion(text) {
+  const routingMatch = text.match(ROUTING_RE);
+  const routing = routingMatch ? routingMatch[1] : null;
+  const cardDigits = [...text.matchAll(CARD_DIGITS_RE)]
+    .map((m) => m[0].replace(/[ -]/g, ''))
+    .filter((d) => d !== routing && d.length >= 6);
+  const card = cardDigits[0] ?? null;
+  const last4m = text.match(LAST4_RE);
+  const last4 = last4m ? (last4m[1] || last4m[2]) : null;
+  const token = text.match(TOKEN_RE)?.[0] ?? null;
+  if (!card && !routing && !last4 && !token) return null;
+
+  const issuerClaim = claimedIssuer(text);
+  const networkClaim = claimedNetwork(text);
+  const problemsList = [];
+  const facts = [];
+  const out = {
+    network: null, issuing_bank: null, issuing_country: null, card_type: null, luhn_valid: null,
+    routing_number: routing, routing_valid: null, routing_bank: null, sources: [],
+  };
+
+  if (card) {
+    const network = identifyNetwork(card);
+    const info = (card.length >= 8 ? await lookupBin(card.slice(0, 8)) : null) ?? await lookupBin(card.slice(0, 6));
+    const scheme = network || (info?.scheme ? titleCase(info.scheme) : null);
+    out.network = scheme;
+    out.issuing_bank = info?.issuer ?? null;
+    out.issuing_country = info?.country ?? null;
+    out.card_type = info?.type ?? null;
+    out.sources.push('ISO/IEC 7812 BIN prefix table');
+    if (info) out.sources.push(info.source);
+    const label = card.length >= 12 ? `Card number ${card.slice(0, 6)}...${card.slice(-4)}` : `BIN ${card}`;
+    if (!scheme) {
+      problemsList.push(`${label} does not fall in any published card network range`);
+    } else {
+      const issuerText = info?.issuer ? ` issued by ${titleCase(info.issuer)}${info.country ? ` (${info.country})` : ''}` : '';
+      const typeText = info?.type ? `, a ${String(info.type).toLowerCase()} card` : '';
+      facts.push(`${label} is a ${scheme} number${issuerText}${typeText}${info ? `, per the ${info.source}` : ''}.`);
+      if (networkClaim && networkClaim !== scheme) problemsList.push(`${label} is a ${scheme} number, not ${networkClaim}`);
+    }
+    if (issuerClaim) {
+      if (!info?.issuer) {
+        facts.push(`No BIN directory record names the issuer, so the claim that ${issuerClaim.label} issued it cannot be confirmed.`);
+      } else if (!info.issuer.toLowerCase().includes(issuerClaim.key)) {
+        problemsList.push(`the BIN directory lists ${titleCase(info.issuer)} as the issuer, not ${issuerClaim.label}`);
+      } else {
+        facts.push(`That matches the issuer named in the question (${issuerClaim.label}).`);
+      }
+    }
+    if (card.length >= 12) {
+      out.luhn_valid = luhnValid(card);
+      if (!out.luhn_valid) problemsList.push('the full card number fails the Luhn check digit, so it is not a valid card number');
+      else facts.push('The full number passes the Luhn check digit.');
+    }
+  }
+
+  if (routing) {
+    out.routing_valid = abaValid(routing);
+    out.sources.push('ABA check digit rule');
+    if (!out.routing_valid) {
+      problemsList.push(`routing number ${routing} fails the ABA check digit, so it is not a valid ACH routing number`);
+    } else {
+      const bank = await lookupRouting(routing);
+      if (bank) {
+        out.routing_bank = bank.bank;
+        out.sources.push('bankrouting.io ABA directory');
+      }
+      const where = bank ? ` and belongs to ${titleCase(bank.bank)}${bank.city ? ` (${titleCase(bank.city)}, ${bank.state})` : ''}` : '';
+      facts.push(`Routing number ${routing} passes the ABA check digit${where}, so it is a well-formed ACH routing number.`);
+    }
+  }
+
+  if (!card && last4) {
+    facts.push(`Millions of cards end in ${last4}; the network and issuer are encoded in the first 6 to 8 digits (the BIN), not the last four${issuerClaim ? `, so nothing here ties the card to ${issuerClaim.label}` : ''}.`);
+  }
+  if (!card && token) {
+    const placeholder = /^tok_/.test(token) && token.length < 20;
+    facts.push(`${token} is in Stripe's token format${placeholder ? ', though real Stripe tokens are about 24 random characters after "tok_", so this looks like a placeholder' : ''}. A token can only be looked up by the merchant account that created it, and it does not reveal the issuing bank.`);
+  }
+
+  const live = 'Whether it is active and funded can only be confirmed by the issuer or a payment processor.';
+  let verdict;
+  let lead;
+  if (problemsList.length) {
+    verdict = 'invalid';
+    lead = `No, it does not check out: ${problemsList.join('; ')}.`;
+  } else if (card || routing) {
+    verdict = 'valid_format';
+    lead = 'Partly verified: the numbers given are real and well-formed.';
+  } else {
+    verdict = 'unverifiable';
+    const what = last4 && !token ? `a card ending in ${last4}` : `the token ${token}`;
+    lead = `Cannot be verified from what was given: ${what} carries no checkable network, issuer or status information.`;
+  }
+  const next = !card && (last4 || token) ? ' Send the first 6 to 8 card digits (the BIN) to check network and issuer.' : '';
+  const summary = `${lead} ${facts.join(' ')} ${live}${next}`.replace(/\s+/g, ' ').trim();
+  return {
+    verdict, summary, sources: out.sources, ...out,
+    last4, token, claimed_issuer: issuerClaim?.label ?? null, claimed_network: networkClaim,
+  };
+}
 
 function identifyNetwork(digits) {
   const rule = NETWORK_RULES.find((r) => r.test(digits));
@@ -101,6 +294,28 @@ async function handlePaymentMethodVerify(req, res) {
   const text = String(rawInput).trim().slice(0, MAX_INPUT_CHARS);
   if (!/[a-z0-9]/i.test(text)) {
     return respondUnusableInput(res, `No usable payment method description was found in ${quoteParam(rawInput)}. Pass a card network name, a BIN, or a payment app name.`);
+  }
+
+  // Whole questions (several words) go through the claim checker, which
+  // also handles routing numbers, last four digits and tokens.
+  if (text.split(/\s+/).length > 3 || ROUTING_RE.test(text) || LAST4_RE.test(text) || TOKEN_RE.test(text)) {
+    const r = await verifyFromQuestion(text);
+    if (r) {
+      const { summary, verdict, sources, ...fields } = r;
+      return res.json({
+        status: 'ok',
+        summary,
+        answer: summary,
+        verdict,
+        valid: verdict === 'invalid' ? false : verdict === 'valid_format' ? true : null,
+        ...fields,
+        confidence: verdict === 'unverifiable' ? 0.7 : 0.85,
+        canonical: ['payment-method-verify', verdict, fields.network ? fields.network.toLowerCase().replace(/\s+/g, '-') : 'none'].join(':'),
+        source: [...new Set(sources)].join(' + '),
+        can_verify_live_status: false,
+        checked_at: new Date().toISOString(),
+      });
+    }
   }
 
   const digitsMatch = text.match(BIN_RE);

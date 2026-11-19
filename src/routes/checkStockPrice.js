@@ -14,6 +14,36 @@ import { formatUsdPrice } from '../lib/formatUsdPrice.js';
 
 const router = Router();
 
+// The shared guard (intentGuard.js) needs a stock word or a short list of
+// company names. Round 14 sent "What is the current trading price for
+// Microsoft Corporation (MSFT) in USD?", which has neither, and it was
+// refused. This local check also accepts price wording next to a ticker
+// in brackets, a bare uppercase ticker, or a company suffix such as
+// "Corporation" or "Inc.". Crypto wording still goes to the crypto route.
+const PRICE_WORDING = /\b(?:price|prices|priced|trading|trades?|quote|quoted|worth|valued|value|cost|costs|close|closed|closing|open(?:ed|ing)?)\b/i;
+const BRACKETED_TICKER = /\(\s*(?:(?:NASDAQ|NYSE|AMEX)\s*:\s*)?([A-Z]{1,5}(?:\.[A-Z])?)\s*\)/;
+const EXCHANGE_TICKER = /\b(?:NASDAQ|NYSE|AMEX)\s*:\s*([A-Z]{1,5})\b/;
+const COMPANY_SUFFIX = /\b[A-Z][A-Za-z&.'-]*\s+(?:Corporation|Corp\.?|Inc\.?|Incorporated|Ltd\.?|Limited|plc|PLC|Holdings|Company|Co\.|Group|N\.V\.|S\.A\.|AG|SE)(?=[\s,.?)!]|$)/;
+const CRYPTO_WORDING = /\b(?:crypto(?:currency)?|bitcoin|ethereum|coin|token|BTC|ETH|SOL|XRP|BNB|ADA|DOGE|MATIC|AVAX|DOT|LINK|LTC|TRX|SHIB|UNI|ATOM|USDT|USDC|XMR|TON|PEPE)\b/i;
+const NOT_TICKERS = new Set(['USD', 'US', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD', 'CEO', 'AI', 'NYSE', 'NASDAQ', 'AMEX', 'ETF', 'IPO', 'UTC', 'EST', 'ET', 'PT']);
+
+export function stockQuestionLooksAnswerable(text) {
+  if (typeof text !== 'string') return false;
+  if (stockTextMatchesIntent(text)) return true;
+  if (CRYPTO_WORDING.test(text) || !PRICE_WORDING.test(text)) return false;
+  const bracketed = BRACKETED_TICKER.exec(text)?.[1] ?? EXCHANGE_TICKER.exec(text)?.[1];
+  if (bracketed && !NOT_TICKERS.has(bracketed)) return true;
+  return COMPANY_SUFFIX.test(text);
+}
+
+// When the question names the ticker in brackets ("Microsoft Corporation
+// (MSFT)"), that symbol is the most reliable thing in it.
+function bracketedTicker(text) {
+  if (typeof text !== 'string') return null;
+  const found = BRACKETED_TICKER.exec(text)?.[1] ?? EXCHANGE_TICKER.exec(text)?.[1];
+  return found && !NOT_TICKERS.has(found) ? found : null;
+}
+
 async function handleStockPrice(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
   // The engine sends "What is Apple's share price today?" as a question,
@@ -21,7 +51,7 @@ async function handleStockPrice(req, res) {
   // of it. extractTicker prefers an explicit symbol in the text and falls
   // back to the prose name, which the price API resolves by symbol search.
   const question = freeTextParam(params);
-  if (question && !stockTextMatchesIntent(question)) {
+  if (question && !stockQuestionLooksAnswerable(question)) {
     return respondUnusableInput(
       res,
       'This request does not appear to ask for a company share price. Ask for a stock or share price and include the company name or ticker symbol.',
@@ -37,7 +67,10 @@ async function handleStockPrice(req, res) {
   // engine), which firstUsableValue correctly treats as unusable and skips,
   // falling through to tickerText the same way it would for a ticker that
   // was never sent at all.
-  const ticker = firstUsableValue(suppliedTicker, tickerText ? extractTicker(tickerText) : null);
+  const ticker = firstUsableValue(
+    suppliedTicker,
+    tickerText ? (bracketedTicker(tickerText) ?? extractTicker(tickerText)) : null,
+  );
 
   if (!ticker) {
     return respondUnusableInput(

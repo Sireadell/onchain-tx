@@ -220,3 +220,26 @@ test('cross-chain-state: every chain failing is a real 502, not a fake answer', 
   const res = await fetch(`${server}/cross-chain-state?address=${ADDRESS}&chains=eth,base`);
   assert.equal(res.status, 502);
 });
+
+test('cross-chain-state: a state root question with no address is answered from the blocks', async (t) => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const str = String(url);
+    if (!str.includes('publicnode.com')) return original(url, init);
+    const { method } = JSON.parse(init.body);
+    const isArb = str.includes('arbitrum');
+    const block = {
+      number: isArb ? '0xa21fe80' : '0x9800000', hash: `0x${(isArb ? 'a' : 'b').repeat(64)}`, parentHash: `0x${'1'.repeat(64)}`,
+      stateRoot: `0x${(isArb ? 'c' : 'd').repeat(64)}`, timestamp: '0x65a25b2d',
+    };
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: method === 'eth_blockNumber' ? '0x1' : block }), { status: 200 });
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+  const q = 'Can you verify that the Arbitrum state root from block 170000000 is correctly reflected in the latest block on the Optimism chain?';
+  const body = await (await fetch(`${base}/cross-chain-state?query=${encodeURIComponent(q)}`)).json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.verdict, 'unverifiable');
+  assert.match(body.summary, /^Cannot be verified as asked: OP Mainnet does not hold Arbitrum One's state roots/);
+  assert.equal(body.blocks.length, 2);
+});

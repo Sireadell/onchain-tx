@@ -7,6 +7,7 @@ import { searchPapers, AcademicSearchError } from '../lib/academicSearch.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { freeTextMatchesIntent, ACADEMIC_CUES } from '../lib/intentGuard.js';
 import { firstUsableValue } from '../lib/entityExtract.js';
+import { exactSourceAnswer, exactSourceBody } from '../lib/exactSources.js';
 
 const router = Router();
 
@@ -70,6 +71,12 @@ async function handleAcademicSearch(req, res) {
       'I cannot search for papers because no topic was supplied. Pass a topic as the topic parameter and I will report peer-reviewed papers on it, ranked by citation count, with title, authors, year, and citation count for each. Optionally pass from_year and/or to_year to restrict the date range.',
     );
   }
+
+  // A question about one DOI's bibliographic record (OpenCitations Meta,
+  // Crossref) is a lookup, not a topic search: a topic search on the whole
+  // question matched no papers and answered "insufficient information".
+  const exact = await exactSourceAnswer(String(rawTopic));
+  if (exact) return res.json(exactSourceBody(exact, rawTopic));
 
   if (params?.topic == null && !freeTextMatchesIntent(String(rawTopic), ACADEMIC_CUES)) {
     return respondUnusableInput(

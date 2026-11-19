@@ -4,6 +4,43 @@ import express from 'express';
 import { forwardAsyncErrors, errorHandler } from '../app.js';
 import router from './checkSportsScore.js';
 import { __clearSportsCacheForTesting } from '../lib/sportsData.js';
+import { __clearEspnCacheForTesting } from '../lib/espnScores.js';
+import { espnAnswer } from './checkSportsScore.js';
+
+// ESPN is answered from this table for every test, so no test reaches the
+// real site. Empty by default, which sends the route on to TheSportsDB.
+let espnStub = {};
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  const str = String(url);
+  if (str.startsWith('https://site.api.espn.com/')) {
+    const path = str.replace('https://site.api.espn.com/apis/site/v2/sports/', '').split('?')[0];
+    const body = espnStub[path] ?? (path.endsWith('/teams') ? { sports: [{ leagues: [{ teams: [] }] }] } : { events: [] });
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+  return realFetch(url, init);
+};
+function setEspn(t, table) {
+  __clearEspnCacheForTesting();
+  espnStub = table;
+  t.after(() => { espnStub = {}; __clearEspnCacheForTesting(); });
+}
+
+const team = (id, displayName, shortDisplayName, nickname) => ({ team: { id, displayName, shortDisplayName, name: shortDisplayName, nickname, location: displayName, abbreviation: id } });
+const espnEvent = (id, date, home, away, hs, as, state) => ({
+  id, date, league: { name: 'English Premier League' },
+  competitions: [{
+    venue: { fullName: 'Anfield' },
+    status: { type: { state, completed: state === 'post', detail: state === 'post' ? 'FT' : state === 'in' ? "67'" : 'Scheduled' } },
+    competitors: [
+      { homeAway: 'home', team: { id: home[0], displayName: home[1] }, score: hs === null ? undefined : { value: hs } },
+      { homeAway: 'away', team: { id: away[0], displayName: away[1] }, score: as === null ? undefined : { value: as } },
+    ],
+  }],
+});
+const MU = ['360', 'Manchester United'];
+const LIV = ['364', 'Liverpool'];
+const EPL_TEAMS = { sports: [{ leagues: [{ teams: [team('360', 'Manchester United', 'Man United', 'Red Devils'), team('364', 'Liverpool', 'Liverpool', 'Reds'), team('382', 'Manchester City', 'Man City', 'City')] }] }] };
 
 function buildTestApp() {
   const app = express();
@@ -153,4 +190,47 @@ test('SPORTS_SCORE POST works the same as GET', async (t) => {
   });
   const json = await res.json();
   assert.equal(json.status, 'ok');
+});
+
+test('SPORTS_SCORE answers a "current score" match question with no live game from ESPN', async (t) => {
+  const base = startServer(t);
+  stubSportsDb(t, {});
+  setEspn(t, {
+    'soccer/eng.1/teams': EPL_TEAMS,
+    'soccer/eng.1/teams/360/schedule': { events: [
+      espnEvent('1', '2026-05-03T14:30Z', MU, LIV, 3, 2, 'post'),
+      espnEvent('2', '2026-11-08T16:30Z', MU, ['362', 'Aston Villa'], 4, 4, 'post'),
+      espnEvent('3', '2099-11-22T16:30Z', LIV, MU, null, null, 'pre'),
+    ] },
+  });
+  const q = 'What is the current score of the Manchester United vs. Liverpool match?';
+  const json = await (await fetch(`${base}/sports-score?query=${encodeURIComponent(q)}`)).json();
+  assert.equal(json.status, 'ok');
+  assert.equal(json.team, 'Manchester United');
+  assert.equal(json.opponent, 'Liverpool');
+  assert.equal(json.live, false);
+  assert.match(json.summary, /no live score right now/);
+  assert.match(json.summary, /next match is Liverpool vs Manchester United/);
+  assert.match(json.summary, /most recent meeting ended Manchester United 3-2 Liverpool/);
+  assert.match(json.summary, /latest result: Manchester United 4-4 Aston Villa/);
+  assert.equal(json.last_meeting.home_score, 3);
+});
+
+test('SPORTS_SCORE reports a live score from the ESPN board first', async (t) => {
+  const base = startServer(t);
+  stubSportsDb(t, {});
+  setEspn(t, {
+    'soccer/eng.1/teams': EPL_TEAMS,
+    'soccer/eng.1/scoreboard': { events: [espnEvent('9', new Date().toISOString(), LIV, MU, 1, 0, 'in')] },
+  });
+  const json = await (await fetch(`${base}/sports-score?home=Liverpool&away=${encodeURIComponent('Manchester United')}`)).json();
+  assert.equal(json.live, true);
+  assert.match(json.summary, /^Live now: Liverpool 1-0 Manchester United \(67'/);
+  assert.equal(json.home_score, 1);
+});
+
+test('SPORTS_SCORE ESPN answer uses the right possessive for plural team names', () => {
+  const ev = { home_team: 'A', away_team: 'B', home_score: 1, away_score: 0, date: '2026-01-01T00:00Z', competition: 'MLB', completed: true, state: 'post' };
+  const out = espnAnswer({ team: 'New York Yankees', opponent: 'Boston Red Sox', league: 'MLB', sport: 'baseball', live: null, lastMeeting: null, nextMeeting: null, teamLast: ev, teamNext: null });
+  assert.match(out.summary, /New York Yankees' latest result/);
 });

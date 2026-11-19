@@ -15,6 +15,7 @@ import { Router } from 'express';
 import { searchWeb, hasWebSearchProvider, WebSearchError } from '../lib/webSearch.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { firstUsableValue } from '../lib/entityExtract.js';
+import { exactSourceAnswer, exactSourceBody } from '../lib/exactSources.js';
 
 const router = Router();
 
@@ -62,6 +63,11 @@ async function handleResearchQuery(req, res) {
   if (!/[a-z0-9]/i.test(query)) {
     return respondUnusableInput(res, `No research question was found in ${quoteParam(rawQuery)}. Pass the question as the query parameter.`);
   }
+
+  // A DOI record question (OpenCitations Meta, Crossref) or a Wikipedia
+  // revision question is answered from that exact record, not a web search.
+  const exact = await exactSourceAnswer(query);
+  if (exact) return res.json(exactSourceBody(exact, query));
 
   if (!hasWebSearchProvider()) {
     return res.status(503).json({

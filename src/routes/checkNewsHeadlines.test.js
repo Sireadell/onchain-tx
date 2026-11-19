@@ -85,15 +85,10 @@ test('news-headlines: parses the headline list, matches URLs, and leads the grad
 
   assert.equal(res.status, 200);
   assert.equal(body.status, 'ok');
-  assert.equal(body.headlines.length, 2);
-  assert.deepEqual(body.headlines[0], {
-    title: 'Election update: results expected tonight',
-    source: 'Example News',
-    published: D1,
-    url: 'https://example.com/a',
-  });
-  assert.equal(body.headlines[1].url, 'https://example.com/b');
-  assert.ok(body.summary.startsWith(`Recent coverage of election includes: "Election update: results expected tonight" (Example News, ${D1}); "Candidates make final push"`));
+  assert.equal(body.count, 2);
+  assert.ok(body.answer.startsWith(`Top 2 headlines on election, published ${D2} to ${D1}: 1. "Election update: results expected tonight" (Example News); 2. "Candidates make final push" (Example Wire)`));
+  assert.equal(body.summary, '2 current headlines on election.');
+  assert.equal(body.headlines, undefined, 'the list is carried once, as text');
   assert.equal(calls[0].body.topic, 'news');
   assert.match(calls[0].body.query, /List the 6 most recent news headlines about election/);
 });
@@ -105,9 +100,8 @@ test('news-headlines: falls back to the result titles when the answer is prose',
   const res = await fetch(`${base}/news-headlines?topic=election`);
   const body = await res.json();
   assert.equal(body.status, 'ok');
-  assert.equal(body.headlines.length, 2);
-  assert.equal(body.headlines[0].url, 'https://example.com/a');
-  assert.match(body.summary, /Election update/);
+  assert.equal(body.count, 2);
+  assert.match(body.answer, /1\. "Election update: results expected tonight"/);
   assert.equal(body.confidence, 0.7);
 });
 
@@ -118,7 +112,7 @@ test('news-headlines: the whole question is reduced to its topic', async (t) => 
   const res = await fetch(`${base}/news-headlines?topic=${encodeURIComponent('What are the top news headlines about technology in Middle East today?')}`);
   const body = await res.json();
   assert.equal(body.topic, 'technology in Middle East');
-  assert.match(body.summary, /^Recent coverage of technology in Middle East includes/);
+  assert.match(body.answer, /^Top 2 headlines on technology in Middle East, published .+: 1\./);
   assert.match(calls[0].body.query, /headlines about technology in Middle East, published within the last 3 days/);
 });
 
@@ -197,7 +191,62 @@ test('news-headlines: when every listed story is old, the dated news feeds answe
   const base = startServer(t);
   const body = await (await fetch(`${base}/news-headlines?question=${encodeURIComponent("What are today's top technology headlines?")}`)).json();
   assert.equal(body.status, 'ok');
-  assert.equal(body.headlines[0].title, 'Chipmaker unveils new AI processor');
-  assert.equal(body.headlines[0].source, 'Reuters');
-  assert.ok(!/Shorts|2025/.test(body.summary));
+  assert.match(body.answer, /^Top 1 headline on technology, published \d{1,2} \w+ \d{4}: 1\. "Chipmaker unveils new AI processor" \(Reuters\)/);
+  assert.ok(!/Shorts|2025/.test(body.answer));
+});
+
+// Round 14 (2026-11-19): "top 5" was read as the topic "5" and the answer
+// listed sports scores. The count sets how many, and the real subject (and a
+// place named before it) is what gets searched.
+test('news-headlines: "top 5" is a count, not the topic, and the place joins the subject', () => {
+  const a = extractTopic('What are the top 5 news headlines regarding the ongoing semiconductor shortage in Asia today?');
+  assert.equal(a.topic, 'semiconductor shortage in Asia');
+  assert.equal(a.count, 5);
+  const b = extractTopic('What are the top 5 news headlines in London today regarding the housing market?');
+  assert.equal(b.topic, 'the housing market in London');
+  assert.equal(b.count, 5);
+  const c = extractTopic('What are the top 5 news headlines regarding the upcoming G7 summit in Italy?');
+  assert.equal(c.topic, 'G7 summit in Italy');
+  assert.equal(extractTopic('Top 3 tech headlines right now').count, 3);
+  assert.equal(extractTopic('Give me the 10 latest headlines about Bitcoin').topic, 'Bitcoin');
+  assert.equal(extractTopic('What are the latest headlines regarding the ongoing drought in California?').count, null);
+});
+
+test('news-headlines: a count in the question sets how many headlines are listed', async (t) => {
+  withKey(t);
+  const calls = stubTavily(t, TAVILY_LIST);
+  const base = startServer(t);
+  await fetch(`${base}/news-headlines?query=${encodeURIComponent('What are the top 5 news headlines regarding the ongoing semiconductor shortage in Asia today?')}`);
+  assert.match(calls.at(-1).body.query, /List the 5 most recent news headlines about semiconductor shortage in Asia/);
+  await fetch(`${base}/news-headlines?query=${encodeURIComponent('top 5 headlines on the election')}&max_results=3`);
+  assert.match(calls.at(-1).body.query, /List the 3 most recent/, 'an explicit max_results still wins');
+});
+
+// Round 16 (2026-11-19): the search key ran out of credit and every question
+// answered a 502. The free dated feeds answer instead.
+test('news-headlines: a failed search provider falls back to the dated news feeds', async (t) => {
+  withKey(t);
+  const now = new Date();
+  const rss = `<rss><channel><item><title>Reservoirs stay low as drought drags on - LA Times</title><link>https://news.google.com/t1</link><pubDate>${now.toUTCString()}</pubDate><source url="https://latimes.com">LA Times</source></item></channel></rss>`;
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (/^https:\/\/(?:news\.google\.com|www\.bing\.com)/.test(String(url))) return new Response(rss, { status: 200 });
+    if (String(url).startsWith('https://api.tavily.com')) return new Response('{"detail":"no credit"}', { status: 432 });
+    return original(url, init);
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const base = startServer(t);
+  const res = await fetch(`${base}/news-headlines?query=${encodeURIComponent('What are the latest headlines regarding the ongoing drought in California?')}`);
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.status, 'ok');
+  assert.match(body.answer, /Reservoirs stay low as drought drags on/);
+  assert.equal(body.source, 'Google News and Bing News');
+});
+
+test('news-headlines: the publication dates are given once, as a span', async () => {
+  const { publishedSpan } = await import('./checkNewsHeadlines.js');
+  assert.equal(publishedSpan([{ published: '2026-11-18' }, { published: '16 November 2026' }, { published: null }]), 'published 16 November 2026 to 18 November 2026');
+  assert.equal(publishedSpan([{ published: '2026-11-18' }]), 'published 18 November 2026');
+  assert.equal(publishedSpan([{ published: null }]), '');
 });

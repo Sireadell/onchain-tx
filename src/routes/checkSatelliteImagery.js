@@ -11,6 +11,7 @@ import { respondUnusableInput } from '../lib/unusableInput.js';
 import { getJson, upstreamDown, paramsOf } from '../lib/liveJson.js';
 import { resolveLocation, osmLookup } from '../lib/weatherForecast.js';
 import { parseCoordinates } from '../lib/questionParse.js';
+import { landCover, ndvi, MODIS_SOURCE } from '../lib/modisLand.js';
 
 const router = Router();
 
@@ -35,11 +36,18 @@ export function placePhrases(text) {
     if (s && !/^(?:Landsat|Sentinel|NASA|MODIS|What|Show)\b/.test(s) && !out.includes(s)) out.push(s);
   };
   const src = String(text ?? '');
+  // "the Amazon rainforest near Manaus": the town after "near" is the
+  // point; "Amazon" alone geocoded to a warehouse in Texas (2026-11-19).
+  const near = src.match(/\bnear\s+(?:the\s+)?([A-Z][\w.'-]*(?:,?\s+[A-Z][\w.'-]*)*)/);
+  if (near) push(near[1]);
   for (const m of src.matchAll(PLACE_RE)) {
     // "Tesla Gigafactory in Austin, Texas": the name alone matched the
     // Berlin plant, so the "in <place>" that follows comes first.
     const after = src.slice(m.index + m[0].length).match(/^\s+in\s+([A-Z][\w.'-]*(?:,?\s+[A-Z][\w.'-]*)*)/);
     if (after) {
+      // "Tesla Gigafactory Berlin" geocodes to the plant; the comma form
+      // found nothing and fell back to the city centre (2026-11-19).
+      push(`${m[1]} ${after[1].split(',')[0]}`);
       push(`${m[1]}, ${after[1]}`);
       push(after[1]);
     }
@@ -76,6 +84,77 @@ export function nearbyEvents(events, point, radiusKm) {
   return out.sort((x, y) => x.distance_km - y.distance_km);
 }
 
+
+const NDVI_RE = /\bndvi\b|\bvegetation (?:index|health|cover|greenness)\b|\bgreenness\b|\bcrop health\b|\bplant health\b/i;
+const LAND_RE = /\bland[\s-]?(?:cover|use)\b|\burban (?:development|expansion|growth|sprawl)\b|\bdeforest|\bforest (?:loss|cover)\b|\bwater (?:body|bodies|extent|level)\b|\bbuilt[\s-]?up\b|\bclassification\b/i;
+
+export function questionKind(text) {
+  const t = String(text ?? '');
+  if (NDVI_RE.test(t)) return 'ndvi';
+  if (LAND_RE.test(t)) return 'land';
+  return null;
+}
+
+// "within a 5km radius", "a 10 km area".
+export function radiusKmOf(text) {
+  const m = String(text ?? '').match(/(\d+(?:\.\d+)?)\s*-?\s*(?:km|kilomet(?:er|re)s?)\b/i);
+  const v = m ? Number(m[1]) : NaN;
+  return Number.isFinite(v) && v > 0 ? Math.min(v, 25) : null;
+}
+
+// Year range a land question asks about: "since January 2023" (2023 to
+// latest), "between January 2023 and March 2023" (2022 to 2023).
+export function yearsOf(text) {
+  const t = String(text ?? '');
+  const years = [...t.matchAll(/\b(20[0-3]\d)\b/g)].map((m) => Number(m[1]));
+  if (!years.length) return { since: null, until: null };
+  if (/\bbetween\b|\bfrom\b.*\bto\b/i.test(t)) return { since: Math.min(...years) - 1, until: Math.max(...years) };
+  return { since: Math.min(...years), until: null };
+}
+
+const modisCache = new Map();
+async function cachedModis(key, fn) {
+  const hit = modisCache.get(key);
+  if (hit && Date.now() - hit.at < 30 * 60_000) return hit.value;
+  const value = await fn();
+  if (modisCache.size > 200) modisCache.delete(modisCache.keys().next().value);
+  if (value) modisCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+const SENSOR_RE = /\b(Sentinel-?\d[A-C]?|Landsat\s*\d+|Planet(?: Labs)?|Maxar|WorldView-?\d|SPOT\s*\d)\b/i;
+const placeLabel = (point) => (point.place ? `${point.place} (${point.lat}, ${point.lon})` : `${point.lat}, ${point.lon}`);
+const pct = (n) => `${Number.isInteger(n) ? n : n.toFixed(1)}%`;
+const pts = (n) => `${n > 0 ? '+' : ''}${n} points`;
+
+export function landSummary(point, lc, text) {
+  const top = lc.latest.slice(0, 5).map((s) => `${s.name} ${pct(s.percent)}`).join(', ');
+  const parts = [`Land cover within about ${lc.box_km / 2} km of ${placeLabel(point)}, from the NASA MODIS ${lc.latest_year} yearly land cover map (500 m pixels): mostly ${lc.latest[0].name} (${pct(lc.latest[0].percent)}); in full ${top}.`];
+  if (lc.change) {
+    const c = lc.change;
+    const big = Math.max(Math.abs(c.urban_points), Math.abs(c.water_points), Math.abs(c.forest_points), Math.abs(c.cropland_points));
+    parts.push(`Change from ${lc.compare_year} to ${lc.latest_year}: urban and built-up ${pts(c.urban_points)} (now ${pct(lc.urban_percent)}), water ${pts(c.water_points)} (now ${pct(lc.water_percent)}), forest ${pts(c.forest_points)} (now ${pct(lc.forest_percent)}), cropland ${pts(c.cropland_points)}.`);
+    parts.push(big < 2 ? 'No significant change at this 500 m scale (every class moved by less than 2 points).' : 'The largest shift is shown above; changes under 2 points are within normal year-to-year noise at this scale.');
+  }
+  if (/\b(?:last|past)\s+(?:six|6|three|3|few)\s+months\b|\blast week\b|\bprevious month\b/i.test(text)) {
+    parts.push(`The map is yearly, so changes within the last few months are not resolved; ${lc.latest_year} is the newest year published.`);
+  }
+  const sensor = String(text ?? '').match(SENSOR_RE)?.[0];
+  if (sensor) parts.push(`${sensor} scenes were not read here; this uses the MODIS land cover product instead.`);
+  return parts.join(' ');
+}
+
+export function ndviSummary(point, n) {
+  const parts = [`The current NDVI around ${placeLabel(point)} is ${n.mean.toFixed(2)} (average of ${n.pixels} pixels at 250 m over about a ${n.box_km} km square, range ${n.min.toFixed(2)} to ${n.max.toFixed(2)}), from the NASA MODIS Terra 16-day composite for ${n.period_start} to ${n.period_end}, the most recent one published.`];
+  parts.push(`That means ${n.meaning}.`);
+  if (n.year_ago) {
+    const d = Math.round((n.mean - n.year_ago.mean) * 100) / 100;
+    parts.push(`For the same 16 days a year earlier it was ${n.year_ago.mean.toFixed(2)}, so it is ${Math.abs(d) < 0.03 ? 'about the same' : d > 0 ? `greener by ${d.toFixed(2)}` : `less green by ${Math.abs(d).toFixed(2)}`}.`);
+  }
+  parts.push('NDVI runs from -1 to 1; above 0.6 is dense green vegetation, below 0.2 is bare soil, water or pavement.');
+  return parts.join(' ');
+}
+
 async function handle(req, res) {
   const params = paramsOf(req);
   const text = freeTextParam(params);
@@ -95,6 +174,46 @@ async function handle(req, res) {
     } catch { /* no place found, refused below */ }
   }
   if (!point) return respondUnusableInput(res, 'Send lat and lon (for example lat=34.05 lon=-118.24) to analyse satellite-visible events near a point.');
+  // NDVI and land cover questions get measured MODIS values for the point.
+  const kind = questionKind(text);
+  if (kind) {
+    const askedKm = Number(firstUsableValue(params.radius_km, params.radius)) || radiusKmOf(text);
+    try {
+      if (kind === 'ndvi') {
+        const km = askedKm ? Math.min(Math.round(askedKm), 5) : 1;
+        const n = await cachedModis(`ndvi:${point.lat},${point.lon},${km}`, () => ndvi(point.lat, point.lon, { km }));
+        if (n) {
+          const summary = ndviSummary(point, n);
+          return res.json({
+            status: 'ok', summary, answer: summary, confidence: 0.85,
+            canonical: `satellite-imagery:ndvi:${point.lat.toFixed(2)},${point.lon.toFixed(2)}`,
+            latitude: point.lat, longitude: point.lon, place: point.place ?? null,
+            ndvi: n.mean, pixels: n.pixels, period_start: n.period_start, period_end: n.period_end, ndvi_year_ago: n.year_ago?.mean ?? null,
+            product: 'MODIS MOD13Q1 NDVI',
+            source: MODIS_SOURCE, checked_at: new Date().toISOString(),
+          });
+        }
+      } else {
+        const km = askedKm ? Math.max(Math.round(askedKm), 1) : (/\bdeforest|\bforest (?:loss|cover)\b/i.test(text) ? 25 : 5);
+        const { since, until } = yearsOf(text);
+        const lc = await cachedModis(`lc:${point.lat},${point.lon},${km},${since},${until}`, () => landCover(point.lat, point.lon, { km, sinceYear: since, untilYear: until }));
+        if (lc) {
+          const summary = landSummary(point, lc, text);
+          return res.json({
+            status: 'ok', summary, answer: summary, confidence: 0.85,
+            canonical: `satellite-imagery:landcover:${point.lat.toFixed(2)},${point.lon.toFixed(2)}:${lc.latest_year}`,
+            latitude: point.lat, longitude: point.lon, place: point.place ?? null,
+            dominant_class: lc.latest[0].name, land_cover_year: lc.latest_year, compare_year: lc.compare_year,
+            product: 'MODIS MCD12Q1 land cover',
+            source: MODIS_SOURCE, checked_at: new Date().toISOString(),
+          });
+        }
+      }
+    } catch {
+      // MODIS service down or slow: fall through to the event and imagery answer.
+    }
+  }
+
   const radius = Math.min(Math.max(Number(firstUsableValue(params.radius_km, params.radius)) || 300, 10), 2000);
   let events;
   try {

@@ -53,7 +53,8 @@ test('a contract view is read at the named block', async (t) => {
 test('an NFT owner question builds ownerOf with the token id', async (t) => {
   const calls = stubRpc(t, () => addressWord(OWNER));
   const j = await ask(startServer(t), `Which wallet held BAYC id 100 (contract ${CONTRACT}) when block 20,900,000 was current?`);
-  assert.match(j.summary, /ownerOf\(100\) gave/);
+  assert.equal(j.summary, `Wallet ${OWNER} held BAYC #100 at Ethereum block 20,900,000.`);
+  assert.equal(j.owner, OWNER);
   assert.equal(calls[0].params[0].data, `0x6352211e${(100).toString(16).padStart(64, '0')}`);
 });
 
@@ -122,4 +123,73 @@ test('a question with nothing readable asks for a contract and a view', async (t
   const j = await ask(startServer(t), 'how is the weather');
   assert.equal(j.status, 'invalid_input');
   assert.match(j.summary, /which on-chain value to read/);
+});
+
+test('any named view is called by its keccak selector at the named block', async (t) => {
+  const timelock = '0x6d903f6003cca6255D85CcA4D3B5E5146dC33925';
+  const calls = stubRpc(t, (method) => {
+    assert.equal(method, 'eth_call');
+    return `0x${(172800).toString(16).padStart(64, '0')}`;
+  });
+  const j = await ask(startServer(t), `For a DAO review, call delay() in seconds on ${timelock} (Ethereum) with the state of block 19,000,000. What number comes back?`);
+  assert.equal(j.status, 'ok');
+  assert.match(j.summary, /^delay\(\) returned 172800 seconds \(2 days\)/);
+  assert.equal(j.value, '172800');
+  assert.equal(calls[0].params[0].data, '0x6a42b8f8');
+  assert.equal(calls[0].params[1], `0x${(19_000_000).toString(16)}`);
+});
+
+test('the first Transfer event in a block range is read from the logs', async (t) => {
+  const usdc = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
+  const topic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+  const from = `0x${'11'.repeat(20)}`;
+  const to = `0x${'22'.repeat(20)}`;
+  const log = (logIndex, block, value) => ({
+    address: usdc.toLowerCase(), topics: [topic, addressWord(from), addressWord(to)],
+    data: `0x${value.toString(16).padStart(64, '0')}`, blockNumber: `0x${block.toString(16)}`,
+    logIndex: `0x${logIndex.toString(16)}`, transactionHash: `0x${'ab'.repeat(32)}`,
+  });
+  const calls = stubRpc(t, (method, params) => {
+    if (method === 'eth_getLogs') return [log(9, 55_000_001, 5n), log(87, 55_000_000, 1086382000n)];
+    if (params[0].data === '0x313ce567') return `0x${'6'.padStart(64, '0')}`;
+    if (params[0].data === '0x95d89b41') return `0x${'20'.padStart(64, '0')}${'4'.padStart(64, '0')}${Buffer.from('USDC').toString('hex').padEnd(64, '0')}`;
+    throw new Error(`unexpected ${method}`);
+  });
+  const j = await ask(startServer(t), `Look at ERC-20 Transfer events emitted by USDC (${usdc}) on Polygon between blocks 55,000,000 and 55,000,002. For the first one in log order, what were the sender, receiver and value?`);
+  assert.equal(j.status, 'ok');
+  assert.match(j.summary, new RegExp(`^Sender ${from}, receiver ${to}, value 1086.382 USDC`));
+  assert.match(j.summary, /first of 2 Transfer events in log order \(log index 87, block 55,000,000\)/);
+  assert.equal(j.block, '55000000-55000002');
+  const getLogs = calls.find((c) => c.method === 'eth_getLogs');
+  assert.equal(getLogs.segment, 'polygon');
+  assert.deepEqual(getLogs.params[0], { address: usdc, topics: [topic], fromBlock: `0x${(55_000_000).toString(16)}`, toBlock: `0x${(55_000_002).toString(16)}` });
+});
+
+test('a nonce question reads the transaction count at the block', async (t) => {
+  const wallet = `0x${'35'.repeat(20)}`;
+  const calls = stubRpc(t, () => '0x7');
+  const j = await ask(startServer(t), `What is the transaction count (nonce) of ${wallet} at block 26440080 on ethereum?`);
+  assert.match(j.summary, /nonce\) of .* on Ethereum at block 26,440,080 is 7/);
+  assert.equal(calls[0].method, 'eth_getTransactionCount');
+  assert.equal(calls[0].params[1], `0x${(26_440_080).toString(16)}`);
+});
+
+test('a known token balance by symbol is read with balanceOf on that token', async (t) => {
+  const holder = `0x${'4e'.repeat(20)}`;
+  const calls = stubRpc(t, (method, params) => {
+    if (params[0].data === '0x313ce567') return `0x${'8'.padStart(64, '0')}`;
+    if (params[0].data === '0x95d89b41') return '0x';
+    return `0x${(4679534098).toString(16).padStart(64, '0')}`;
+  });
+  const j = await ask(startServer(t), `Reconciliation: What was the cbBTC balance held by contract ${holder} on Base at block 52,569,168?`);
+  assert.equal(j.summary, `${holder} held 46.79534098 cbBTC on Base at block 52,569,168.`);
+  assert.equal(calls[0].params[0].to, '0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf');
+  assert.equal(calls[0].params[0].data, `0x70a08231${holder.slice(2).padStart(64, '0')}`);
+});
+
+test('a collection named without an address (BAYC) is found and its holder leads', async (t) => {
+  const calls = stubRpc(t, () => addressWord(OWNER));
+  const j = await ask(startServer(t), 'Provenance check for BAYC id 100. Which wallet held it when block 20,900,000 was current?');
+  assert.equal(j.summary, `Wallet ${OWNER} held BAYC #100 at Ethereum block 20,900,000.`);
+  assert.equal(calls[0].params[0].to, CONTRACT);
 });

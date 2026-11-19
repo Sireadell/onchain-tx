@@ -60,6 +60,8 @@ export function blockFromText(text) {
   const clean = String(text ?? '').replace(/0x[0-9a-fA-F]{40,}/g, ' ');
   const m = clean.match(new RegExp(String.raw`\bblock(?:\s+(?:number|height))?\s*#?\s*${BLOCK_NUM}`, 'i'))
     ?? clean.match(new RegExp(String.raw`\bat\s+(?:height|number)\s+${BLOCK_NUM}`, 'i'))
+    // "on Ethereum height 20500000"
+    ?? clean.match(new RegExp(String.raw`\bheight\s*#?\s*${BLOCK_NUM}`, 'i'))
     ?? clean.match(new RegExp(String.raw`${BLOCK_NUM}\s*(?:th\s+)?block\b`, 'i'));
   return m ? m[1].replace(/[,_]/g, '') : null;
 }

@@ -10,6 +10,7 @@ const CONTRACT = '0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D';
 test('block is read from several phrasings and ignores hex values', () => {
   assert.equal(blockFromText('at block 19,600,000 please'), '19600000');
   assert.equal(blockFromText('historical block 19,300,000'), '19300000');
+  assert.equal(blockFromText('Coinbase wallet 0x503828976D22510aad0201ac7ec88293211D23Da on Ethereum height 20500000?'), '20500000');
   assert.equal(blockFromText('block number 61,000,000'), '61000000');
   assert.equal(blockFromText('latest value of owner()'), null);
 });

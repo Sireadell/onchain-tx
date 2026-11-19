@@ -11,6 +11,25 @@ test('air quality: a past day in the question is read as that date', () => {
 
 test('twitter search: filler words are dropped from the search terms', () => {
   assert.equal(socialTerms('latest tweets about the upcoming solar eclipse on April 8, 2024'), 'solar eclipse April 8 2024');
+  // Real scorer questions that used to search "What are discussions ..."
+  assert.equal(socialTerms('What are the latest discussions on X about the upcoming SpaceX Starship launch?'), 'SpaceX Starship launch');
+  assert.equal(socialTerms('What are people tweeting about the upcoming Super Bowl LVIII on X?'), 'Super Bowl LVIII');
+  assert.equal(socialTerms('What are the latest reactions on X/Twitter regarding the upcoming SpaceX Starship test flight?'), 'SpaceX Starship test flight');
+  assert.equal(socialTerms('What are the latest discussions about the upcoming Apple event on X?'), 'Apple event');
+  assert.equal(socialTerms('#bitcoin'), '#bitcoin');
+});
+
+test('twitter search: only posts naming the subject are kept, closest first', async () => {
+  const { socialSubject, onTopic, socialRelevance } = await import('./newData.js');
+  const s = socialSubject('What are the latest discussions on X about the upcoming SpaceX Starship launch?');
+  assert.deepEqual(s.named, ['SpaceX', 'Starship']);
+  assert.equal(onTopic('SpaceX caught a Starship upper stage in the tower', s), true);
+  assert.equal(onTopic('I encourage people to post more about what the people who are paying Hakeem Jeffries do', s), false);
+  const apple = socialSubject('What are the latest discussions about the upcoming Apple event on X?');
+  assert.ok(socialRelevance('Apple event was everything', apple) > socialRelevance('Apple Music is great', apple));
+  assert.equal(onTopic('Pineapple pizza', apple), false);
+  const eclipse = socialSubject('What are people tweeting about the upcoming solar eclipse on April 8, 2024?');
+  assert.deepEqual(eclipse.core, ['solar', 'eclipse']);
 });
 
 test('air quality context compares readings with the WHO 24-hour guidelines', async () => {

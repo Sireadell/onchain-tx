@@ -324,3 +324,71 @@ test('wallet-balance: a mainnet read adds nonce, contract flag, block and explor
   assert.equal(body.block_number, 16);
   assert.equal(body.explorer_url, `https://etherscan.io/address/${ADDRESS}`);
 });
+
+// Round 14: "Look up the WETH balance of wallet 0x... as of block 26344263"
+// was answered with native ETH at the latest block. A named token is read
+// with balanceOf on that token, at the block asked for.
+test('wallet-balance: named WETH at a named block reads balanceOf at that block', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  resetRpcCache();
+  const calls = [];
+  mockFetch(t, async (url, options) => {
+    const { method, params } = JSON.parse(options.body);
+    calls.push({ method, params });
+    const result = method === 'eth_call' ? '0x' + (4595653755120328858n).toString(16).padStart(64, '0') : '0x1';
+    return { ok: true, status: 200, json: async () => ({ jsonrpc: '2.0', id: 1, result }) };
+  });
+  const base = startServer(t);
+  const q = `Look up the WETH balance of wallet ${ADDRESS} as of block 26344263.`;
+  const res = await fetch(`${base}/wallet-balance?query=${encodeURIComponent(q)}`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.token.toLowerCase(), '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2');
+  assert.equal(body.token_symbol, 'WETH');
+  assert.equal(body.balance_wei, '4595653755120328858');
+  assert.equal(body.block_number, 26344263);
+  assert.match(body.summary, /held 4\.595654 WETH on Ethereum at block 26344263/);
+  const call = calls.find((c) => c.method === 'eth_call');
+  assert.equal(call.params[1], '0x' + (26344263).toString(16));
+  assert.equal(calls.some((c) => c.method === 'eth_getBalance'), false);
+});
+
+test('wallet-balance: a block with no token reads the native balance at that block', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  resetRpcCache();
+  const calls = [];
+  mockFetch(t, async (url, options) => {
+    const { method, params } = JSON.parse(options.body);
+    calls.push({ method, params });
+    const result = method === 'eth_getBalance' ? '0xde0b6b3a7640000' : '0x';
+    return { ok: true, status: 200, json: async () => ({ jsonrpc: '2.0', id: 1, result }) };
+  });
+  const base = startServer(t);
+  const q = `What was the ETH balance of ${ADDRESS} at block 26,344,263?`;
+  const res = await fetch(`${base}/wallet-balance?query=${encodeURIComponent(q)}`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.block_number, 26344263);
+  assert.match(body.summary, /held 1 ETH on Ethereum at block 26344263/);
+  assert.equal(calls.find((c) => c.method === 'eth_getBalance').params[1], '0x' + (26344263).toString(16));
+});
+
+test('wallet-balance: USDC named in a Base question reads the Base USDC contract', async (t) => {
+  process.env.ANKR_API_KEY = 'test-key';
+  resetRpcCache();
+  const calls = [];
+  mockFetch(t, async (url, options) => {
+    const { method, params } = JSON.parse(options.body);
+    calls.push({ method, params, url });
+    const result = method === 'eth_call' ? '0x' + (2500000n).toString(16).padStart(64, '0') : '0x10';
+    return { ok: true, status: 200, json: async () => ({ jsonrpc: '2.0', id: 1, result }) };
+  });
+  const base = startServer(t);
+  const q = `What is the USDC balance of ${ADDRESS} on base?`;
+  const res = await fetch(`${base}/wallet-balance?query=${encodeURIComponent(q)}`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.token_symbol, 'USDC');
+  assert.match(body.summary, /holds 2\.5 USDC on Base/);
+  assert.equal(calls.find((c) => c.method === 'eth_call').params[0].to, '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
+});

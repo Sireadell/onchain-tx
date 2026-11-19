@@ -413,3 +413,33 @@ test('web-search: with every paid provider failing, the keyless search still ans
   assert.equal(body.provider, 'free-search');
   assert.ok(body.sources.length >= 1 && body.sources[0].url.startsWith('https://en.wikipedia.org/wiki/'));
 });
+
+// Exact-source lookups: Wikipedia revision metadata and DOI records.
+function stubExactSources(t) {
+  const original = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.startsWith('http://127.0.0.1:')) return original(url, init);
+    calls.push(u);
+    if (u.includes('en.wikipedia.org/w/api.php') && u.includes('revids=')) {
+      return new Response(JSON.stringify({ query: { pages: [{ title: 'Silicon', revisions: [{ revid: 1382843447, parentid: 1, user: 'Kapicapybara', timestamp: '2026-10-30T16:25:24Z', size: 88460, comment: '' }] }] } }), { status: 200 });
+    }
+    if (u.includes('opencitations.net')) {
+      return new Response(JSON.stringify([{ id: 'doi:10.1385/abab:135:1:43 omid:br/0610262333', title: 'Mutagenesis And Analysis Of Mold Aspergillus Niger.', author: 'Singh, O. V. [omid:ra/0610725401]', pub_date: '2006', venue: 'Applied Biochemistry And Biotechnology [issn:0273-2289]', volume: '', issue: '', page: '43-58', type: 'journal article', publisher: 'Springer [crossref:297]' }]), { status: 200 });
+    }
+    return new Response('{}', { status: 404 });
+  };
+  t.after(() => { globalThis.fetch = original; });
+  return calls;
+}
+
+test('web-search: a Wikipedia revision question is answered from that exact revision', async (t) => {
+  const calls = stubExactSources(t);
+  const base = startServer(t);
+  const j = await (await fetch(`${base}/web-search?query=${encodeURIComponent('Silicon, revision 1382843447, field revision text size in bytes.')}`)).json();
+  assert.equal(j.status, 'ok');
+  assert.match(j.summary, /^The revision text size of Silicon, revision 1382843447 \(English Wikipedia\), is 88460 bytes\./);
+  assert.equal(j.value, 88460);
+  assert.ok(calls.some((u) => u.includes('revids=1382843447')));
+});

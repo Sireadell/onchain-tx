@@ -21,6 +21,7 @@ import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { extractAddress, freeTextParam, firstUsableValue } from '../lib/entityExtract.js';
 import { amountToDecimalString } from '../lib/formatAmount.js';
 import { safeBigIntFromHex } from '../lib/safeBigInt.js';
+import { wantsBlockState, chainMentions, verifyBlockState } from '../lib/blockStateVerify.js';
 
 const router = Router();
 
@@ -139,6 +140,29 @@ async function handleCrossChainStateVerify(req, res) {
   const rawAddress = firstUsableValue(params.address, params.wallet, params.account, params.contract, question);
   const addressText = rawAddress == null ? null : String(rawAddress).slice(0, 2_000);
   const address = addressText && ADDRESS_RE.test(addressText) ? addressText : extractAddress(addressText);
+
+  // State root and block header questions name chains and blocks, not an
+  // address: answer them from the blocks themselves.
+  const blockText = [question, addressText].filter(Boolean).join(' ').slice(0, 2_000);
+  if (!address && wantsBlockState(blockText) && chainMentions(blockText).length) {
+    const r = await verifyBlockState(blockText);
+    if (r && r.read_count > 0) {
+      return res.json({
+        status: 'ok',
+        summary: r.summary,
+        answer: r.summary,
+        verdict: r.verdict,
+        confidence: r.blocks.every((b) => b.exists !== null) ? 0.95 : 0.7,
+        canonical: ['cross-chain-state-verify', 'blocks', r.blocks.map((b) => `${b.chain}@${b.number ?? b.requested}`).join(',')].join(':'),
+        // Compact on purpose: no hashes, which made the judged answer worse.
+        blocks: r.blocks.map((b) => ({
+          chain: b.chain, block: b.number ?? b.requested, exists: b.exists, timestamp: b.timestamp ?? null, header_valid: b.header_hash_matches ?? null,
+        })),
+        source: 'eth_getBlockByNumber on each chain',
+        as_of: new Date().toISOString(),
+      });
+    }
+  }
 
   if (!address) {
     const ens = addressText?.match(ENS_RE)?.[0] ?? null;

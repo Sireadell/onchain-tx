@@ -243,3 +243,33 @@ test('academic-search: nonsense topic answered with guidance, not a 500', async 
   assert.equal(res.status, 200);
   assert.equal((await res.json()).status, 'invalid_input');
 });
+
+// Exact-source lookups: Wikipedia revision metadata and DOI records.
+function stubExactSources(t) {
+  const original = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.startsWith('http://127.0.0.1:')) return original(url, init);
+    calls.push(u);
+    if (u.includes('en.wikipedia.org/w/api.php') && u.includes('revids=')) {
+      return new Response(JSON.stringify({ query: { pages: [{ title: 'Silicon', revisions: [{ revid: 1382843447, parentid: 1, user: 'Kapicapybara', timestamp: '2026-10-30T16:25:24Z', size: 88460, comment: '' }] }] } }), { status: 200 });
+    }
+    if (u.includes('opencitations.net')) {
+      return new Response(JSON.stringify([{ id: 'doi:10.1385/abab:135:1:43 omid:br/0610262333', title: 'Mutagenesis And Analysis Of Mold Aspergillus Niger.', author: 'Singh, O. V. [omid:ra/0610725401]', pub_date: '2006', venue: 'Applied Biochemistry And Biotechnology [issn:0273-2289]', volume: '', issue: '', page: '43-58', type: 'journal article', publisher: 'Springer [crossref:297]' }]), { status: 200 });
+    }
+    return new Response('{}', { status: 404 });
+  };
+  t.after(() => { globalThis.fetch = original; });
+  return calls;
+}
+
+test('academic-search: an OpenCitations Meta author count question is answered from the DOI record', async (t) => {
+  stubExactSources(t);
+  const base = startServer(t);
+  const q = "I am reconciling an older library export. Take the bibliographic fields from the 2024-04-06 OpenCitations Meta release. The DOI identifying the work is 10.1385/abab:135:1:43. Give the matching scholarly reference for \"Mutagenesis And Analysis Of Mold Aspergillus Niger.\": how many semicolon-separated author entries does that release list?";
+  const j = await (await fetch(`${base}/academic-search?query=${encodeURIComponent(q)}`)).json();
+  assert.equal(j.status, 'ok');
+  assert.match(j.summary, /^OpenCitations Meta lists 1 semicolon-separated author entry for .*: Singh, O\. V\./);
+  assert.equal(j.record.author_count, 1);
+});

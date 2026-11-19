@@ -86,8 +86,9 @@ test('tvl: both protocol and tvl_chain return chain-specific and total protocol 
   assert.equal(body.tvl_usd, 4000);
   assert.equal(body.chain_tvl_usd, 4000);
   assert.equal(body.protocol_total_tvl_usd, 5000);
-  assert.match(body.summary, /on ethereum has \$4000\.00 TVL/);
-  assert.doesNotMatch(body.summary, /5000/);
+  assert.match(body.answer, /^The aave-v3 protocol on the ethereum chain has a total value locked \(TVL\) of \$4000\.00 as of /);
+  assert.match(body.answer, /80\.0% of aave-v3's overall TVL/);
+  assert.doesNotMatch(body.answer, /5000/);
   assert.equal(calledPaths.length, 2);
 });
 
@@ -225,9 +226,9 @@ test('tvl: "the Aave protocol on the Polygon network" is read as aave on Polygon
   assert.equal(body.status, 'ok');
   assert.equal(body.query, 'Aave:Polygon');
   assert.equal(body.tvl_usd, 134);
-  assert.match(body.summary, /^Aave on Polygon has \$134\.00 TVL/);
-  assert.match(body.summary, /up 11\.67% over the last day/);
-  assert.match(body.summary, /Its DefiLlama category is Lending/);
+  assert.match(body.answer, /^The Aave protocol on the Polygon chain has a total value locked \(TVL\) of \$134\.00 as of /);
+  assert.equal(body.change_1d_pct.toFixed(2), '11.67');
+  assert.equal(body.category, 'Lending');
 });
 
 test('tvl: "all of DeFi" answers the market total and "the Solana blockchain" answers the chain', async (t) => {
@@ -251,4 +252,59 @@ test('tvl: "all of DeFi" answers the market total and "the Solana blockchain" an
   const chain = await (await fetch(`${base}/tvl?query=${encodeURIComponent('What is the TVL of the Solana blockchain?')}`)).json();
   assert.equal(chain.query_type, 'chain');
   assert.equal(chain.tvl_usd, 5000);
+});
+
+// Round 14 (2026-11-19): chatty questions kept filler in the protocol name
+// ("Meteora DLMM in deposits ? Keep it brief", "PancakeSwap across all
+// supported chains") and answered not_found. Names are now matched against
+// DefiLlama's own protocol list, longest run of words first.
+const FAKE_PROTOCOLS = [
+  { name: 'Meteora DLMM', slug: 'meteora-dlmm', parentProtocol: 'parent#meteora', tvl: 120, chains: ['Solana'] },
+  { name: 'Meteora DAMM V2', slug: 'meteora-damm-v2', parentProtocol: 'parent#meteora', tvl: 20, chains: ['Solana'] },
+  { name: 'ether.fi Liquid', slug: 'ether.fi-liquid', parentProtocol: 'parent#ether-fi', tvl: 295, chains: ['Ethereum'] },
+  { name: 'ether.fi Stake', slug: 'ether.fi-stake', parentProtocol: 'parent#ether-fi', tvl: 3000, chains: ['Ethereum'] },
+  { name: 'PancakeSwap AMM', slug: 'pancakeswap-amm', parentProtocol: 'parent#pancakeswap', tvl: 1200, chains: ['BSC'] },
+  { name: 'PancakeSwap AMM V3', slug: 'pancakeswap-amm-v3', parentProtocol: 'parent#pancakeswap', tvl: 600, chains: ['BSC', 'Ethereum'] },
+  { name: 'Uniswap V3', slug: 'uniswap-v3', parentProtocol: 'parent#uniswap', tvl: 1300, chains: ['Ethereum', 'Arbitrum'] },
+  { name: 'Morpho Blue', slug: 'morpho-blue', parentProtocol: 'parent#morpho', tvl: 10000, chains: ['Ethereum'] },
+  { name: 'Aave V3', slug: 'aave-v3', parentProtocol: 'parent#aave', tvl: 14000, chains: ['Ethereum', 'Polygon'] },
+  { name: 'Keep Network', slug: 'keep-network', tvl: 1, chains: ['Ethereum'] },
+  { name: 'Solana Name Service', slug: 'sns', tvl: 1, chains: ['Solana'] },
+];
+
+test('tvl: catalog matching finds the protocol in chatty questions', async () => {
+  const { buildCatalog, resolveFromCatalog } = await import('./checkTvl.js');
+  const cat = buildCatalog(FAKE_PROTOCOLS);
+  const r = (q) => resolveFromCatalog(q, cat);
+  assert.deepEqual(r('How big is Meteora DLMM in deposits right now? Keep it brief.'), { slug: 'meteora-dlmm', name: 'Meteora DLMM', chain: null });
+  assert.equal(r('How much capital sits in ether.fi Liquid contracts at the moment? Round sensibly.').slug, 'ether.fi-liquid');
+  assert.deepEqual(r('What is the Total Value Locked in PancakeSwap across all supported chains?'), { slug: 'pancakeswap', name: 'PancakeSwap', chain: null });
+  assert.deepEqual(r('What is the Total Value Locked (TVL) of Uniswap v3 on Arbitrum on Arbitrum?'), { slug: 'uniswap-v3', name: 'Uniswap V3', chain: 'Arbitrum' });
+  assert.equal(r('What is the Total Value Locked in Morpho lending vaults?').slug, 'morpho');
+  assert.deepEqual(r('What is the total value locked in the Aave protocol on the Ethereum mainnet?'), { slug: 'aave', name: 'Aave', chain: 'Ethereum' });
+  assert.equal(r('What is the TVL of the Solana blockchain?'), null, 'a chain question stays a chain question');
+  assert.equal(r('Compare the TVL of Uniswap V3 and Aave V3'), null);
+  assert.equal(r('How much is locked in Uniswap V3 and Aave V3?'), null);
+  assert.equal(r('What is the TVL of Totally Unknown Thing?'), null);
+});
+
+test('tvl: a chatty question answers the parent protocol total with the figure first', async (t) => {
+  resetDefiLlamaCache();
+  const { resetTvlCatalog } = await import('./checkTvl.js');
+  resetTvlCatalog();
+  t.after(() => resetTvlCatalog());
+  const requested = [];
+  mockFetch(t, async (url) => {
+    requested.push(url);
+    if (url.endsWith('/protocols')) return { status: 200, json: async () => FAKE_PROTOCOLS };
+    if (url.includes('/tvl/pancakeswap')) return { status: 200, text: async () => '1981848566.38' };
+    return { status: 404, text: async () => 'Protocol not found' };
+  });
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/tvl?query=${encodeURIComponent('What is the Total Value Locked in PancakeSwap across all supported chains?')}`)).json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.tvl_usd, 1981848566.38);
+  assert.equal(body.query, 'PancakeSwap');
+  assert.match(body.answer, /^PancakeSwap has a total value locked \(TVL\) of \$1\.98 billion \(\$1981848566\.38\) as of /);
+  assert.ok(!requested.some((u) => /across/i.test(u)), 'filler must not reach the lookup');
 });

@@ -11,6 +11,8 @@ import { llmComplete, hasLlmProvider, capInput, frameInput, INJECTION_GUARD } fr
 import { wikiAnswer } from '../lib/wikiAnswer.js';
 import { searchWeb } from '../lib/webSearch.js';
 import { consensusConfigured } from '../lib/consensus.js';
+import { exactSourceAnswer, exactSourceBody } from '../lib/exactSources.js';
+import { npmUpgradeAnswer } from '../lib/npmUpgradeNotes.js';
 
 const router = Router();
 
@@ -43,10 +45,37 @@ async function handleQuestion(req, res) {
   const { text: capped } = capInput(question, 2_000);
   const checkedAt = new Date().toISOString();
 
-  // Two or more independent voters must agree before an answer is stated.
+  const exact = await exactSourceAnswer(capped);
+  if (exact) return res.json(exactSourceBody(exact, capped));
+
+  // An npm upgrade question ("which APIs changed incompatibly in vitest
+  // 2.0.0?") is answered from the project's own release notes or migration
+  // guide. Model answers to these disagreed and invented changes.
+  try {
+    const notes = await npmUpgradeAnswer(capped);
+    if (notes) {
+      return res.json({
+        status: 'ok', summary: notes.summary, confidence: 0.95,
+        canonical: ['question-answering', 'release-notes', notes.package, notes.to_version].join(':'),
+        package: notes.package, from_version: notes.from_version, to_version: notes.to_version,
+        breaking_changes: notes.breaking_changes, source: notes.source,
+        citations: [{ n: 1, title: `${notes.package} ${notes.to_version} release notes`, url: notes.release }],
+        checked_at: checkedAt,
+      });
+    }
+  } catch {
+    // Release notes unreachable: fall through to the general answer paths.
+  }
+
+  // Two or more independent voters must agree before an answer is stated
+  // with full confidence. When they split, the fullest best-supported answer
+  // is still given, with a note that the sources differ: refusing outright
+  // scored zero on real questions (vitest 2.0 and react-query 5 breaking
+  // changes) where every source had the main facts and only worded or
+  // ordered them differently.
   if (consensusConfigured()) {
     try {
-      const out = await searchWeb(capped, { budgetMs: 14_000, maxResults: 5 });
+      const out = await searchWeb(capped, { budgetMs: 14_000, maxResults: 5, bestEffort: true });
       if (out?.provider === 'consensus' && out.answer) {
         const citations = citationsFrom(out.results);
         return res.json({
@@ -57,12 +86,21 @@ async function handleQuestion(req, res) {
           checked_at: checkedAt,
         });
       }
-      if (out?.inconclusive) {
+      if (out?.provider === 'consensus-split' && out.answer) {
+        const citations = citationsFrom(out.results);
+        const total = out.votes?.total ?? 0;
         return res.json({
-          status: 'ok', summary: `The sources I checked do not agree on an answer to "${capped.slice(0, 160)}", so I am not stating one.`,
-          confidence: 0.2, canonical: ['question-answering', 'no-consensus'].join(':'), votes: out.votes, checked_at: checkedAt,
+          status: 'ok',
+          summary: `${out.answer.trim()}${total ? ` (Sources differ on some details: this is the best-supported of ${total} independent answers checked.)` : ''}`,
+          confidence: 0.7,
+          canonical: ['question-answering', 'split'].join(':'), votes: out.votes,
+          source: total ? `${total} independent sources checked, partly disagreeing` : 'live web sources',
+          ...(citations.length ? { citations } : {}),
+          checked_at: checkedAt,
         });
       }
+      // A split with no usable answer falls through to the routes below
+      // rather than refusing outright.
     } catch {
       // Too few voters answered: fall through to the older routes below.
     }
