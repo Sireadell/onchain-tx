@@ -31,6 +31,7 @@ import { respondUnusableInput } from '../lib/unusableInput.js';
 import { extractSubject, freeTextParam, looksLikeSentence, firstUsableValue } from '../lib/entityExtract.js';
 import { resolveChainLoose } from '../lib/chains.js';
 import { describeAddressMiss, ADDRESS_RE } from '../lib/addressContext.js';
+import { cleanSubject } from '../lib/questionRead.js';
 
 const router = Router();
 
@@ -51,6 +52,19 @@ export function cleanProtocolName(value) {
   const cleaned = value.trim().replace(/[?.!]+$/, '').replace(/^(?:(?:the|current|total|live|latest|present)\s+)+(?:of\s+)?(?:the\s+)?/i, '').replace(/^of\s+(?:the\s+)?/i, '')
     .replace(/\s+(?:protocol|dex|platform|dapp|finance protocol)$/i, '').trim();
   return cleaned || value;
+}
+
+// Used only when the DefiLlama catalog did not match (or could not load in
+// time). A name read the old way that still carries question text ("Meteora
+// DLMM in deposits ? Keep it brief", "PancakeSwap across all supported
+// chains") is replaced by the shared subject reader's answer. A clean name is
+// returned untouched, so every question that already resolved still does.
+export function repairProtocolName(name, question) {
+  if (typeof name !== 'string' || typeof question !== 'string') return name;
+  const broken = name.includes('?') || looksLikeSentence(name)
+    || /\b(?:keep it|round sensibly|right now|at the moment|across all|in deposits|currently)\b/i.test(name);
+  if (!broken) return name;
+  return cleanSubject(question, { stripChain: true }) ?? name;
 }
 
 export function extractTvlProtocol(question) {
@@ -290,7 +304,10 @@ async function handleTvl(req, res) {
   const catalogHit = question ? resolveFromCatalog(question, await catalogWithin(CATALOG_WAIT_MS)) : null;
   let protocol = catalogHit
     ? catalogHit.slug
-    : cleanProtocolName(firstUsableValue(usableProtocol, split ? split[1].trim() : subject));
+    : repairProtocolName(
+      cleanProtocolName(firstUsableValue(usableProtocol, split ? split[1].trim() : subject)),
+      usableProtocol ? null : question,
+    );
   let wholeDefi = false;
   // "the TVL of the Solana blockchain" names a chain, and "all of DeFi" names
   // the whole market; neither is a protocol.

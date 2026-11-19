@@ -28,6 +28,7 @@ import { getTokenInfo, TokenNotFoundError } from '../lib/blockscoutApi.js';
 import { DEFAULT_CHAIN, resolveChainLoose, resolveRpcChainLoose, resolveTestnetLoose, rpcChainNames } from '../lib/chains.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 import { extractAddress, freeTextParam, firstUsableValue } from '../lib/entityExtract.js';
+import { readBlock } from '../lib/questionRead.js';
 import { amountToDecimalString, amountToRoundedString } from '../lib/formatAmount.js';
 import { safeBigIntFromHex } from '../lib/safeBigInt.js';
 import { findEnsName, resolveEnsName } from '../lib/ensResolve.js';
@@ -106,9 +107,9 @@ export function findBlockNumber(params, text) {
     if (Number.isSafeInteger(n) && n > 0) return n;
   }
   if (typeof text !== 'string') return null;
-  const m = /\bblock(?:\s+(?:number|height|no\.?))?\s*[#:]?\s*(\d{1,3}(?:,\d{3})+|\d+)\b/i.exec(text);
-  if (!m) return null;
-  const n = Number(m[1].replace(/,/g, ''));
+  // Shared reader: also reads "height N" and skips digits inside an address.
+  const found = readBlock(text);
+  const n = found === null ? NaN : Number(found);
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 

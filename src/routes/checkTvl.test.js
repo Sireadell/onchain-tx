@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildApp } from '../app.js';
 import { resetDefiLlamaCache } from '../lib/defiLlamaApi.js';
-import { extractTvlProtocol } from './checkTvl.js';
+import { extractTvlProtocol, repairProtocolName } from './checkTvl.js';
 
 test('tvl: extracts protocols from the three hard questions', () => {
   assert.equal(extractTvlProtocol("What is Uniswap's aggregate live TVL across every chain, in USD?"), 'Uniswap');
@@ -307,4 +307,14 @@ test('tvl: a chatty question answers the parent protocol total with the figure f
   assert.equal(body.query, 'PancakeSwap');
   assert.match(body.answer, /^PancakeSwap has a total value locked \(TVL\) of \$1\.98 billion \(\$1981848566\.38\) as of /);
   assert.ok(!requested.some((u) => /across/i.test(u)), 'filler must not reach the lookup');
+});
+
+test('tvl: a fallback name that still carries question text is repaired, a clean one is untouched', () => {
+  assert.equal(repairProtocolName('Meteora DLMM in deposits ? Keep it brief', 'How big is Meteora DLMM in deposits right now? Keep it brief.'), 'Meteora DLMM');
+  assert.equal(repairProtocolName('How much capital sits in ether.fi Liquid contracts ? Round sensibly', 'How much capital sits in ether.fi Liquid contracts at the moment? Round sensibly.'), 'ether.fi Liquid');
+  assert.equal(repairProtocolName('PancakeSwap across all supported chains', 'What is the Total Value Locked in PancakeSwap across all supported chains?'), 'PancakeSwap');
+  assert.equal(repairProtocolName('Curve', 'How much TVL does Curve have on Ethereum?'), 'Curve');
+  assert.equal(repairProtocolName('Uniswap v3', 'What is the Total Value Locked (TVL) of Uniswap v3 on Arbitrum on Arbitrum?'), 'Uniswap v3');
+  assert.equal(repairProtocolName('Solana blockchain', 'What is the TVL of the Solana blockchain?'), 'Solana blockchain');
+  assert.equal(repairProtocolName('aave', null), 'aave');
 });

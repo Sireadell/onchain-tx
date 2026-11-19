@@ -23,3 +23,25 @@ test('token supply: native ETH is answered from the supply tracker, not refused'
   assert.match(body.summary, /block 18000000/);
   assert.equal(body.requested_block, '18000000');
 });
+
+test('token supply: a block written as "height N" in the question is the block read', async (t) => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('api.coingecko.com/api/v3/coins/ethereum')) {
+      return new Response(JSON.stringify({ last_updated: '2026-11-12T09:40:49.000Z', market_data: { total_supply: 122212724.47, circulating_supply: 122212724.47, max_supply: null } }), { status: 200 });
+    }
+    return original(url, init);
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const express = (await import('express')).default;
+  const router = (await import('./checkTokenTotalSupply.js')).default;
+  const app = express();
+  app.use('/s', router);
+  const server = app.listen(0);
+  t.after(() => server.close());
+  const q = 'What is the total circulating supply of ETH on the Ethereum mainnet as of height 18,000,000?';
+  const res = await fetch(`http://127.0.0.1:${server.address().port}/s?query=${encodeURIComponent(q)}`);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.requested_block, '18000000');
+});

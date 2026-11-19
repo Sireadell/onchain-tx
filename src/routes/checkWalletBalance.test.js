@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { buildApp } from '../app.js';
 import { resetRpcCache } from '../lib/ankrRpc.js';
 import { resetBlockscoutCache } from '../lib/blockscoutApi.js';
+import { findBlockNumber } from './checkWalletBalance.js';
 
 function startServer(t) {
   const server = buildApp().listen(0);
@@ -391,4 +392,12 @@ test('wallet-balance: USDC named in a Base question reads the Base USDC contract
   assert.equal(body.token_symbol, 'USDC');
   assert.match(body.summary, /holds 2\.5 USDC on Base/);
   assert.equal(calls.find((c) => c.method === 'eth_call').params[0].to, '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
+});
+
+test('wallet balance: the block in the question is read in every logged form', () => {
+  assert.equal(findBlockNumber({}, 'How many WETH tokens does 0xf52cb3c47ebe35925906725fe849f2d6ad62fffe hold at block 26344263?'), 26344263);
+  assert.equal(findBlockNumber({}, 'Look up the WETH balance of wallet 0x0d0707963952f2fba59dd06f2b425ace40b492fe as of block 26,344,263.'), 26344263);
+  assert.equal(findBlockNumber({}, 'What was the ETH balance of 0x503828976D22510aad0201ac7ec88293211D23Da on Ethereum height 20500000?'), 20500000);
+  assert.equal(findBlockNumber({}, 'What is the ETH balance of 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 on ethereum?'), null);
+  assert.equal(findBlockNumber({ block: '18000000' }, 'anything'), 18000000);
 });

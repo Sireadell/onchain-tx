@@ -160,6 +160,9 @@ test('hashprice: block 800000 figures give about 238,322 sats per PH/s per day',
   assert.equal(parseHeight('800,000'), 800000);
   assert.equal(parseHeight(undefined, 'hashprice at block height 850000?'), 850000);
   assert.equal(parseHeight('abc'), null);
+  assert.equal(parseHeight(undefined, 'Hi, using the block reward at 947,955, estimate miner revenue per unit of hashrate.'), 947955);
+  assert.equal(parseHeight(undefined, 'At bitcoin block #540698, what was hashprice?'), 540698);
+  assert.equal(parseHeight(undefined, "What is the current hashprice for 1 TH/s on the Bitcoin network, considering today's block reward and transaction fees?"), 'latest');
 });
 
 test('hashprice: height=latest reads the tip instead of crashing', async (t) => {

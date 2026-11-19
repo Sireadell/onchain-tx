@@ -11,6 +11,7 @@ import { ethCall, withRpcBudget } from '../lib/ankrRpc.js';
 import { resolveRpcChainLoose, CHAINS } from '../lib/chains.js';
 import { extractAddress, firstUsableValue, freeTextParam } from '../lib/entityExtract.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
+import { readBlock } from '../lib/questionRead.js';
 import { KNOWN_TOKENS, decodeUint, decodeAbiString } from '../lib/knownTokens.js';
 
 const router = Router();
@@ -46,8 +47,8 @@ function parseBlock(value, text) {
       if (Number.isSafeInteger(n) && n > 0) return String(n);
     }
   }
-  const m = String(text ?? '').match(/\bblock(?:\s+(?:number|height))?\s*#?\s*([\d,_]{4,})/i);
-  return m ? m[1].replace(/[,_]/g, '') : 'latest';
+  // Shared reader: also reads "height N" and "block #N".
+  return readBlock(text) ?? 'latest';
 }
 
 export function formatUnits(raw, decimals) {

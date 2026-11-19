@@ -14,6 +14,7 @@
 import { Router } from 'express';
 import { firstUsableValue, freeTextParam } from '../lib/entityExtract.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
+import { readBlock as readBlockNumber } from '../lib/questionRead.js';
 
 const router = Router();
 
@@ -66,8 +67,10 @@ export function parseHeight(value, text) {
     if (/^\d{1,7}$/.test(s)) return Number(s);
     return null;
   }
-  const m = String(text ?? '').match(/\b(?:block|height)\s*(?:height|number)?\s*#?\s*([\d,]{3,9})\b/i);
-  return m ? Number(m[1].replace(/,/g, '')) : 'latest';
+  // Shared reader: also reads "the block reward at 947,955" (logged
+  // 2026-11-18), which the old local pattern missed and answered for the tip.
+  const found = readBlockNumber(text);
+  return found !== null && Number.isSafeInteger(Number(found)) ? Number(found) : 'latest';
 }
 
 async function handleMiningHashprice(req, res) {
