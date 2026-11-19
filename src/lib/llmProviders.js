@@ -29,6 +29,13 @@ const geminiModel = () => process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
 // Each model has its own free daily allowance, so when the main one is used up
 // the smaller models on the same key still answer. They are tried in order.
 export const groqModels = () => [...new Set([groqModel(), 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'])];
+// A second Groq account (GROQ_API_KEY_2) has its own daily allowance. Each
+// model is tried on the first key, then the second, before the next smaller
+// model, so the best model stays in use for as long as either key has room.
+// The second key's entries carry an "@2" suffix, which also keeps their
+// pauses apart from the first key's.
+const GROQ_KEY2_SUFFIX = '@2';
+export const groqSlots = () => groqModels().flatMap((m) => (process.env.GROQ_API_KEY_2 ? [m, m + GROQ_KEY2_SUFFIX] : [m]));
 export const geminiModels = () => [...new Set([geminiModel(), 'gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemma-4-31b-it'])];
 export const hasGroq = () => Boolean(process.env.GROQ_API_KEY);
 export const hasGemini = () => Boolean(process.env.GEMINI_API_KEY);
@@ -128,25 +135,27 @@ async function post(url, { headers, body, budgetMs, provider, keepOnNotFound = f
 export async function groqComplete(system, user, { maxTokens = 400, temperature = 0.1, budgetMs = 9_000, model = null } = {}) {
   if (!hasGroq()) throw new ProviderError('GROQ_API_KEY is not set', { provider: 'groq' });
   if (providerDisabled('groq')) throw new ProviderError('groq is paused after a refusal', { provider: 'groq' });
-  const one = async (name, ms) => {
+  const one = async (slot, ms) => {
+    const onKey2 = slot.endsWith(GROQ_KEY2_SUFFIX);
+    const model = onKey2 ? slot.slice(0, -GROQ_KEY2_SUFFIX.length) : slot;
     const body = await post(GROQ_URL, {
       provider: 'groq',
       budgetMs: ms,
       keepOnNotFound: true,
-      headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
+      headers: { Authorization: `Bearer ${onKey2 ? process.env.GROQ_API_KEY_2 : process.env.GROQ_API_KEY}` },
       body: {
-        model: name,
+        model,
         messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
         max_tokens: maxTokens,
         temperature,
-        ...(/gpt-oss/i.test(name) ? { reasoning_effort: 'low' } : {}),
+        ...(/gpt-oss/i.test(model) ? { reasoning_effort: 'low' } : {}),
       },
     });
     const text = body?.choices?.[0]?.message?.content;
-    if (typeof text !== 'string' || !text.trim()) throw new ProviderError(`groq ${name} returned no text`, { provider: 'groq', status: 502 });
-    return { text: text.trim(), cost_usd: 0, provider: 'groq', model: name };
+    if (typeof text !== 'string' || !text.trim()) throw new ProviderError(`groq ${model} returned no text`, { provider: 'groq', status: 502 });
+    return { text: text.trim(), cost_usd: 0, provider: 'groq', model: slot };
   };
-  return tryModels('groq', model ? [model] : groqModels(), budgetMs, one);
+  return tryModels('groq', model ? [model] : groqSlots(), budgetMs, one);
 }
 
 export async function geminiComplete(system, user, { maxTokens = 400, temperature = 0.1, budgetMs = 9_000, grounded = process.env.GEMINI_GROUNDING === '1', model = null } = {}) {

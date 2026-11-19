@@ -48,3 +48,22 @@ test('a bad key is not retried on other models', async (t) => {
   await assert.rejects(() => groqComplete('s', 'u'), (err) => err.status === 401);
   assert.equal(asked.length, 1);
 });
+
+test('groq: the second key is tried on the same model before a smaller model', async (t) => {
+  process.env.GROQ_API_KEY = 'k1';
+  process.env.GROQ_API_KEY_2 = 'k2';
+  t.after(() => { delete process.env.GROQ_API_KEY_2; });
+  const original = globalThis.fetch;
+  const asked = [];
+  globalThis.fetch = async (url, init) => {
+    const { model } = JSON.parse(init.body);
+    const key = init.headers.Authorization.slice(7);
+    asked.push(`${model} ${key}`);
+    const ok = key === 'k2';
+    return new Response(JSON.stringify(ok ? { choices: [{ message: { content: `from ${model} ${key}` } }] } : { error: { message: 'quota used up' } }), { status: ok ? 200 : 429 });
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const out = await groqComplete('s', 'u');
+  assert.equal(out.text, 'from openai/gpt-oss-120b k2');
+  assert.deepEqual(asked, ['openai/gpt-oss-120b k1', 'openai/gpt-oss-120b k2']);
+});
