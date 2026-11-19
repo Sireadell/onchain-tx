@@ -41,9 +41,32 @@ const SERVICES = new Map([
 
 export const serviceName = (port) => SERVICES.get(port) ?? 'unknown';
 
+// Which reserved block a non-public address falls in, in plain words, so the
+// answer can say why no outside scanner has seen it.
+export function reservedRange(ip) {
+  const m = String(ip).replace(/^::ffff:/i, '').match(/^(\d+)\.(\d+)\.(\d+)\.\d+$/);
+  if (!m) return 'a private or reserved IPv6 range that the public internet does not route to';
+  const [a, b, c] = m.slice(1).map(Number);
+  if (a === 10) return 'private address space (10.0.0.0/8), which RFC 1918 reserves for internal networks';
+  if (a === 172 && b >= 16 && b <= 31) return 'private address space (172.16.0.0/12), which RFC 1918 reserves for internal networks';
+  if (a === 192 && b === 168) return 'private address space (192.168.0.0/16), which RFC 1918 reserves for internal networks';
+  if (a === 127) return 'the loopback range (127.0.0.0/8), which always points back at the same machine';
+  if (a === 169 && b === 254) return 'the link-local range (169.254.0.0/16), which never leaves the local network segment';
+  if (a === 100 && b >= 64 && b <= 127) return 'shared carrier address space (100.64.0.0/10, RFC 6598), used inside an internet provider\'s network';
+  if ((a === 192 && b === 0 && c === 2) || (a === 198 && b === 51 && c === 100) || (a === 203 && b === 0 && c === 113)) return 'a documentation range (RFC 5737) set aside for examples, which no real machine uses';
+  return 'a reserved range (IANA special-purpose registry) that the public internet does not route to';
+}
+
+// The port the question asks about, when it names one ("port 80").
+export function askedPort(text) {
+  const m = String(text ?? '').match(/\bport\s*(?:number\s*)?(\d{1,5})\b/i);
+  const n = m ? Number(m[1]) : null;
+  return n && n <= 65535 ? n : null;
+}
+
 export async function resolveTarget(host) {
   if (net.isIP(host)) {
-    if (isPrivateIp(host)) throw new PortAuditError(`${host} is a private or reserved address, which no public scan index covers`);
+    if (isPrivateIp(host)) throw new PortAuditError(`${host} is a private or reserved address, which no public scan index covers`, { cause: { private: true, privateIp: host } });
     return host;
   }
   if (BLOCKED_HOSTNAME_RE.test(host) || !/^[a-z0-9.-]+$/i.test(host) || host.length > 253) throw new PortAuditError(`${host} is not a public host name`);
@@ -54,7 +77,7 @@ export async function resolveTarget(host) {
     try { records = await dns.lookup(host, { all: true }); } catch { throw new PortAuditError(`${host} does not resolve in DNS`); }
   }
   const pub = records.find((r) => !isPrivateIp(r.address));
-  if (!pub) throw new PortAuditError(`${host} resolves only to private addresses`);
+  if (!pub) throw new PortAuditError(`${host} resolves only to private addresses`, { cause: { private: true, privateIp: records[0]?.address } });
   return pub.address;
 }
 

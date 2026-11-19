@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildApp } from '../app.js';
-import { targetFromText, assess, resolveTarget } from '../lib/portAudit.js';
+import { targetFromText, assess, resolveTarget, reservedRange, askedPort } from '../lib/portAudit.js';
 
 function startServer(t) {
   const server = buildApp().listen(0);
@@ -50,8 +50,8 @@ test('port audit: reports ports, risky services and CVEs from InternetDB', async
   assert.deepEqual(body.open_ports, [22, 80, 6379]);
   assert.deepEqual(body.risky_ports, ['6379/Redis']);
   assert.equal(body.risk_level, 'high');
-  assert.match(body.summary, /Shodan InternetDB/);
-  assert.match(body.summary, /No connection was made to the host/);
+  assert.match(body.answer, /Shodan InternetDB/);
+  assert.match(body.answer, /No connection was made to the host/);
 });
 
 test('port audit: an address Shodan has never seen answers not_found, not an error', async (t) => {
@@ -73,7 +73,39 @@ test('port audit: a private address never reaches Shodan', async (t) => {
   const base = startServer(t);
   let called = false;
   stubFetch(t, async () => { called = true; return new Response('{}'); });
-  const body = await (await fetch(`${base}/port-audit?host=192.168.1.1`)).json();
+  const body = await (await fetch(`${base}/port-audit?query=${encodeURIComponent('Scan 192.168.1.100 for open ports')}`)).json();
   assert.equal(called, false);
-  assert.equal(body.status, 'invalid_input');
+  assert.equal(body.status, 'ok');
+  assert.equal(body.verdict, 'not_found');
+  assert.equal(body.found, false);
+  assert.match(body.answer, /192\.168\.0\.0\/16/);
+  assert.match(body.answer, /RFC 1918/);
+  assert.equal(body.summary, undefined);
+});
+
+test('port audit: reserved ranges are named', () => {
+  assert.match(reservedRange('10.1.2.3'), /10\.0\.0\.0\/8/);
+  assert.match(reservedRange('127.0.0.1'), /loopback/);
+  assert.match(reservedRange('203.0.113.5'), /documentation/);
+  assert.equal(askedPort('What runs on port 80 of example.com?'), 80);
+  assert.equal(askedPort('Which ports are open on example.com?'), null);
+});
+
+test('port audit: the port asked about is answered first, CDN edges are named', async (t) => {
+  const base = startServer(t);
+  stubFetch(t, async () => new Response(JSON.stringify({ ip: '45.33.32.156', ports: [80, 443, 8080], tags: ['cdn'], vulns: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  const body = await (await fetch(`${base}/port-audit?query=${encodeURIComponent('What services are running on port 80 of 45.33.32.156?')}`)).json();
+  assert.match(body.answer, /^On 45\.33\.32\.156, port 80 is open and serves HTTP\./);
+  assert.match(body.answer, /CDN edge/);
+  assert.equal(body.found, true);
+  const shut = await (await fetch(`${base}/port-audit?query=${encodeURIComponent('Is port 22 open on 45.33.32.156?')}`)).json();
+  assert.match(shut.answer, /^On 45\.33\.32\.156, port 22 is not open/);
+});
+
+test('port audit: a host name containing "private" that does not resolve is not called a private address', async (t) => {
+  const base = startServer(t);
+  stubFetch(t, async () => new Response('{}'));
+  const body = await (await fetch(`${base}/port-audit?query=${encodeURIComponent('Which ports are open on private-api.invalid?')}`)).json();
+  assert.notEqual(body.verdict, 'not_found');
+  assert.doesNotMatch(JSON.stringify(body), /IPv6 range/);
 });
