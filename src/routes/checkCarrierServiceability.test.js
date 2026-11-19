@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
-import carrierServiceabilityRouter from './checkCarrierServiceability.js';
+import carrierServiceabilityRouter, { deps } from './checkCarrierServiceability.js';
 
 function startServer(t) {
   const app = express();
@@ -138,4 +138,62 @@ test('carrier-serviceability: provider failure returns 502, not a crash', async 
   assert.equal(res.status, 502);
   const body = await res.json();
   assert.equal(body.status, 'error');
+});
+
+function stubRules(t, impl) {
+  const saved = { ...deps };
+  deps.hasLlmProvider = () => true;
+  deps.llmComplete = impl;
+  t.after(() => Object.assign(deps, saved));
+}
+
+function emptySearch(t) {
+  withKey(t);
+  stubFetch(t, (url) => (url.startsWith('https://api.tavily.com')
+    ? new Response(JSON.stringify({ answer: null, results: [] }), { status: 200 })
+    : undefined));
+}
+
+for (const [reply, verdict] of [
+  ['Yes. Chunghwa Post domestic parcels cover Taipei to Kaohsiung.', 'serviceable'],
+  ['No. Paint is a prohibited item for this service.', 'not serviceable'],
+  ['Yes with restrictions. Paint must meet the non-hazardous packaging rules.', 'serviceable with restrictions'],
+  ['Coverage of this route is not published.', 'unclear'],
+]) {
+  test(`carrier-serviceability: with no search answer the published rules answer (${verdict})`, async (t) => {
+    emptySearch(t);
+    let asked = null;
+    stubRules(t, async (system, user, opts) => { asked = { system, user, opts }; return { text: reply }; });
+    const base = startServer(t);
+    const q = 'Will Chunghwa Post ship a 10kg package containing paint from 104 to 802?';
+    const body = await (await fetch(`${base}/carrier-serviceability?query=${encodeURIComponent(q)}`)).json();
+    assert.equal(body.status, 'ok');
+    assert.equal(body.verdict, verdict);
+    assert.equal(body.summary, reply);
+    assert.match(body.method, /published coverage.*confirm the exact address/);
+    assert.match(asked.user, /Chunghwa Post/);
+    assert.equal(asked.opts.disableSearch, true);
+    assert.ok(asked.opts.budgetMs <= 12_000);
+  });
+}
+
+test('carrier-serviceability: a search outage with a failing fallback still answers 502', async (t) => {
+  withKey(t);
+  stubFetch(t, (url) => (url.startsWith('https://api.tavily.com') ? new Response('', { status: 500 }) : undefined));
+  stubRules(t, async () => { throw new Error('model down'); });
+  const base = startServer(t);
+  const res = await fetch(`${base}/carrier-serviceability?address=10001`);
+  assert.equal(res.status, 502);
+  assert.equal((await res.json()).status, 'error');
+});
+
+test('carrier-serviceability: a search outage is answered from the published rules', async (t) => {
+  withKey(t);
+  stubFetch(t, (url) => (url.startsWith('https://api.tavily.com') ? new Response('', { status: 500 }) : undefined));
+  stubRules(t, async () => ({ text: 'Yes. UPS Ground serves ZIP 10001.' }));
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/carrier-serviceability?address=10001&carrier=ups`)).json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.verdict, 'serviceable');
+  assert.equal(body.carrier, 'ups');
 });

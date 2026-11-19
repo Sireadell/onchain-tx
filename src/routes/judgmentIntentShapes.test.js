@@ -6,7 +6,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import { forwardAsyncErrors, errorHandler } from '../app.js';
-import { kycLivenessRouter, fraudRiskRouter } from './newIntents.js';
+import { kycLivenessRouter, fraudRiskRouter, fraudRiskFields } from './newIntents.js';
+import { ipFacts, emailFacts, fraudSignals } from '../lib/fraudSignals.js';
 import { KEEP_LAYOUT } from '../lib/llmIntentRoute.js';
 import { llmOutputEvaluationRouter, splitStrengthsErrors } from './llmIntents.js';
 import summarizeRouter, { deps, looksLikeSourcelessRequest } from './checkTextSummarization.js';
@@ -242,12 +243,65 @@ test('graded layout: verdict is the short answer, reasons once in summary, metho
   t.after(() => { server.closeAllConnections(); server.close(); });
   const base = `http://127.0.0.1:${server.address().port}`;
   const body = await (await fetch(`${base}/fraud?query=${encodeURIComponent('fraud risk for a signup from 198.51.100.10 with a mailinator.com email?')}`)).json();
-  assert.deepEqual(Object.keys(body), ['status', 'verdict', 'answer', 'found', 'confidence', 'summary', 'method']);
+  assert.deepEqual(Object.keys(body), ['status', 'verdict', 'answer', 'found', 'confidence', 'summary', 'risk_score', 'signals', 'method']);
   assert.equal(body.verdict, 'Medium risk');
   assert.equal(body.answer, 'Medium risk');
   assert.match(body.summary, /disposable provider/);
   assert.equal(body.checked_at, undefined);
   assert.equal(body.cost_usd, undefined);
+});
+
+test('fraud-risk: score on 0 to 1, the checked facts with their sources, and the model reasons', async (t) => {
+  withKey(t);
+  stubPerplexity(t, 'High risk. A headless browser points to a script. Risk score: 88/100.');
+  const app = express();
+  app.use('/fraud', forwardAsyncErrors(fraudRiskRouter));
+  const server = app.listen(0);
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const q = 'What is the fraud risk score for a signup from 192.168.1.100 with a headless browser and test@tempmail.com?';
+  const body = await (await fetch(`${base}/fraud?query=${encodeURIComponent(q)}`)).json();
+  assert.equal(body.risk_score, 0.88);
+  assert.match(body.summary, /^High risk \(risk score 0\.88 of 1\): 192\.168\.1\.100 is a private address \(RFC 1918\)/);
+  assert.match(body.summary, /tempmail\.com hands out throwaway mailboxes \[disposable email domain list\]/);
+  assert.match(body.summary, /"test@" is a placeholder mailbox/);
+  assert.match(body.summary, /headless browser.*\[stated in the details\]\. A headless browser points to a script\.$/);
+  assert.doesNotMatch(body.summary, /Risk score: 88/);
+  assert.equal(body.signals.length, 4);
+  assert.match(body.method, /disposable-mailbox list/);
+});
+
+test('fraud-risk: with no checkable facts and no stated score the score sits inside the verdict band', () => {
+  const f = fraudRiskFields('Low risk. Small repeat order from a long-standing customer in 2024.', { input: 'order of $20 from a customer since 2019', verdict: 'Low risk' });
+  assert.ok(f.risk_score >= 0.05 && f.risk_score <= 0.39);
+  assert.equal(f.signals, undefined);
+  assert.match(f.summary, /^Low risk \(risk score 0\.\d+ of 1\)\. Small repeat order from a long-standing customer in 2024\.$/);
+});
+
+test('fraud signals: only reserved IP ranges and known throwaway domains are flagged', () => {
+  assert.deepEqual(ipFacts('8.8.8.8 and 203.0.113.5 and 999.1.1.1').length, 1);
+  assert.match(ipFacts('from 203.0.113.5')[0], /documentation-range/);
+  assert.deepEqual(emailFacts('jane.doe@gmail.com'), []);
+  assert.equal(emailFacts('uses mailinator.com and bob@mailinator.com').length, 1);
+});
+
+test('fraud-risk: a closing order total or count is kept in the reasons, not read as the score', () => {
+  for (const [text, kept] of [
+    ['Low risk. The order total was 450.', /The order total was 450\.$/],
+    ['Low risk. Small order of 20.', /Small order of 20\.$/],
+    ['Medium risk. Three attempts in the last 12.', /in the last 12\.$/],
+  ]) {
+    const verdict = text.split('.')[0];
+    const f = fraudRiskFields(text, { input: 'order', verdict });
+    assert.match(f.summary, kept);
+    assert.notEqual(f.risk_score, 0.2);
+  }
+  assert.equal(fraudRiskFields('High risk. Stolen card pattern. 91/100', { input: 'x', verdict: 'High risk' }).risk_score, 0.91);
+});
+
+test('fraud signals: "not a bot" is not counted as a bot', () => {
+  assert.equal(fraudSignals('the user is not a bot').length, 0);
+  assert.equal(fraudSignals('signup from a bot farm').length, 1);
 });
 
 test('graded layout: an intent ranked first keeps its older layout', async (t) => {
