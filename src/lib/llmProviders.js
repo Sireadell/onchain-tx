@@ -35,7 +35,36 @@ export const groqModels = () => [...new Set([groqModel(), 'openai/gpt-oss-20b', 
 // has room. Entries for key N carry an "@N" suffix, which also keeps their
 // pauses apart from the other keys'.
 const groqKeyNumbers = () => [1, ...[2, 3, 4, 5, 6, 7, 8, 9].filter((n) => process.env[`GROQ_API_KEY_${n}`])];
-export const groqSlots = () => groqModels().flatMap((m) => groqKeyNumbers().map((n) => (n === 1 ? m : `${m}@${n}`)));
+export const groqSlots = () => groqModels().flatMap((m) => orderByRoom(groqKeyNumbers().map((n) => (n === 1 ? m : `${m}@${n}`))));
+
+// Per-minute room left on each key and model, read from Groq's own
+// x-ratelimit headers after every call. A burst of questions used to go to
+// key 1 first, fill its minute, and only then spill over; now each question
+// goes to the key with the most room, so a burst spreads over every key, and
+// a key known to be too full for the question is skipped without a wasted call.
+const room = new Map(); // slot -> { tokens, resetAt }
+export function parseDurationMs(text) {
+  const m = /^(?:(\d+)h)?(?:(\d+)m(?!s))?(?:([\d.]+)(ms|s))?$/.exec(String(text ?? '').trim());
+  if (!m || !(m[1] || m[2] || m[3])) return null;
+  const ms = Number(m[1] ?? 0) * 3_600_000 + Number(m[2] ?? 0) * 60_000 + (m[3] ? Number(m[3]) * (m[4] === 'ms' ? 1 : 1_000) : 0);
+  return Number.isFinite(ms) ? ms : null;
+}
+function noteRoom(slot, headers) {
+  const tokens = Number(headers.get('x-ratelimit-remaining-tokens'));
+  const reset = parseDurationMs(headers.get('x-ratelimit-reset-tokens'));
+  if (Number.isFinite(tokens) && headers.get('x-ratelimit-remaining-tokens') !== null) room.set(slot, { tokens, resetAt: Date.now() + (reset ?? 60_000) });
+}
+const roomFor = (slot) => {
+  const r = room.get(slot);
+  if (!r || Date.now() >= r.resetAt) return Infinity;
+  return r.tokens;
+};
+function orderByRoom(slots) {
+  return slots.map((slot, i) => ({ slot, i, left: roomFor(slot) })).sort((a, b) => (b.left - a.left) || (a.i - b.i)).map((x) => x.slot);
+}
+// Rough token count for a request: about 3.5 characters a token in, plus part
+// of the reply allowance (most replies use well under the cap).
+const estimateTokens = (system, user, maxTokens) => Math.ceil((String(system).length + String(user).length) / 3.5 + maxTokens * 0.6);
 export const geminiModels = () => [...new Set([geminiModel(), 'gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemma-4-31b-it'])];
 export const hasGroq = () => Boolean(process.env.GROQ_API_KEY);
 export const hasGemini = () => Boolean(process.env.GEMINI_API_KEY);
@@ -61,6 +90,7 @@ export function disableProvider(name, ms = 6 * 3_600_000) {
 export function resetProviderState() {
   disabledUntil.clear();
   modelPausedUntil.clear();
+  room.clear();
 }
 
 // One model out of allowance (or missing) pauses only that model, so the next
@@ -136,7 +166,7 @@ async function tryModels(provider, models, budgetMs, attempt) {
   throw new ProviderError(reasons.join(' | '), { status: last.status, provider });
 }
 
-async function post(url, { headers, body, budgetMs, provider, keepOnNotFound = false }) {
+async function post(url, { headers, body, budgetMs, provider, keepOnNotFound = false, onHeaders = null }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), budgetMs);
   try {
@@ -146,6 +176,7 @@ async function post(url, { headers, body, budgetMs, provider, keepOnNotFound = f
       headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify(body),
     });
+    if (onHeaders) { try { onHeaders(res.headers); } catch { /* bookkeeping only */ } }
     if (!res.ok) {
       const errBody = await res.json().catch(() => null);
       const why = String(errBody?.error?.message ?? errBody?.message ?? '').slice(0, 160);
@@ -165,11 +196,17 @@ async function post(url, { headers, body, budgetMs, provider, keepOnNotFound = f
 export async function groqComplete(system, user, { maxTokens = 400, temperature = 0.1, budgetMs = 9_000, model = null } = {}) {
   if (!hasGroq()) throw new ProviderError('GROQ_API_KEY is not set', { provider: 'groq' });
   if (providerDisabled('groq')) throw new ProviderError('groq is paused after a refusal', { provider: 'groq' });
+  const need = estimateTokens(system, user, maxTokens);
   const one = async (slot, ms) => {
     const at = slot.match(/^(.*)@(\d)$/);
     const model = at ? at[1] : slot;
     const apiKey = at ? process.env[`GROQ_API_KEY_${at[2]}`] : process.env.GROQ_API_KEY;
+    const r = room.get(slot);
+    if (r && Date.now() < r.resetAt && r.tokens < need) {
+      throw new ProviderError(`groq ${slot} has no room this minute. Please try again in ${Math.max(r.resetAt - Date.now(), 200)}ms`, { provider: 'groq', status: 429 });
+    }
     const body = await post(GROQ_URL, {
+      onHeaders: (h) => noteRoom(slot, h),
       provider: 'groq',
       budgetMs: ms,
       keepOnNotFound: true,

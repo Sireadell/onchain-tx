@@ -115,3 +115,27 @@ test('groq: when every key is on a short per-minute pause, waits it out instead 
   assert.match(out.text, /^from /);
   assert.equal(calls, 4);
 });
+
+test('groq: the next question goes to the key with the most room this minute', async (t) => {
+  process.env.LLM_GUARD_FORCE = '1';
+  process.env.GROQ_API_KEY = 'k1';
+  process.env.GROQ_API_KEY_2 = 'k2';
+  delete process.env.GROQ_MODEL;
+  resetProviderState();
+  t.after(() => { delete process.env.LLM_GUARD_FORCE; delete process.env.GROQ_API_KEY_2; resetProviderState(); });
+  const original = globalThis.fetch;
+  const asked = [];
+  globalThis.fetch = async (url, init) => {
+    const key = init.headers.Authorization.slice(7);
+    asked.push(key);
+    return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
+      status: 200,
+      headers: { 'x-ratelimit-remaining-tokens': key === 'k1' ? '300' : '7000', 'x-ratelimit-reset-tokens': '30s' },
+    });
+  };
+  t.after(() => { globalThis.fetch = original; });
+  await groqComplete('s', 'u'); // k1 first: nothing is known yet
+  await groqComplete('s', 'u'); // nothing known about k2 yet, so k2 (unknown = full) beats k1 (300 left)
+  await groqComplete('s', 'u'); // k2 has 7000, k1 too full for the reply allowance
+  assert.deepEqual(asked, ['k1', 'k2', 'k2']);
+});
