@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { groqComplete, geminiComplete } from './llmProviders.js';
+import { groqComplete, geminiComplete, retryAfterMs, resetProviderState } from './llmProviders.js';
 
 function stubFetch(t, answers) {
   const original = globalThis.fetch;
@@ -85,4 +85,33 @@ test('groq: a third key is tried after the first two on the same model', async (
   t.after(() => { globalThis.fetch = original; });
   await groqComplete('s', 'u');
   assert.deepEqual(asked, ['openai/gpt-oss-120b k1', 'openai/gpt-oss-120b k2', 'openai/gpt-oss-120b k3']);
+});
+
+test('retryAfterMs reads the wait a per-minute limit asks for', () => {
+  assert.equal(retryAfterMs('Rate limit reached on tokens per minute (TPM): Limit 8000. Please try again in 5.9s. Need more tokens?'), 5900);
+  assert.equal(retryAfterMs('Please try again in 450ms.'), 450);
+  assert.equal(retryAfterMs('Please try again in 1m2.5s.'), 62500);
+  assert.equal(retryAfterMs('quota used up'), null);
+});
+
+test('groq: when every key is on a short per-minute pause, waits it out instead of giving up', async (t) => {
+  process.env.LLM_GUARD_FORCE = '1';
+  process.env.GROQ_API_KEY = 'k1';
+  process.env.GROQ_MODEL = 'only-model';
+  resetProviderState();
+  t.after(() => { delete process.env.LLM_GUARD_FORCE; delete process.env.GROQ_MODEL; resetProviderState(); });
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (url, init) => {
+    calls += 1;
+    const { model } = JSON.parse(init.body);
+    const busy = calls <= 3;
+    return new Response(JSON.stringify(busy
+      ? { error: { message: `Rate limit reached for model ${model} on tokens per minute (TPM): Limit 8000. Please try again in 300ms.` } }
+      : { choices: [{ message: { content: `from ${model}` } }] }), { status: busy ? 429 : 200 });
+  };
+  t.after(() => { globalThis.fetch = original; });
+  const out = await groqComplete('s', 'u', { budgetMs: 8_000 });
+  assert.match(out.text, /^from /);
+  assert.equal(calls, 4);
 });

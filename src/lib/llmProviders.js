@@ -81,26 +81,56 @@ const pauseModel = (provider, model, ms) => {
 // Runs `attempt(model, budgetMs)` down the model list. A 429 (allowance used),
 // a 404 (model gone) or a server error moves on to the next model; anything
 // else (bad key, bad request) is the same for every model and is thrown.
+// "Please try again in 5.9s" / "in 450ms" from a per-minute limit, in ms.
+export function retryAfterMs(message) {
+  const m = /try again in\s+(?:(\d+)m)?([\d.]+)(ms|s)\b/i.exec(String(message));
+  if (!m) return null;
+  const ms = (Number(m[1] ?? 0) * 60_000) + Number(m[2]) * (m[3].toLowerCase() === 'ms' ? 1 : 1_000);
+  return Number.isFinite(ms) ? Math.ceil(ms) : null;
+}
+
+// The soonest moment one of these models comes off a short pause, or null.
+function soonestResume(provider, models) {
+  let soonest = null;
+  for (const model of models) {
+    const until = modelPausedUntil.get(`${provider}/${model}`);
+    if (until && (soonest === null || until < soonest)) soonest = until;
+  }
+  return soonest;
+}
+
 async function tryModels(provider, models, budgetMs, attempt) {
   const deadline = Date.now() + budgetMs;
   const reasons = [];
   let last = null;
-  for (const model of models) {
-    if (modelPaused(provider, model)) continue;
-    const left = deadline - Date.now();
-    if (reasons.length && left < 1_500) break;
-    try {
-      return await attempt(model, Math.max(left, 1_500));
-    } catch (err) {
-      if (!(err instanceof ProviderError)) throw err;
-      const status = err.status;
-      // A daily/quota limit holds for a while; a per-minute limit clears in seconds.
-      if (status === 429) pauseModel(provider, model, /per day|tpd|quota|exceeded/i.test(err.message) ? 10 * 60_000 : 3_000);
-      else if (status === 404) pauseModel(provider, model, 60 * 60_000);
-      else if (!(status >= 500) && status !== 400 && status !== null) throw err;
-      reasons.push(`${model}: ${err.message}`);
-      last = err;
+  // A burst of questions can put every key and model on a per-minute pause of a
+  // few seconds at once (logged 2026-11-20 with three Groq keys, all with daily
+  // room left). Waiting out the shortest pause answers the question; giving up
+  // books a zero. A second pass runs only when that wait fits the budget.
+  for (let pass = 0; pass < 2; pass += 1) {
+    for (const model of models) {
+      if (modelPaused(provider, model)) continue;
+      const left = deadline - Date.now();
+      if (reasons.length && left < 1_500) break;
+      try {
+        return await attempt(model, Math.max(left, 1_500));
+      } catch (err) {
+        if (!(err instanceof ProviderError)) throw err;
+        const status = err.status;
+        // A daily/quota limit holds for a while; a per-minute limit clears in seconds.
+        if (status === 429) {
+          const daily = /per day|tpd|rpd|quota|exceeded/i.test(err.message);
+          pauseModel(provider, model, daily ? 10 * 60_000 : Math.min(Math.max(retryAfterMs(err.message) ?? 3_000, 500), 60_000));
+        } else if (status === 404) pauseModel(provider, model, 60 * 60_000);
+        else if (!(status >= 500) && status !== 400 && status !== null) throw err;
+        reasons.push(`${model}: ${err.message}`);
+        last = err;
+      }
     }
+    if (pass > 0 || pausingOff()) break;
+    const resume = soonestResume(provider, models);
+    if (resume === null || resume + 2_500 > deadline) break;
+    await new Promise((r) => setTimeout(r, Math.max(resume - Date.now(), 0) + 50));
   }
   if (!last) throw new ProviderError(`every ${provider} model is paused until its allowance resets`, { status: 429, provider });
   throw new ProviderError(reasons.join(' | '), { status: last.status, provider });
