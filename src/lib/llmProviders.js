@@ -29,13 +29,13 @@ const geminiModel = () => process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
 // Each model has its own free daily allowance, so when the main one is used up
 // the smaller models on the same key still answer. They are tried in order.
 export const groqModels = () => [...new Set([groqModel(), 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'])];
-// A second Groq account (GROQ_API_KEY_2) has its own daily allowance. Each
-// model is tried on the first key, then the second, before the next smaller
-// model, so the best model stays in use for as long as either key has room.
-// The second key's entries carry an "@2" suffix, which also keeps their
-// pauses apart from the first key's.
-const GROQ_KEY2_SUFFIX = '@2';
-export const groqSlots = () => groqModels().flatMap((m) => (process.env.GROQ_API_KEY_2 ? [m, m + GROQ_KEY2_SUFFIX] : [m]));
+// Extra Groq accounts (GROQ_API_KEY_2, GROQ_API_KEY_3, ...) each have their
+// own daily allowance. Each model is tried on every key in turn before the
+// next smaller model, so the best model stays in use for as long as any key
+// has room. Entries for key N carry an "@N" suffix, which also keeps their
+// pauses apart from the other keys'.
+const groqKeyNumbers = () => [1, ...[2, 3, 4, 5, 6, 7, 8, 9].filter((n) => process.env[`GROQ_API_KEY_${n}`])];
+export const groqSlots = () => groqModels().flatMap((m) => groqKeyNumbers().map((n) => (n === 1 ? m : `${m}@${n}`)));
 export const geminiModels = () => [...new Set([geminiModel(), 'gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemma-4-31b-it'])];
 export const hasGroq = () => Boolean(process.env.GROQ_API_KEY);
 export const hasGemini = () => Boolean(process.env.GEMINI_API_KEY);
@@ -136,13 +136,14 @@ export async function groqComplete(system, user, { maxTokens = 400, temperature 
   if (!hasGroq()) throw new ProviderError('GROQ_API_KEY is not set', { provider: 'groq' });
   if (providerDisabled('groq')) throw new ProviderError('groq is paused after a refusal', { provider: 'groq' });
   const one = async (slot, ms) => {
-    const onKey2 = slot.endsWith(GROQ_KEY2_SUFFIX);
-    const model = onKey2 ? slot.slice(0, -GROQ_KEY2_SUFFIX.length) : slot;
+    const at = slot.match(/^(.*)@(\d)$/);
+    const model = at ? at[1] : slot;
+    const apiKey = at ? process.env[`GROQ_API_KEY_${at[2]}`] : process.env.GROQ_API_KEY;
     const body = await post(GROQ_URL, {
       provider: 'groq',
       budgetMs: ms,
       keepOnNotFound: true,
-      headers: { Authorization: `Bearer ${onKey2 ? process.env.GROQ_API_KEY_2 : process.env.GROQ_API_KEY}` },
+      headers: { Authorization: `Bearer ${apiKey}` },
       body: {
         model,
         messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
