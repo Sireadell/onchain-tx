@@ -288,8 +288,8 @@ export const vendorVerifyRouter = judge({
 const purchaseOrderJudge = judge({
   intent: 'PURCHASE_ORDER_VERIFY', canonical: 'purchase-order-verify',
   role: 'You verify a purchase order against an invoice or delivery.',
-  task: 'Check that quantities, unit prices, totals, tax, dates and vendor details agree, and list every mismatch with its amount.',
-  verdicts: ['Matches', 'Minor mismatch', 'Mismatch'],
+  task: 'Check that quantities, unit prices, totals, tax, dates and vendor details agree, and list every mismatch with its amount. If no invoice, delivery or line items are supplied to compare against (only a question about a PO number, vendor, amount or approval), no mismatch can be shown, so the verdict is Cannot verify.',
+  verdicts: ['Cannot verify', 'Matches', 'Minor mismatch', 'Mismatch'],
   keys: ['purchase_order', 'po', 'invoice', 'delivery', 'items', 'details'],
   emptyHint: 'I cannot verify a purchase order because none was supplied. Pass the order and invoice details as the purchase_order or query parameter.',
 });
