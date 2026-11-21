@@ -186,7 +186,20 @@ export const yieldRouter = both(Router(), async (req, res) => {
   try {
     const all = await pools();
     const words = text.replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter((w) => w.length >= 2 && !['the', 'what', 'is', 'apy', 'apr', 'yield', 'rate', 'on', 'for', 'of', 'current', 'best', 'staking', 'lending', 'in'].includes(w));
-    let best = all.filter((x) => x.tvlUsd > 1_000_000 && words.length && words.some((w) => x.symbol?.toLowerCase().split(/[-/ ]/).includes(w) || x.project?.toLowerCase() === w));
+    // A protocol named with its hyphen (compound-v3, curve-dex) or as two words
+    // (uniswap v3) must match that project first; stripping punctuation alone
+    // sent those questions to the biggest unrelated pools.
+    const rawTokens = text.split(/[^a-z0-9-]+/).map((w) => w.replace(/^-+|-+$/g, '')).filter(Boolean);
+    const projectTokens = new Set(rawTokens);
+    for (let i = 0; i + 1 < rawTokens.length; i += 1) projectTokens.add(`${rawTokens[i]}-${rawTokens[i + 1]}`);
+    const projectHits = all.filter((x) => x.tvlUsd > 1_000_000 && x.project && projectTokens.has(x.project.toLowerCase()));
+    let best;
+    if (projectHits.length) {
+      const bySymbol = projectHits.filter((x) => words.some((w) => x.symbol?.toLowerCase().split(/[-/ ]/).includes(w)));
+      best = bySymbol.length ? bySymbol : projectHits;
+    } else {
+      best = all.filter((x) => x.tvlUsd > 1_000_000 && words.length && words.some((w) => x.symbol?.toLowerCase().split(/[-/ ]/).includes(w) || x.project?.toLowerCase() === w));
+    }
     const chain = chainWant ? String(chainWant).toLowerCase() : words.find((w) => all.some((x) => x.chain?.toLowerCase() === w));
     if (chain) best = best.filter((x) => x.chain?.toLowerCase() === chain);
     best.sort((a, b) => b.tvlUsd - a.tvlUsd);
