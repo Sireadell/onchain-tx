@@ -41,7 +41,7 @@ export function parseLiquidityAsk(text) {
     const word = t.replace(/[^A-Za-z0-9. ]/g, ' ').split(/\s+/).find((w) => /^[A-Za-z][A-Za-z0-9.]{1,9}$/.test(w) && !SKIP.has(w.toLowerCase()) && !CHAIN_WORDS[w.toLowerCase()] && !DEX_WORDS.includes(w.toLowerCase()) && (/[A-Z]{2,}/.test(w) || /\d/.test(w)));
     if (word) a = word;
   }
-  const version = /v([234])/i.exec(t)?.[1] ?? null;
+  const version = /\bv([234])\b/i.exec(t)?.[1] ?? null;
   return { a, b, chain, dex, fee: null, swap, version };
 }
 
