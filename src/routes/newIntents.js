@@ -8,6 +8,7 @@ import { Router } from 'express';
 import { makeLlmIntentRouter, collectInput } from '../lib/llmIntentRoute.js';
 import { assessTravel } from '../lib/faaStatus.js';
 import { lookupFlight } from '../lib/flightLookup.js';
+import { checkDocument } from '../lib/documentCheck.js';
 import { readOrderRef, readPoFromText, verifyChicagoInvoice, verifyChicagoPo } from '../lib/chicagoRecords.js';
 import { fraudSignals, riskScore } from '../lib/fraudSignals.js';
 
@@ -144,7 +145,33 @@ export const plagiarismRouter = judge({
   maxTokens: 500,
 });
 
-export const documentAuthenticityRouter = judge({
+// Hashes, hash chains and linked PDFs are checked by arithmetic and by reading
+// the file (lib/documentCheck.js); only what that cannot settle goes to the
+// judgement model below.
+export const documentAuthenticityRouter = Router();
+documentAuthenticityRouter.use(async (req, res, next) => {
+  const params = (req.method === 'GET' ? req.query : req.body) ?? {};
+  const text = collectInput(params, ['document', 'text', 'certificate', 'invoice', 'url', 'query', 'question']);
+  const checked = text ? await checkDocument(text).catch(() => null) : null;
+  if (!checked) return documentAuthenticityJudge(req, res, next);
+  const { answer, verdict, authentic, evidence } = checked;
+  return res.json({
+    status: 'ok',
+    answer,
+    summary: answer,
+    verdict,
+    found: true,
+    authentic,
+    evidence,
+    document: evidence?.document ?? null,
+    method: 'Computed from the supplied text and, for a linked file, from the fetched bytes; no certificate authority, revocation service or notary register was contacted.',
+    confidence: authentic === null ? 0.6 : 0.9,
+    canonical: ['document-authenticity', evidence?.sha256 ?? 'checks'].join(':'),
+    checked_at: new Date().toISOString(),
+  });
+});
+
+const documentAuthenticityJudge = judge({
   intent: 'DOCUMENT_AUTHENTICITY', canonical: 'document-authenticity',
   role: 'You assess whether a document (certificate, invoice, contract, ID text or letter) is authentic.',
   task: 'Check formatting consistency, impossible dates, number and checksum validity, issuer details that do not match, and wording typical of forgeries. '
