@@ -13,6 +13,7 @@ import {
 } from '../lib/sportsData.js';
 import { searchWeb, WebSearchError, hasWebSearchProvider } from '../lib/webSearch.js';
 import { scoresFor, lineOf, ESPN_SOURCE } from '../lib/espnScores.js';
+import { lookupGame, parseDate, detectFinal } from '../lib/gameLookup.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { firstUsableValue } from '../lib/entityExtract.js';
 
@@ -140,6 +141,22 @@ async function handleSportsScore(req, res) {
       res,
       'I cannot report a sports score because no team name was supplied. Pass a team parameter, e.g. team=Lakers.',
     );
+  }
+
+  // A dated game or a named final ("Yankees game on 2025-06-01", "2023 World
+  // Series") is looked up on that day's scoreboard, not on the team schedule.
+  if (questionText && (parseDate(questionText) || detectFinal(questionText))) {
+    try {
+      const g = await lookupGame(questionText);
+      if (g) {
+        const { answer, ...rest } = g;
+        return res.json({
+          status: 'ok', answer, summary: answer, reason: g.found ? `Read from ${g.source}.` : answer,
+          confidence: g.found ? 0.95 : 0.85, canonical: ['sports-score', questionText.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60)].join(':'),
+          ...rest, checked_at: new Date().toISOString(),
+        });
+      }
+    } catch { /* fall through to the team lookup */ }
   }
 
   // ESPN first: it covers the big football leagues and the US leagues with

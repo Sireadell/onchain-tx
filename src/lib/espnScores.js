@@ -4,7 +4,7 @@
 // by routes/checkSportsScore.js. TheSportsDB's old free key was switched
 // off, so this is the main feed for named-team questions now.
 
-const BASE = 'https://site.api.espn.com/apis/site/v2/sports';
+export const ESPN_BASE = 'https://site.api.espn.com/apis/site/v2/sports';
 const TIMEOUT_MS = Number(process.env.ESPN_TIMEOUT_MS) || 7_000;
 const TEAMS_TTL_MS = 12 * 60 * 60_000;
 const SCHEDULE_TTL_MS = 2 * 60_000;
@@ -44,8 +44,8 @@ function store(key, value, ttl) {
 }
 export function __clearEspnCacheForTesting() { cache.clear(); }
 
-async function getJson(url) {
-  const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS), headers: { Accept: 'application/json' } });
+export async function getJson(url, { headers = { Accept: 'application/json' } } = {}) {
+  const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS), headers });
   if (!res.ok) throw new Error(`ESPN returned HTTP ${res.status}`);
   return res.json();
 }
@@ -60,13 +60,13 @@ export function normName(s) {
     .trim();
 }
 
-async function leagueTeams(sport, league) {
+export async function leagueTeams(sport, league) {
   const key = `teams:${sport}/${league}`;
   const hit = cached(key);
   if (hit !== undefined) return hit;
   let teams = [];
   try {
-    const body = await getJson(`${BASE}/${sport}/${league}/teams`);
+    const body = await getJson(`${ESPN_BASE}/${sport}/${league}/teams`);
     teams = (body?.sports?.[0]?.leagues?.[0]?.teams ?? []).map(({ team }) => ({
       id: team.id,
       name: team.displayName,
@@ -149,7 +149,7 @@ function shape(e, leagueLabel) {
 }
 
 async function schedule(sport, league, teamId, query) {
-  const url = `${BASE}/${sport}/${league}/teams/${teamId}/schedule${query ? `?${query}` : ''}`;
+  const url = `${ESPN_BASE}/${sport}/${league}/teams/${teamId}/schedule${query ? `?${query}` : ''}`;
   const key = `sched:${url}`;
   const hit = cached(key);
   if (hit !== undefined) return hit;
@@ -170,7 +170,7 @@ async function scoreboard(sport, league) {
   if (hit !== undefined) return hit;
   let events = [];
   try {
-    const body = await getJson(`${BASE}/${sport}/${league}/scoreboard`);
+    const body = await getJson(`${ESPN_BASE}/${sport}/${league}/scoreboard`);
     events = Array.isArray(body?.events) ? body.events : [];
     store(key, events, 60_000);
   } catch {

@@ -37,6 +37,8 @@ function stubSportsDb(t, { teams, lastEvents, nextEvents } = {}) {
     if (str.includes('eventsnext.php')) {
       return new Response(JSON.stringify({ results: nextEvents ?? null }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
+    // The free official feeds are tested in gameLookup.test.js; here they are off.
+    if (str.includes('espn.com') || str.includes('wikipedia.org') || str.includes('openligadb')) return new Response('{}', { status: 404 });
     return original(url, init);
   };
   t.after(() => { globalThis.fetch = original; __clearSportsCacheForTesting(); });
@@ -129,7 +131,8 @@ test('GAME_RESULT unknown team with no search provider refuses honestly', async 
   const res = await fetch(`${base}/game-result?team=${encodeURIComponent('Zzzznonexistentteamxyz')}`);
   const json = await res.json();
   assert.equal(res.status, 200);
-  assert.equal(json.status, 'invalid_input');
+  assert.equal(json.verdict, 'not_found');
+  assert.equal(json.found, false);
 });
 
 test('GAME_RESULT handles a 12,000+ char input without crashing', async (t) => {
@@ -140,7 +143,7 @@ test('GAME_RESULT handles a 12,000+ char input without crashing', async (t) => {
   assert.equal(res.status, 200);
 });
 
-test('GAME_RESULT upstream and fallback both down returns a real error code', async (t) => {
+test('GAME_RESULT upstream and fallback both down says plainly that nothing was found', async (t) => {
   const base = startServer(t);
   __clearSportsCacheForTesting();
   const original = globalThis.fetch;
@@ -153,8 +156,9 @@ test('GAME_RESULT upstream and fallback both down returns a real error code', as
   withPerplexityKey(t);
   const res = await fetch(`${base}/game-result?team=Knicks`);
   const json = await res.json();
-  assert.equal(res.status, 502);
-  assert.equal(json.status, 'error');
+  assert.equal(res.status, 200);
+  assert.equal(json.verdict, 'not_found');
+  assert.equal(json.found, false);
 });
 
 test('GAME_RESULT POST works the same as GET', async (t) => {

@@ -5,7 +5,7 @@
 // team it cannot find falls through to the route's searchWeb fallback
 // rather than being reported as "no such team".
 
-const SPORTSDB_BASE = 'https://www.thesportsdb.com/api/v1/json/3';
+const SPORTSDB_BASE = `https://www.thesportsdb.com/api/v1/json/${process.env.SPORTSDB_KEY || '123'}`;
 const REQUEST_TIMEOUT_MS = Number(process.env.SPORTSDB_TIMEOUT_MS) || 8_000;
 const CACHE_TTL_MS = Number(process.env.SPORTSDB_CACHE_TTL_MS) || 3 * 60_000;
 const MAX_CACHE_ENTRIES = 300;
