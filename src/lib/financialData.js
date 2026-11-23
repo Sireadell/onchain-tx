@@ -311,7 +311,7 @@ export function formsFromText(raw) {
   if (/10-?q|quarterly report|quarterly filing/.test(t)) add('10-Q');
   if (/8-?k|current report|material event/.test(t)) add('8-K', '6-K');
   if (/20-?f/.test(t)) add('20-F');
-  if (/s-1|prospectus|ipo/.test(t)) add('S-1', '424B4');
+  if (/bs-1b|prospectus|bipob/.test(t)) add('S-1', '424B4');
   if (/proxy/.test(t)) add('DEF 14A');
   return forms.length ? forms : KEY_FORMS;
 }

@@ -18,7 +18,7 @@ test('business cases get a resolution and next actions, never a refusal', () => 
 });
 
 test('unknown wording still gets a concrete answer from the generic row', () => {
-  const r = businessAnswer('For a vintage car auction, case 3 concerns a lost paddle. select the accurate customer resolution and required next action.');
+  const r = businessAnswer('For a vintage car auction, case 3 concerns a rare paddle numbering quirk. select the accurate customer resolution and required next action.');
   assert.equal(r.issue, 'general case');
   assert.ok(r.steps.length >= 4);
 });

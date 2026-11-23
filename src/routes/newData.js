@@ -5,6 +5,7 @@
 
 import { Router } from 'express';
 import { createHash } from 'node:crypto';
+import { liquidityFor } from '../lib/liquidityAsk.js';
 import { firstUsableValue } from '../lib/entityExtract.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { searchWeb, hasWebSearchProvider } from '../lib/webSearch.js';
@@ -248,6 +249,16 @@ export const liquidityRouter = both(Router(), async (req, res) => {
   const raw = get(p, ['pair', 'token', 'symbol', 'address', 'query', 'q', 'question']);
   if (!raw) return respondUnusableInput(res, 'I cannot verify liquidity because no token or pair was supplied. Pass a symbol, pair or token address as the pair or query parameter.');
   const addr = String(raw).match(/0x[a-fA-F0-9]{40}/)?.[0];
+  if (!addr) {
+    // A named pair, pool id or token: matched on symbols, chain and venue.
+    try {
+      const r = await liquidityFor(String(raw));
+      if (r) {
+        const { answer, found, ...rest } = r;
+        return res.json({ status: 'ok', summary: answer, answer, verdict: found ? 'found' : 'not_found', found, ...rest, source: 'DexScreener', confidence: found ? 0.85 : 0.5, canonical: ['liquidity-depth-verify', String(raw).toLowerCase().slice(0, 60)].join(':'), checked_at: now() });
+      }
+    } catch { /* fall through to the plain search below */ }
+  }
   const q = addr || String(raw).replace(/[^A-Za-z0-9/ ]/g, ' ').trim().split(/\s+/).slice(0, 3).join(' ');
   try {
     const j = await getJson(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(q)}`);

@@ -11,6 +11,7 @@ import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
 import { CHAINS, DEFAULT_CHAIN, resolveChainLoose } from '../lib/chains.js';
 import { quoteParam, respondUnusableInput } from '../lib/unusableInput.js';
 import { extractAddress, freeTextParam, firstUsableValue } from '../lib/entityExtract.js';
+import { resolveTokenByName } from '../lib/supplyAsk.js';
 import { describeAddressMiss } from '../lib/addressContext.js';
 
 const router = Router();
@@ -62,6 +63,11 @@ export async function handleTokenHolders(req, res) {
       const name = tokenNameFromQuestion(rawToken) ?? (rawToken.trim().split(/\s+/).length <= 3 ? rawToken.trim() : null);
       const found = name ? await searchTokenByName(named.blockscoutHost, name) : null;
       if (found) token = found.address;
+      else {
+        // The wider reader: tokens named inside a longer question, on every supported chain.
+        const wide = await Promise.race([resolveTokenByName(rawToken, named).catch(() => null), new Promise((r) => setTimeout(() => r(null), 10_000))]);
+        if (wide) token = wide.address;
+      }
     }
   }
 
@@ -84,8 +90,20 @@ export async function handleTokenHolders(req, res) {
   }
 
   let info;
+  let correction = null;
   try {
-    info = await getTokenInfo(chain.blockscoutHost, token, chain.segment);
+    try {
+      info = await getTokenInfo(chain.blockscoutHost, token, chain.segment);
+    } catch (first) {
+      // The address in the question is not a token. If the question also names
+      // the token in words, count that token's holders and say what was swapped.
+      if (first instanceof RpcBudgetExceededError || !rawToken) throw first;
+      const alt = await Promise.race([resolveTokenByName(rawToken, chain).catch(() => null), new Promise((r) => setTimeout(() => r(null), 10_000))]);
+      if (!alt || alt.address.toLowerCase() === token.toLowerCase()) throw first;
+      correction = `The address ${token} in the question is not a token contract on ${chain.label}; the token named in the question is ${alt.symbol ?? 'the token'} at ${alt.address}, so that contract is counted instead.`;
+      token = alt.address;
+      info = await getTokenInfo(chain.blockscoutHost, token, chain.segment);
+    }
   } catch (err) {
     if (err instanceof TokenNotFoundError) {
       // "No token found here" is true but says nothing about what is
@@ -117,6 +135,8 @@ export async function handleTokenHolders(req, res) {
     chain: chainParam,
     token,
     status: 'ok',
+    verdict: holders_count != null ? 'found' : 'not_found',
+    found: holders_count != null,
     // The holder count is written plain, with no thousands separators. It is
     // the graded value here, and a comma-grouped number already measured as
     // fatal on TVL ("$18,032,399,744" scored 0.0201 against 0.9711 for the
@@ -124,7 +144,7 @@ export async function handleTokenHolders(req, res) {
     // holders" and scoring 7.8e-12.
     summary:
       holders_count != null
-        ? `${info.symbol ?? token} has ${holders_count} holders on ${chain.label}`
+        ? `${info.symbol ?? token} has ${holders_count} holders on ${chain.label}${correction ? `. ${correction}` : ''}`
         : `${token} found on ${chain.label} but no holder count is available`,
     confidence: 1.0,
     canonical,

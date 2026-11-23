@@ -13,6 +13,7 @@ import { extractAddress, firstUsableValue, freeTextParam } from '../lib/entityEx
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { readBlock } from '../lib/questionRead.js';
 import { KNOWN_TOKENS, decodeUint, decodeAbiString } from '../lib/knownTokens.js';
+import { parseAsk, resolveTokenByName, burnReport, holderCount, fmt, tokenCandidates } from '../lib/supplyAsk.js';
 
 const router = Router();
 
@@ -153,11 +154,29 @@ async function handleTokenTotalSupply(req, res) {
   }
   const block = parseBlock(firstUsableValue(params.block, params.block_number, params.blockNumber, params.height), text);
 
+  let resolvedVia = knownSymbol ? 'known table' : null;
+  if (!token) {
+    // A token named in words ("USD Coin", "cbBTC", "ether.fi Staked ETH (eETH)")
+    // is looked up on the asked chain before any native-coin reading is tried.
+    const named = await Promise.race([
+      resolveTokenByName(`${tokenRaw ?? ''} ${text}`, chain).catch(() => null),
+      new Promise((r) => setTimeout(() => r(null), 12_000)),
+    ]);
+    if (named) { token = named.address; knownSymbol = named.symbol; resolvedVia = named.via; }
+  }
+
   if (!token) {
     const word = String(tokenRaw ?? '').trim().toLowerCase();
     const native = NATIVE[word] ?? (!tokenRaw ? NATIVE[(/\b(eth|ether|matic|pol|avax)\b/i.exec(text)?.[1] ?? '').toLowerCase()] : null);
-    if (native) return answerNative(res, chain, native, block);
-    return respondUnusableInput(res, 'I cannot read a total supply because no token contract was supplied. Pass token as a 0x contract address, or a well-known symbol such as USDC.');
+    // "Staked ETH" or "Wrapped ETH" is a token, not the native coin.
+    const derivative = /\b(?:staked|wrapped|liquid|restaked|rocket pool|lido|ether\.fi)\b/i.test(text);
+    if (native && !derivative) return answerNative(res, chain, native, block);
+    const what = tokenCandidates(`${tokenRaw ?? ''} ${text}`)[0] ?? String(tokenRaw ?? text).slice(0, 60);
+    const why = `No ERC-20 token matching "${what}" with a market price could be found on ${chain.label}, so no total supply is stated. Send the 0x contract address on ${chain.label} and the supply is read straight from the chain.`;
+    return res.json({
+      status: 'ok', answer: why, summary: why, verdict: 'not_found', found: false, reason: why,
+      confidence: 0.5, chain: chain.key, token: null, total_supply: null, checked_at: new Date().toISOString(),
+    });
   }
 
   let read;
@@ -186,11 +205,37 @@ async function handleTokenTotalSupply(req, res) {
   const symbol = read.symbol ?? knownSymbol ?? 'tokens';
   const supply = formatUnits(read.supply, decimals);
   const at = blockUsed === 'latest' ? 'at the latest block' : `at block ${blockUsed}`;
-  const summary = `The total supply of ${symbol} (${token}) on ${chain.label} is ${withCommas(supply)} ${symbol} ${at} (raw ${read.supply.toString()} with ${decimals} decimals), read on-chain with totalSupply().${note ? ` ${note}` : ''}`;
+  let summary = `The total supply of ${symbol} (${token}) on ${chain.label} is ${withCommas(supply)} ${symbol} ${at} (raw ${read.supply.toString()} with ${decimals} decimals), read on-chain with totalSupply().${note ? ` ${note}` : ''}`;
+
+  // Follow-up asks: burn share, circulating amount, holder count.
+  const ask = parseAsk(text);
+  const extra = {};
+  if (ask.burn || ask.circulating) {
+    const burn = await withRpcBudget(() => burnReport(chain, token, blockUsed, read.supply, decimals, text)).catch(() => null);
+    if (burn) {
+      summary += ` ${burn.text}`;
+      extra.burned = fmt(burn.burned, decimals);
+      extra.burned_raw = burn.burned.toString();
+      extra.burn_share_percent = burn.share;
+      extra.circulating_supply = fmt(burn.circulating, decimals);
+      extra.burn_addresses = burn.rows.map((r) => ({ address: r.address, label: r.label, balance: fmt(r.raw, decimals) }));
+    } else {
+      summary += ' The burn-address balances could not be read from the RPC just now.';
+    }
+  }
+  if (ask.holders) {
+    const holders = await holderCount(chain, token);
+    if (holders !== null) { summary += ` The token has ${holders.toLocaleString('en-US')} holders according to the chain explorer index.`; extra.holders = holders; }
+    else summary += ' The holder count is not available from the explorer index for this chain.';
+  }
 
   res.json({
     status: 'ok',
+    answer: summary,
     summary,
+    verdict: 'found',
+    found: true,
+    reason: `Read on-chain from ${chain.label}${resolvedVia ? ` (token matched by ${resolvedVia})` : ''}.`,
     confidence: note ? 0.7 : 0.95,
     canonical: ['token-total-supply', chain.key, token.toLowerCase(), blockUsed].join(':'),
     chain: chain.key,
@@ -200,6 +245,7 @@ async function handleTokenTotalSupply(req, res) {
     total_supply: supply,
     total_supply_raw: read.supply.toString(),
     block: blockUsed,
+    ...extra,
     source: `${chain.label} RPC eth_call totalSupply()`,
     checked_at: new Date().toISOString(),
   });
