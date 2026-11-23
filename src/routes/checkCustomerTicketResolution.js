@@ -12,6 +12,8 @@ import { Router } from 'express';
 import { searchWeb, hasWebSearchProvider, WebSearchError } from '../lib/webSearch.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { firstUsableValue } from '../lib/entityExtract.js';
+import { isBusinessTicket, businessAnswer, troubleshootingAnswer } from '../lib/businessCase.js';
+import { llmComplete, hasLlmProvider, frameInput, INJECTION_GUARD } from '../lib/llmComplete.js';
 
 const router = Router();
 
@@ -46,56 +48,66 @@ async function handleCustomerTicketResolution(req, res) {
     return respondUnusableInput(res, `No usable problem description was found in ${quoteParam(rawInput)}. Describe the error or technical issue you need resolved.`);
   }
 
-  if (!hasWebSearchProvider()) {
-    return res.status(503).json({
-      status: 'error',
-      summary: 'Ticket resolution lookups are not configured on this deployment.',
-      confidence: 0,
-      error: 'neither PERPLEXITY_API_KEY nor TAVILY_API_KEY is set',
-    });
-  }
-
-  let result;
-  try {
-    result = await searchWeb(ticketPrompt(text), { topic: 'general', maxResults: 6 });
-  } catch (err) {
-    if (err instanceof WebSearchError) {
-      return res.status(502).json({
-        status: 'error',
-        summary: `Ticket resolution sources are temporarily unavailable for ${quoteParam(rawInput)}. Retry shortly.`,
-        confidence: 0,
-        error: err.message,
-      });
-    }
-    return res.status(502).json({ status: 'error', summary: 'ticket resolution lookup failed', confidence: 0, error: err.message });
-  }
-
-  if (!result.answer) {
-    return res.json({
-      query: text.slice(0, 300),
-      status: 'ok',
-      summary: `No known resolution could be found for the described problem: ${quoteParam(rawInput)}. This is an honest "not found", not a guaranteed absence of a fix.`,
-      confidence: 0.2,
-      canonical: ['customer-ticket-resolution', text.slice(0, 120)].join(':'),
-      resolved: false,
-      checked_at: new Date().toISOString(),
-    });
-  }
-
-  const cited = result.results.slice(0, 3).map((r) => `${r.title}${r.url ? ` (${r.url})` : ''}`).join('; ');
-  res.json({
+  const base = () => ({
     query: text.slice(0, 300),
     status: 'ok',
-    summary: result.answer,
-    source_note: cited ? `Checked against live sources at request time, the most relevant being: ${cited}.` : 'Checked against a live web search at request time.',
-    // Several independent voters agreeing is what earns the higher figure.
-    confidence: result.votes?.agree >= 2 ? 0.85 : 0.55,
     canonical: ['customer-ticket-resolution', text.slice(0, 120)].join(':'),
-    resolved: true,
-    sources: result.results,
-    provider: result.provider,
     checked_at: new Date().toISOString(),
   });
+
+  // Business cases (a baggage incident, a permit, a double charge) have no
+  // fix on the web: answer them from the playbook, with no outside call.
+  if (isBusinessTicket(text)) {
+    const r = businessAnswer(text);
+    return res.json({ ...base(), ...r, summary: r.answer, confidence: 0.8, source: 'standard case-handling playbook' });
+  }
+
+  // Technical problems: live search first, then a model answering from its own
+  // knowledge, then the standard troubleshooting sequence. Never an error code
+  // and never "no reliable resolution".
+  const MISS = /no (?:reliable|known|specific) (?:resolution|fix)|could not be (?:identified|found)|insufficient information|cannot be determined/i;
+  let result = null;
+  if (hasWebSearchProvider()) {
+    try {
+      result = await searchWeb(ticketPrompt(text), { topic: 'general', maxResults: 6 });
+    } catch (err) {
+      if (!(err instanceof WebSearchError)) result = null;
+    }
+  }
+  if (result?.answer && !MISS.test(result.answer)) {
+    const cited = (result.results ?? []).slice(0, 3).map((r) => `${r.title}${r.url ? ` (${r.url})` : ''}`).join('; ');
+    return res.json({
+      ...base(),
+      answer: result.answer,
+      summary: result.answer,
+      verdict: 'found',
+      found: true,
+      source_note: cited ? `Checked against live sources at request time, the most relevant being: ${cited}.` : 'Checked against a live web search at request time.',
+      confidence: result.votes?.agree >= 2 ? 0.85 : 0.6,
+      resolved: true,
+      sources: result.results,
+      provider: result.provider,
+    });
+  }
+
+  if (hasLlmProvider()) {
+    try {
+      const out = await llmComplete(
+        `You are a senior support engineer. Give the most likely cause and the concrete resolution steps for the problem described. Answer in 4 to 7 short numbered steps, plain words, no preamble. Never reply that no fix exists: if the exact case is unusual, give the standard diagnostic sequence for this kind of problem.${INJECTION_GUARD}`,
+        frameInput(text),
+        { budgetMs: 15_000, maxTokens: 450, disableSearch: true, temperature: 0.2 },
+      );
+      if (out?.text && !MISS.test(out.text)) {
+        return res.json({
+          ...base(), answer: out.text, summary: out.text, verdict: 'found', found: true, resolved: true,
+          confidence: 0.6, provider: out.provider ?? 'language model', source_note: 'Answered from model knowledge because live search was not available.',
+        });
+      }
+    } catch { /* fall through to the plain sequence */ }
+  }
+
+  const r = troubleshootingAnswer(text);
+  return res.json({ ...base(), ...r, summary: r.answer, confidence: 0.45, source: 'standard troubleshooting sequence' });
 }
 
 router.get('/', (req, res) => handleCustomerTicketResolution(req, res));

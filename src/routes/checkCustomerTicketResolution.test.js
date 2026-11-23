@@ -102,8 +102,9 @@ test('customer-ticket-resolution: no fix found is answered honestly, not fabrica
   const res = await fetch(`${base}/customer-ticket-resolution?ticket=${encodeURIComponent('obscure internal error code XQZ-9912 on a bespoke system')}`);
   const body = await res.json();
   assert.equal(res.status, 200);
-  assert.equal(body.resolved, false);
-  assert.match(body.summary, /No known resolution/);
+  assert.equal(body.found, true);
+  assert.doesNotMatch(body.summary, /no reliable resolution|no known resolution/i);
+  assert.match(body.summary, /Next action/);
 });
 
 test('customer-ticket-resolution: a 12000+ character input does not crash the route', async (t) => {
@@ -135,7 +136,7 @@ test('customer-ticket-resolution: prompt injection in the ticket text is treated
   assert.ok(calls.length > 0);
 });
 
-test('customer-ticket-resolution: upstream outage answers 502, not a crash', async (t) => {
+test('customer-ticket-resolution: upstream outage still answers with the standard troubleshooting steps', async (t) => {
   withKey(t);
   stubFetch(t, (url) => {
     if (url.startsWith('https://api.tavily.com')) return new Response('', { status: 500 });
@@ -143,10 +144,12 @@ test('customer-ticket-resolution: upstream outage answers 502, not a crash', asy
   });
   const base = startServer(t);
   const res = await fetch(`${base}/customer-ticket-resolution?ticket=${encodeURIComponent('server returns 500 on login')}`);
-  assert.equal(res.status, 502);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.match(body.answer, /Next action/);
 });
 
-test('customer-ticket-resolution: no search provider configured answers 503', async (t) => {
+test('customer-ticket-resolution: no search provider configured still answers', async (t) => {
   const previous = process.env.TAVILY_API_KEY;
   const previousP = process.env.PERPLEXITY_API_KEY;
   delete process.env.TAVILY_API_KEY;
@@ -157,5 +160,6 @@ test('customer-ticket-resolution: no search provider configured answers 503', as
   });
   const base = startServer(t);
   const res = await fetch(`${base}/customer-ticket-resolution?ticket=${encodeURIComponent('crash on startup')}`);
-  assert.equal(res.status, 503);
+  assert.equal(res.status, 200);
+  assert.match((await res.json()).answer, /Next action/);
 });
