@@ -7,6 +7,7 @@
 import { Router } from 'express';
 import { makeLlmIntentRouter, collectInput } from '../lib/llmIntentRoute.js';
 import { assessTravel } from '../lib/faaStatus.js';
+import { lookupFlight } from '../lib/flightLookup.js';
 import { readOrderRef, readPoFromText, verifyChicagoInvoice, verifyChicagoPo } from '../lib/chicagoRecords.js';
 import { fraudSignals, riskScore } from '../lib/fraudSignals.js';
 
@@ -81,6 +82,25 @@ export const travelDisruptionRouter = Router();
 travelDisruptionRouter.use(async (req, res, next) => {
   const params = (req.method === 'GET' ? req.query : req.body) ?? {};
   const text = collectInput(params, ['flight', 'route', 'airport', 'trip', 'origin', 'destination', 'date', 'airline']);
+  // A flight number is looked up first: its route, and whether it is in the air.
+  const flight = text ? await lookupFlight(text).catch(() => null) : null;
+  if (flight) {
+    const faa = await assessTravel(`${text} ${flight.airports?.join(' ') ?? ''}`).catch(() => null);
+    const faaLine = faa && faa.verdict !== 'Not covered' ? ` ${faa.summary.replace(/ Airline-level status.*$/, '')}` : '';
+    const answer = `${flight.answer}${faaLine}`;
+    const { answer: _a, reason: _r, ...facts } = flight;
+    return res.json({
+      status: 'ok',
+      answer,
+      summary: answer,
+      reason: answer,
+      ...facts,
+      ...(faa ? { airport_status: faa.airport_status, faa_updated: faa.faa_updated } : {}),
+      confidence: flight.found ? 0.85 : 0.6,
+      canonical: ['travel-disruption', flight.flight ?? 'flight', flight.verdict].join(':'),
+      checked_at: new Date().toISOString(),
+    });
+  }
   const live = text ? await assessTravel(text).catch(() => null) : null;
   if (!live || live.verdict === 'Not covered') return travelDisruptionJudge(req, res, next);
   const { summary, verdict, ...facts } = live;
