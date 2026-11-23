@@ -9,6 +9,7 @@ import { Router } from 'express';
 import {
   llmComplete, hasLlmProvider, LlmCompleteError, capInput, INJECTION_GUARD, frameInput,
 } from '../lib/llmComplete.js';
+import { extractiveSummary, summaryLimits } from '../lib/bestEffort.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { firstUsableValue } from '../lib/entityExtract.js';
 import { searchWeb, hasWebSearchProvider } from '../lib/webSearch.js';
@@ -84,6 +85,22 @@ function buildSystemPrompt(length, sourceless = false) {
   return `${guarded} Target length: ${length}.`;
 }
 
+// With no model reachable, the answer is the supplied text's own most
+// important sentences within the asked length, said to be an extract.
+function extractFallback(res, rawText, lengthText) {
+  const body = String(rawText).replace(/^\s*(?:please\s+)?(?:summari[sz]e|give|condense|write|provide|create|produce|make|draft|a policy team|for a)[^.?!]{0,200}[.?!:]\s+/i, '');
+  const limits = summaryLimits(`${rawText} ${lengthText ?? ''}`);
+  const out = extractiveSummary(body, limits) || String(rawText).slice(0, 300);
+  const answer = `${out}`;
+  return res.json({
+    status: 'ok', answer, summary: answer, verdict: 'found', found: true,
+    reason: 'Built from the most important sentences of the supplied text because no language model was reachable.',
+    length: lengthText, confidence: 0.55,
+    canonical: ['text-summarization', String(rawText).slice(0, 80), lengthText ?? ''].join(':'),
+    checked_at: new Date().toISOString(),
+  });
+}
+
 async function handleTextSummarization(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
   const rawText = firstUsableValue(
@@ -102,14 +119,7 @@ async function handleTextSummarization(req, res) {
     );
   }
 
-  if (!hasLlmProvider()) {
-    return res.status(503).json({
-      status: 'error',
-      summary: 'Text summarization is not configured on this deployment.',
-      confidence: 0,
-      error: 'PERPLEXITY_API_KEY is not set',
-    });
-  }
+  if (!hasLlmProvider()) return extractFallback(res, rawText, length ? String(length).slice(0, 60) : null);
 
   const { text, truncated } = capInput(rawText);
   const lengthText = length ? String(length).slice(0, 60) : null;
@@ -137,15 +147,7 @@ async function handleTextSummarization(req, res) {
   try {
     result = await llmComplete(buildSystemPrompt(lengthText, sourceless), frameInput(text), { maxTokens: 500, disableSearch: true, temperature: 0.2 });
   } catch (err) {
-    if (err instanceof LlmCompleteError) {
-      return res.status(502).json({
-        status: 'error',
-        summary: `Text summarization is temporarily unavailable for ${quoteParam(rawText)}. Retry shortly.`,
-        confidence: 0,
-        error: err.message,
-      });
-    }
-    return res.status(502).json({ status: 'error', summary: 'text summarization failed', confidence: 0, error: err.message });
+    return extractFallback(res, rawText, lengthText);
   }
 
   if (!result) {

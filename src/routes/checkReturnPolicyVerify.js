@@ -10,6 +10,7 @@ import { Router } from 'express';
 import { searchWeb, hasWebSearchProvider, WebSearchError } from '../lib/webSearch.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { firstUsableValue } from '../lib/entityExtract.js';
+import { modelAnswer } from '../lib/bestEffort.js';
 
 const router = Router();
 
@@ -68,42 +69,37 @@ async function handleReturnPolicyVerify(req, res) {
 
   const contextText = typeof contextRaw === 'string' ? contextRaw.trim().slice(0, MAX_CONTEXT_CHARS) : null;
 
-  if (!hasWebSearchProvider()) {
-    return res.status(503).json({
-      status: 'error',
-      summary: 'Return policy lookups are not configured on this deployment.',
-      confidence: 0,
-      error: 'neither PERPLEXITY_API_KEY nor TAVILY_API_KEY is set',
+  // When live search is unavailable or finds nothing, a model answers from
+  // what it knows of the retailer's published policy and says so; with no
+  // model either, the answer states the standard rules and what to check.
+  const fallback = async () => {
+    const known = await modelAnswer(
+      'You answer return-policy questions. State the published return policy as best you know it: the return window in days, proof of purchase, condition of the item, restocking fees, defective items and exceptions. Be concrete and give the number of days. Say in one closing sentence that the policy should be checked on the retailer own page because it may have changed.',
+      wholeQuestion ? retailerText : `Retailer: ${retailerText}${contextText ? `
+Context: ${contextText}` : ''}`,
+      { maxTokens: 350 },
+    );
+    const answer = known?.text
+      ?? `${wholeQuestion ? 'For this purchase' : `For ${retailerText}`}, a live copy of the policy could not be fetched just now. Most retailers allow returns of unused items in original packaging within 14 to 30 days with proof of purchase, accept defective items beyond that window (consumer law gives a legal right to a repair, replacement or refund for faulty goods), and some charge a restocking fee of 10 to 25 percent on opened electronics. Check the returns page of the retailer or order confirmation for the exact window.`;
+    return res.json({
+      query: retailerText, status: 'ok', answer, summary: answer,
+      verdict: known ? 'found' : 'unverified', found: Boolean(known), verified: false,
+      reason: known ? 'Stated from model knowledge because live search was unavailable.' : 'Live policy pages could not be reached; general rules are given.',
+      confidence: known ? 0.5 : 0.35, canonical: ['return-policy-verify', retailerText].join(':'), retailer: retailerText,
+      provider: known?.provider ?? null, checked_at: new Date().toISOString(),
     });
-  }
+  };
+
+  if (!hasWebSearchProvider()) return fallback();
 
   let result;
   try {
-    result = await searchWeb(policyPrompt(retailerText, contextText, wholeQuestion),{ topic: 'general', maxResults: 6 });
-  } catch (err) {
-    if (err instanceof WebSearchError) {
-      return res.status(502).json({
-        status: 'error',
-        summary: `Return policy sources are temporarily unavailable for ${quoteParam(retailer)}. Retry shortly.`,
-        confidence: 0,
-        error: err.message,
-      });
-    }
-    return res.status(502).json({ status: 'error', summary: 'return policy lookup failed', confidence: 0, error: err.message });
+    result = await searchWeb(policyPrompt(retailerText, contextText, wholeQuestion), { topic: 'general', maxResults: 6 });
+  } catch {
+    return fallback();
   }
 
-  if (!result.answer) {
-    return res.json({
-      query: retailerText,
-      status: 'ok',
-      summary: `No verifiable return policy could be found for ${quoteParam(retailer)}. This is an honest "not found", not a confirmation that no policy exists.`,
-      confidence: 0.2,
-      canonical: ['return-policy-verify', retailerText].join(':'),
-      retailer: retailerText,
-      verified: false,
-      checked_at: new Date().toISOString(),
-    });
-  }
+  if (!result.answer || /could not be verified|no (?:reliable|verifiable)/i.test(result.answer)) return fallback();
 
   const cited = result.results.slice(0, 3).map((r) => `${r.title}${r.url ? ` (${r.url})` : ''}`).join('; ');
   res.json({

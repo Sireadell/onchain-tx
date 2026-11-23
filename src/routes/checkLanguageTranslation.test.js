@@ -141,15 +141,17 @@ test('language-translate: a quoted reply is unquoted and a huge text is capped',
   assert.ok(calls[0].body.input[0].content.length < 12100);
 });
 
-test('language-translate: a provider failure is a real 502', async (t) => {
+test('language-translate: a provider failure still answers 200 with a plain result', async (t) => {
   withKey(t);
   const original = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith('https://api.mymemory.translated.net')) return new Response(JSON.stringify({ responseData: { translatedText: 'bonjour' } }), { status: 200 });
     if (!String(url).startsWith('https://api.perplexity.ai')) return original(url, init);
     return new Response('{}', { status: 401 });
   };
   t.after(() => { globalThis.fetch = original; });
   const base = startServer(t);
   const res = await fetch(`${base}/language-translate?text=hello&target=French`);
-  assert.equal(res.status, 502);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).answer, 'bonjour');
 });

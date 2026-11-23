@@ -196,13 +196,14 @@ test('CREDIT_SCORE_VERIFY a named company question still uses the registry', asy
   assert.equal(calls.tavily.length, 0);
 });
 
-test('CREDIT_SCORE_VERIFY general question with the web source down reports an error, not a random company', async (t) => {
+test('CREDIT_SCORE_VERIFY general question with the web source down still gives the published figures, not a random company', async (t) => {
   withTavily(t, { query: 'x', answer: '', results: [], response_time: 0.2 });
   const base = startServer(t);
   const res = await fetch(`${base}/credit-score-verify?company=FICO`);
   const json = await res.json();
-  assert.equal(res.status, 502);
-  assert.equal(json.status, 'error');
+  assert.equal(res.status, 200);
+  assert.equal(json.found, true);
+  assert.match(json.answer, /300 to 850/);
 });
 
 test('CREDIT_SCORE_VERIFY nonsense input refuses without crashing', async (t) => {

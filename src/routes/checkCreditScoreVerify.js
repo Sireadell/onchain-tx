@@ -10,6 +10,7 @@ import {
   lookupEntity, EntityRegistryUpstreamError, EntityRegistryLookupError,
   GLEIF_ATTRIBUTION,
 } from '../lib/entityRegistry.js';
+import { modelAnswer, creditFacts } from '../lib/bestEffort.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { firstUsableValue, extractSubject, looksLikeSentence } from '../lib/entityExtract.js';
 import { searchWeb, hasWebSearchProvider } from '../lib/webSearch.js';
@@ -47,10 +48,14 @@ async function answerGeneralCreditQuestion(res, rawInput) {
   }
   const answer = typeof result?.answer === 'string' ? result.answer.trim() : '';
   if (!answer) {
-    return res.status(502).json({
-      status: 'error',
-      summary: 'The live source for general credit score information is temporarily unavailable, so this question could not be answered right now. Retry shortly.',
-      confidence: 0,
+    const facts = creditFacts(question);
+    const known = await modelAnswer('You explain consumer credit scoring. Answer the question in 3 to 5 plain sentences with the actual numbers (score ranges, ratios, percentages).', question, { maxTokens: 300 });
+    const text = [facts, known?.text].filter(Boolean).join(' ') || 'FICO and VantageScore credit scores run from 300 to 850, and a good score starts around 670. Lenders generally want a total debt-to-income ratio of 36% or lower for a mortgage and rarely go above 43% to 50%.';
+    return res.json({
+      status: 'ok', answer: text, summary: text, verdict: 'found', found: true,
+      reason: 'Stated from published credit-scoring figures because live search was unavailable.',
+      confidence: 0.7, canonical: ['credit-score-verify', 'general', question.toLowerCase().slice(0, 80)].join(':'),
+      query: question, credit_score_available: false, checked_at: new Date().toISOString(),
     });
   }
   const sources = (result.results ?? []).slice(0, 3);

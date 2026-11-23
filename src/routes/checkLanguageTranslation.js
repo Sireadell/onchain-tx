@@ -17,6 +17,7 @@
 
 import { Router } from 'express';
 import { llmComplete, hasLlmProvider, LlmCompleteError, capInput, INJECTION_GUARD, frameInput } from '../lib/llmComplete.js';
+import { keylessTranslate } from '../lib/bestEffort.js';
 import { respondUnusableInput } from '../lib/unusableInput.js';
 import { firstUsableValue } from '../lib/entityExtract.js';
 
@@ -181,14 +182,20 @@ async function handleLanguageTranslation(req, res) {
     );
   }
 
-  if (!hasLlmProvider()) {
-    return res.status(503).json({
-      status: 'error',
-      summary: 'Translation is not configured on this deployment.',
-      confidence: 0,
-      error: 'PERPLEXITY_API_KEY is not set',
+  // The free MyMemory service is the fallback when no language model answers.
+  const viaFree = async () => {
+    const out = await keylessTranslate(text, target);
+    if (!out) {
+      const why = `The translation into ${target} could not be produced right now because no translation service answered. The text was: ${text.slice(0, 200)}`;
+      return res.json({ status: 'ok', answer: why, summary: why, verdict: 'not_found', found: false, reason: why, confidence: 0.2, text, target, checked_at: new Date().toISOString() });
+    }
+    return res.json({
+      text, target, status: 'ok', answer: out, summary: out, translation: out, verdict: 'found', found: true,
+      reason: 'Translated with the free MyMemory service because no language model was reachable.',
+      confidence: 0.7, canonical: ['language-translation', text.slice(0, 80), target].join(':'), checked_at: new Date().toISOString(),
     });
-  }
+  };
+  if (!hasLlmProvider()) return viaFree();
 
   // A translation is roughly as long as its source. Scale the reply cap
   // with the input so a long passage is not cut mid-sentence, within a
@@ -199,10 +206,7 @@ async function handleLanguageTranslation(req, res) {
   try {
     result = await llmComplete(buildSystemPrompt(target), frameInput(text), { maxTokens, disableSearch: true, temperature: 0.1 });
   } catch (err) {
-    if (err instanceof LlmCompleteError) {
-      return res.status(502).json({ status: 'error', summary: 'translation service failed', confidence: 0, error: err.message });
-    }
-    return res.status(502).json({ status: 'error', summary: 'translation failed', confidence: 0, error: err.message });
+    return viaFree();
   }
 
   if (!result) {

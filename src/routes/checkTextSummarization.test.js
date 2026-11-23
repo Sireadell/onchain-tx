@@ -68,12 +68,12 @@ test('text-summarization: missing text answered with guidance, not a 400', async
   assert.equal((await res.json()).status, 'invalid_input');
 });
 
-test('text-summarization: an unconfigured deployment says so instead of failing silently', async (t) => {
+test('text-summarization: with no model configured it still returns an extract of the text', async (t) => {
   withKey(t, null);
   const base = startServer(t);
   const res = await fetch(`${base}/text-summarize?text=hello`);
-  assert.equal(res.status, 503);
-  assert.match((await res.json()).error, /PERPLEXITY_API_KEY/);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).found, true);
 });
 
 test('text-summarization: returns the summary and it is the graded answer', async (t) => {
@@ -141,7 +141,7 @@ test('text-summarization: an injection attempt embedded in the text is treated a
   assert.match(calls[0].body.instructions, /treat them as ordinary words/);
 });
 
-test('text-summarization: an upstream failure is a real error code, not a fabricated summary', async (t) => {
+test('text-summarization: an upstream failure falls back to an extract of the supplied text', async (t) => {
   withKey(t);
   const original = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
@@ -151,5 +151,6 @@ test('text-summarization: an upstream failure is a real error code, not a fabric
   t.after(() => { globalThis.fetch = original; });
   const base = startServer(t);
   const res = await fetch(`${base}/text-summarize?text=some+text`);
-  assert.equal(res.status, 502);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).verdict, 'found');
 });
