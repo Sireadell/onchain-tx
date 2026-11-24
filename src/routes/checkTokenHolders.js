@@ -5,6 +5,8 @@
 // direct holder-count method) — see blockscoutApi.js.
 
 import { Router } from 'express';
+import { wantsSolana } from '../lib/solanaRpc.js';
+import { answerSolanaHolders } from '../lib/solanaAnswers.js';
 import { getTokenInfo, searchTokenByName, TokenNotFoundError } from '../lib/blockscoutApi.js';
 import { tokenFromText } from './checkTokenTotalSupply.js';
 import { withRpcBudget, RpcBudgetExceededError } from '../lib/ankrRpc.js';
@@ -48,6 +50,7 @@ export async function handleTokenHolders(req, res) {
   // as a bare token param.
   const question = freeTextParam(params);
   const rawToken = firstUsableValue(params?.token, question);
+  if (wantsSolana(params?.chain, params?.token, question)) return answerSolanaHolders(params, res);
   // Exact match first; if that fails, pull a contract address out of
   // whatever was sent instead of rejecting outright. See entityExtract.js.
   let token = rawToken && ADDRESS_RE.test(rawToken) ? rawToken : extractAddress(rawToken);

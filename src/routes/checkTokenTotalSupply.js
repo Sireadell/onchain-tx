@@ -7,6 +7,8 @@
 // accepts all of them.
 
 import { Router } from 'express';
+import { wantsSolana } from '../lib/solanaRpc.js';
+import { answerSolanaSupply } from '../lib/solanaAnswers.js';
 import { ethCall, withRpcBudget } from '../lib/ankrRpc.js';
 import { resolveRpcChainLoose, CHAINS } from '../lib/chains.js';
 import { extractAddress, firstUsableValue, freeTextParam } from '../lib/entityExtract.js';
@@ -139,6 +141,7 @@ async function answerNative(res, chain, native, block) {
 async function handleTokenTotalSupply(req, res) {
   const params = (req.method === 'GET' ? req.query : req.body) ?? {};
   const text = freeTextParam(params) ?? '';
+  if (wantsSolana(firstUsableValue(params.chain, params.venue, params.network), params.token, params.mint, params.symbol, params.address, text)) return answerSolanaSupply(params, res);
   const chainRaw = firstUsableValue(params.chain, params.venue, params.network, params.chain_id, params.chainId);
   const chain = resolveChainId(chainRaw ?? (resolveRpcChainLoose(text) ? text : undefined));
   if (!chain) {

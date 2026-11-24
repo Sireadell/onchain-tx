@@ -3,6 +3,8 @@
 // cases, confidence semantics).
 
 import { Router } from 'express';
+import { wantsSolana } from '../lib/solanaRpc.js';
+import { answerSolanaTx } from '../lib/solanaAnswers.js';
 import {
   getTransactionByHash,
   getTransactionReceipt,
@@ -51,6 +53,7 @@ export async function handleCheckTx(req, res) {
   const params = req.method === 'GET' ? req.query : req.body;
   const question = freeTextParam(params);
   const rawTxHash = firstUsableValue(params?.tx_hash, question);
+  if (wantsSolana(params?.chain, params?.tx_hash, question)) return answerSolanaTx(params, res);
   // Exact match first; if that fails, try pulling a hash out of whatever
   // was sent (a full question, a hash with surrounding punctuation) rather
   // than rejecting outright. See entityExtract.js.

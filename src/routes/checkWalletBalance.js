@@ -13,6 +13,8 @@
 // than failing the whole request.
 
 import { Router } from 'express';
+import { wantsSolana } from '../lib/solanaRpc.js';
+import { answerSolanaBalance } from '../lib/solanaAnswers.js';
 import {
   getBalance,
   getCode,
@@ -489,6 +491,7 @@ export async function handleWalletBalance(req, res) {
   // address. Fall back to it so the extractor below has something to read.
   const question = freeTextParam(params);
   const rawAddress = firstUsableValue(params?.address, question);
+  if (wantsSolana(params?.chain, params?.address, params?.token, question)) return answerSolanaBalance(params, res);
   const explicitChain = firstUsableValue(params?.chain);
   const testnet = resolveTestnetLoose(explicitChain)
     ?? (explicitChain && resolveChainLoose(String(explicitChain)) ? null : resolveTestnetLoose(question));
