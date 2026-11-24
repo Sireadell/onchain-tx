@@ -152,8 +152,27 @@ import { parseCountQuestion } from './checkRegulatoryFilingMonitor.js';
 test('regulatory filings: a "how many" question is read as a count of one form in one year', () => {
   assert.deepEqual(
     parseCountQuestion('How many Form 10-K filings by Apple Inc. (CIK 320193) in calendar 2023 are on SEC EDGAR?'),
-    { form: '10-K', year: '2023', fiscal: false },
+    { form: '10-K', year: '2023', fiscal: false, yesNo: false },
   );
   assert.equal(parseCountQuestion('How many Form 10q filings by Tesla in 2024?').form, '10-Q');
   assert.equal(parseCountQuestion('What is the latest 10-K from Apple?'), null);
+});
+
+import { parseQuarterQuestion, fiscalQuarterOf, namesCompany } from './checkRegulatoryFilingMonitor.js';
+test('regulatory filings: a named 10-Q quarter is read in the company fiscal calendar', () => {
+  assert.deepEqual(parseQuarterQuestion('Has Apple Inc. filed its Q3 2023 10-Q form with the SEC?'), { year: 2023, quarter: 3 });
+  assert.deepEqual(parseQuarterQuestion('Has Apple filed its latest 10-Q for the quarter ending March 31, 2024?'), { periodEnd: '2024-03-31' });
+  assert.deepEqual(fiscalQuarterOf('2023-07-01', 9), { fy: 2023, quarter: 3 });
+  assert.deepEqual(fiscalQuarterOf('2023-12-30', 9), { fy: 2024, quarter: 1 });
+  assert.deepEqual(fiscalQuarterOf('2023-09-30', 12), { fy: 2023, quarter: 3 });
+  assert.deepEqual(fiscalQuarterOf('2023-09-30', 6), { fy: 2024, quarter: 1 });
+});
+
+test('regulatory filings: "did X file a 10-K in 2025" is a yes or no count', () => {
+  assert.equal(parseCountQuestion('Did Tesla file a 10-K in 2025?').yesNo, true);
+});
+
+test('regulatory filings: a topic does not match an unrelated company', () => {
+  assert.equal(namesCompany('Virtual-asset trading platforms licensing', { name: 'MASCO CORP /DE/', ticker: 'MAS' }), false);
+  assert.equal(namesCompany('Has Apple Inc. filed its 10-Q', { name: 'Apple Inc.', ticker: 'AAPL' }), true);
 });
