@@ -155,3 +155,13 @@ test('language-translate: a provider failure still answers 200 with a plain resu
   assert.equal(res.status, 200);
   assert.equal((await res.json()).answer, 'bonjour');
 });
+
+test('language-translate: colon requests and quoted phrases from scored rounds 41 to 45', () => {
+  assert.deepEqual(parseInstruction("How do you translate 'See you later' into Chinese?"), { text: 'See you later', target: 'Chinese' });
+  assert.deepEqual(parseInstruction('I need this in German, natural and accurate: English and German are related languages.'),
+    { text: 'English and German are related languages.', target: 'German' });
+  const fr = parseInstruction('I need an English translation of this French statutory passage: Le syndicat signe. Return a JSON object with translation, source_language and target_language.');
+  assert.deepEqual(fr, { text: 'Le syndicat signe.', target: 'English', source: 'French' });
+  assert.deepEqual(parseInstruction('Please give me the Italian version: The museum is closed on Mondays.'),
+    { text: 'The museum is closed on Mondays.', target: 'Italian' });
+});
