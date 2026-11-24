@@ -238,10 +238,12 @@ async function handle(req, res) {
         return respondNotFound(res, null, null, `No ship can be identified from ${raw != null ? `"${String(raw).slice(0, 60)}"` : 'this request'}: name the ship, or give its 9 digit MMSI (for example 230629000) or 7 digit IMO number. No details are given rather than guessed.`);
       }
       const heard = aisEnabled() ? shipByName(name) : null;
-      reg = await lookupShip({ name }).catch(() => null);
+      let registryDown = false;
+      reg = await lookupShip({ name }).catch(() => { registryDown = true; return null; });
       if (heard?.t) return respondAisLive(res, heard, reg);
       if (!reg || !(reg.mmsi || reg.imo)) {
-        return respondNotFound(res, null, null, `"${name.slice(0, 60)}" could not be matched to a ship in the open ship register (Wikidata) or the AIS feeds read here, so no position or details are given rather than guessed. Give its 9 digit MMSI or 7 digit IMO number for a direct lookup.`);
+        const why = registryDown ? 'the open ship register (Wikidata) did not respond in time, and the AIS feeds read here have not heard it' : 'it could not be matched to a ship in the open ship register (Wikidata) or the AIS feeds read here';
+        return respondNotFound(res, null, null, `"${name.slice(0, 60)}": ${why}, so no position or details are given rather than guessed. Give its 9 digit MMSI or 7 digit IMO number for a direct lookup.`);
       }
       mmsi = reg.mmsi;
       imo = reg.imo;
