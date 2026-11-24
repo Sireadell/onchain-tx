@@ -79,6 +79,14 @@ export const INDICATOR_MAP = {
   population: 'SP.POP.TOTL',
   'government debt': 'GC.DOD.TOTL.GD.ZS', 'public debt': 'GC.DOD.TOTL.GD.ZS', 'debt to gdp': 'GC.DOD.TOTL.GD.ZS', 'debt-to-gdp': 'GC.DOD.TOTL.GD.ZS',
   'current account': 'BN.CAB.XOKA.GD.ZS',
+  // Found in scored questions 2026-11-23: "GDP in current US dollars" fell to
+  // the bare "gdp" key and was answered as GDP growth.
+  'current us dollars': 'NY.GDP.MKTP.CD', 'current us$': 'NY.GDP.MKTP.CD', 'current usd': 'NY.GDP.MKTP.CD',
+  'gdp (current': 'NY.GDP.MKTP.CD', 'gdp in us dollars': 'NY.GDP.MKTP.CD', 'gdp in usd': 'NY.GDP.MKTP.CD',
+  'jobless rate': 'SL.UEM.TOTL.ZS', 'consumer price inflation': 'FP.CPI.TOTL.ZG', 'consumer prices': 'FP.CPI.TOTL.ZG',
+  'real gdp growth': 'NY.GDP.MKTP.KD.ZG', 'output growth': 'NY.GDP.MKTP.KD.ZG',
+  'gdp deflator': 'NY.GDP.DEFL.KD.ZG', 'labor force participation': 'SL.TLF.CACT.ZS', 'labour force participation': 'SL.TLF.CACT.ZS',
+  'participation rate': 'SL.TLF.CACT.ZS', 'per capita gdp': 'NY.GDP.PCAP.CD', 'per capita income': 'NY.GDP.PCAP.CD',
 };
 
 // Longest names first, so "gdp per capita" is matched before "gdp".
@@ -93,12 +101,30 @@ const INDICATOR_LABELS = {
   'SP.POP.TOTL': 'population',
   'GC.DOD.TOTL.GD.ZS': 'central government debt',
   'BN.CAB.XOKA.GD.ZS': 'current account balance',
+  'NY.GDP.DEFL.KD.ZG': 'GDP deflator inflation',
+  'SL.TLF.CACT.ZS': 'labour force participation rate',
+};
+
+// The wording used in a one-sentence answer for a named year, close to the
+// World Bank's own series title so a reader can match it to the source.
+export const INDICATOR_PHRASES = {
+  'NY.GDP.MKTP.KD.ZG': 'real GDP growth rate (annual %)',
+  'FP.CPI.TOTL.ZG': 'consumer price inflation (annual %)',
+  'SL.UEM.TOTL.ZS': 'unemployment rate (% of total labour force, modelled ILO estimate)',
+  'NY.GDP.PCAP.CD': 'GDP per capita (current US$)',
+  'NY.GDP.MKTP.CD': 'GDP (current US$)',
+  'SP.POP.TOTL': 'total population',
+  'GC.DOD.TOTL.GD.ZS': 'central government debt (% of GDP)',
+  'BN.CAB.XOKA.GD.ZS': 'current account balance (% of GDP)',
+  'NY.GDP.DEFL.KD.ZG': 'inflation, GDP deflator (annual %)',
+  'SL.TLF.CACT.ZS': 'labour force participation rate (% of population ages 15+)',
 };
 
 const INDICATOR_UNITS = {
   'NY.GDP.MKTP.KD.ZG': 'percent', 'FP.CPI.TOTL.ZG': 'percent', 'SL.UEM.TOTL.ZS': 'percent',
   'GC.DOD.TOTL.GD.ZS': 'percent of GDP', 'BN.CAB.XOKA.GD.ZS': 'percent of GDP',
   'NY.GDP.PCAP.CD': 'current US dollars', 'NY.GDP.MKTP.CD': 'current US dollars', 'SP.POP.TOTL': 'people',
+  'NY.GDP.DEFL.KD.ZG': 'percent', 'SL.TLF.CACT.ZS': 'percent',
 };
 
 // The same series in the IMF World Economic Outlook (DataMapper API, no key).

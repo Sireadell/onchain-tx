@@ -103,7 +103,7 @@ test('MACRO_ECONOMIC_INDICATOR handles a 12,000+ char input without crashing', a
   assert.equal(res.status, 200);
 });
 
-test('MACRO_ECONOMIC_INDICATOR both sources down answers 200 unavailable, never a 5xx', async (t) => {
+test('MACRO_ECONOMIC_INDICATOR both sources down answers from the stored World Bank copy, never a 5xx', async (t) => {
   const base = startServer(t);
   stubWorldBank(t, { status: 500, body: [] });
   const original = globalThis.fetch;
@@ -112,8 +112,27 @@ test('MACRO_ECONOMIC_INDICATOR both sources down answers 200 unavailable, never 
   const res = await fetch(`${base}/macro-economic-indicator?country=Japan&indicator=GDP`);
   const json = await res.json();
   assert.equal(res.status, 200);
-  assert.equal(json.status, 'unavailable');
-  assert.equal(json.value, null);
+  assert.equal(json.status, 'ok');
+  assert.equal(json.country, 'Japan');
+  assert.ok(Number.isFinite(json.value));
+  assert.match(json.answer, /latest annual figure published/);
+});
+
+test('MACRO_ECONOMIC_INDICATOR a named past year leads with that year, read from the stored copy', async (t) => {
+  const base = startServer(t);
+  const res = await fetch(`${base}/macro-economic-indicator?query=${encodeURIComponent("Our commodities model needs Argentina's real GDP growth for 2017. What was the released figure?")}`);
+  const json = await res.json();
+  assert.equal(json.status, 'ok');
+  assert.equal(json.year, '2017');
+  assert.match(json.answer, /^Argentina's real GDP growth rate \(annual %\) in 2017 was 2\.82%/);
+});
+
+test('MACRO_ECONOMIC_INDICATOR never reads a plain word as a country code', async (t) => {
+  const base = startServer(t);
+  const res = await fetch(`${base}/macro-economic-indicator?query=${encodeURIComponent('Give the World Bank figure for real GDP growth rate in Honduras, 2023.')}`);
+  const json = await res.json();
+  assert.equal(json.country_code, 'HN');
+  assert.match(json.answer, /in 2023 was 3\.5/);
 });
 
 test('MACRO_ECONOMIC_INDICATOR falls back to the IMF when the World Bank is down', async (t) => {
@@ -200,6 +219,8 @@ test('MACRO_ECONOMIC_INDICATOR "economy growing" phrasing resolves to GDP growth
 });
 
 test('MACRO_ECONOMIC_INDICATOR does not wait for a hanging World Bank when the IMF has answered', async (t) => {
+  // A question with no year goes to the live sources; a named year is
+  // answered from the stored copy and is tested above.
   const base = startServer(t);
   __clearMacroCacheForTesting();
   const original = globalThis.fetch;
@@ -215,10 +236,9 @@ test('MACRO_ECONOMIC_INDICATOR does not wait for a hanging World Bank when the I
   };
   t.after(() => { globalThis.fetch = original; __clearMacroCacheForTesting(); });
   const started = Date.now();
-  const res = await fetch(`${base}/macro-economic-indicator?query=What+was+Japan+inflation+in+${year - 3}%3F`);
+  const res = await fetch(`${base}/macro-economic-indicator?query=What+is+Japan+inflation+now%3F`);
   const json = await res.json();
   assert.ok(Date.now() - started < 3_000, 'answered within the grace period, not the 5 second timeout');
   assert.equal(json.status, 'ok');
   assert.equal(json.value, 3.2);
-  assert.match(json.summary, new RegExp(`For ${year - 3} specifically, the annual figure was 3\.30%`));
 });
