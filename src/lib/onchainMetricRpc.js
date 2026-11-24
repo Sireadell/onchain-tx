@@ -167,7 +167,20 @@ const KNOWN_TOKENS = {
 export function tokenBalanceAsk(text, chainKey) {
   const m = String(text ?? '').match(/\b(cbBTC|USDC|USDT|WETH|DAI|WBTC)\b(?:\s+token)?\s+(?:balance|holdings?)\b/i)
     ?? String(text ?? '').match(/\b(?:balance|holdings?)\s+of\s+(cbBTC|USDC|USDT|WETH|DAI|WBTC)\b/i)
-    ?? String(text ?? '').match(/\bhow\s+much\s+(cbBTC|USDC|USDT|WETH|DAI|WBTC)\b/i);
+    ?? String(text ?? '').match(/\bhow\s+much\s+(cbBTC|USDC|USDT|WETH|DAI|WBTC)\b/i)
+    // "Read balanceOf(0x51c7...) on the USDT token": the address in the call
+    // is the holder, the token is named. Found in a scored question 2026-11-22.
+    ?? String(text ?? '').match(/\bbalanceOf\s*\(\s*0x[0-9a-fA-F]{40}\s*\)\s+(?:on|of|for|in)\s+(?:the\s+)?(cbBTC|USDC|USDT|WETH|DAI|WBTC)\b/i);
+  if (!m) return null;
+  const token = KNOWN_TOKENS[m[1].toLowerCase()]?.[chainKey];
+  return token ? { symbol: m[1], token } : null;
+}
+
+// "what was the WETH contract supply on Arbitrum One": a known token named
+// without its address, asked for its total supply.
+export function tokenSupplyAsk(text, chainKey) {
+  const m = String(text ?? '').match(/\b(cbBTC|USDC|USDT|WETH|DAI|WBTC)\b(?:\s+(?:token|contract))?\s+(?:total\s+)?supply\b/i)
+    ?? String(text ?? '').match(/\b(?:total\s+)?supply\s+of\s+(?:the\s+)?(cbBTC|USDC|USDT|WETH|DAI|WBTC)\b/i);
   if (!m) return null;
   const token = KNOWN_TOKENS[m[1].toLowerCase()]?.[chainKey];
   return token ? { symbol: m[1], token } : null;

@@ -58,6 +58,10 @@ export function addressesIn(text) {
 
 export function blockFromText(text) {
   const clean = String(text ?? '').replace(/0x[0-9a-fA-F]{40,}/g, ' ');
+  // "at block 0xd2e015": a block number in hex. Found in scored questions
+  // 2026-11-21 and 11-22; it was ignored and the latest block read instead.
+  const hex = clean.match(/\b(?:block|height)(?:\s+(?:number|height))?\s*#?\s*(0x[0-9a-fA-F]{1,12})\b/i);
+  if (hex) return BigInt(hex[1]).toString();
   const m = clean.match(new RegExp(String.raw`\bblock(?:\s+(?:number|height))?\s*#?\s*${BLOCK_NUM}`, 'i'))
     ?? clean.match(new RegExp(String.raw`\bat\s+(?:height|number)\s+${BLOCK_NUM}`, 'i'))
     // "on Ethereum height 20500000"

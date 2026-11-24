@@ -97,7 +97,7 @@ test('a bare address with a block reads its native balance, and Gwei is given wh
   assert.equal(bare.kind, 'native_balance');
   assert.match(bare.summary, /is 1 ETH/);
   const gwei = await ask(base, `What is the Ethereum balance in Gwei of address ${wallet} at block 18000000?`);
-  assert.match(gwei.summary, /\(1000000000 gwei\)/);
+  assert.match(gwei.summary, /is 1000000000 gwei \(1 ETH\)/);
   assert.equal(calls[0].method, 'eth_getBalance');
 });
 

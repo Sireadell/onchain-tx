@@ -21,7 +21,7 @@ import {
 } from '../lib/onchainMetric.js';
 import {
   genericCalls, encodeGeneric, genericCallText, decodeGeneric, getLogs, getTransactionCountAt,
-  TRANSFER_TOPIC, tokenBalanceAsk, knownContractIn, knownContractName, blockRangeFromText, decodeTransferLog,
+  TRANSFER_TOPIC, tokenBalanceAsk, tokenSupplyAsk, rawRpc, knownContractIn, knownContractName, blockRangeFromText, decodeTransferLog,
 } from '../lib/onchainMetricRpc.js';
 
 const router = Router();
@@ -107,6 +107,23 @@ async function tokenMeta(chain, token) {
   const decimals = d && d !== '0x' ? Number(BigInt(d.slice(0, 66))) : null;
   const symbol = s && s !== '0x' ? decodeResult('symbol', s)?.value ?? null : null;
   return { decimals: decimals !== null && decimals <= 36 ? decimals : null, symbol };
+}
+
+// For a single totalSupply() or balanceOf(holder) read on a token, the
+// amount in whole tokens, leading the sentence.
+async function humanTokenUnits(chain, contract, calls, fields) {
+  if (calls.length !== 1 || !['totalSupply', 'balanceOf'].includes(calls[0].name)) return null;
+  const rawText = String(fields[0]?.uint ?? fields[0]?.value ?? '');
+  if (!/^\d+$/.test(rawText)) return null;
+  const meta = await tokenMeta(chain, contract);
+  if (meta.decimals === null) return null;
+  const raw = BigInt(rawText);
+  const value = amountToDecimalString(raw, meta.decimals);
+  const sym = meta.symbol ?? 'tokens';
+  const lead = calls[0].name === 'totalSupply'
+    ? `totalSupply() of ${sym} returned ${value} ${sym}`
+    : `balanceOf(${calls[0].args?.[0]?.value ?? 'holder'}) returned ${value} ${sym}`;
+  return { lead, value, raw: rawText, decimals: meta.decimals, symbol: sym };
 }
 
 const MAX_LOG_RANGE = 2000n;
@@ -309,6 +326,15 @@ async function answer(req, res) {
           );
         }
         if (out.ok) {
+          // totalSupply() and balanceOf() also in whole tokens, since a raw
+          // 4294963292249564017724480282 is not what anyone reads.
+          const human = await humanTokenUnits(chain, contract, calls, out.fields);
+          if (human) {
+            return reply(
+              `${human.lead} on ${chain.label} at ${blockLabel(note.text ? 'latest' : block)} (contract ${contract}; raw ${human.raw}, ${human.decimals} decimals).`,
+              { kind: 'view', value: human.value, token_symbol: human.symbol, results: out.fields },
+            );
+          }
           return reply(
             `On ${chain.label} at ${blockLabel(note.text ? 'latest' : block)}, the contract ${contract} answered: ${out.segments.join('; ')}.`,
             { kind: 'view', results: out.fields },
@@ -316,6 +342,36 @@ async function answer(req, res) {
         }
         return respondUnusableInput(res, `${contract} on ${chain.label} did not answer ${calls.map(signatureText).join(', ')}: it has no such view or it reverted. Check that the address is the right contract on this chain.`);
       }
+    }
+
+    // 2b. A known token named without its address, asked for its supply.
+    const supplyAsk = !contract ? tokenSupplyAsk(text, chain.key) : null;
+    if (supplyAsk) {
+      const hex = await run((b) => ethCall(chain.segment, supplyAsk.token, '0x18160ddd', b));
+      const raw = hex && hex !== '0x' ? BigInt(hex.slice(0, 66)) : 0n;
+      const meta = await tokenMeta(chain, supplyAsk.token);
+      const sym = meta.symbol ?? supplyAsk.symbol;
+      const dec = meta.decimals ?? 18;
+      return reply(
+        `The total supply of ${sym} (${supplyAsk.token}) on ${chain.label} at ${blockLabel(note.text ? 'latest' : block)} was ${amountToDecimalString(raw, dec)} ${sym} (raw totalSupply() ${raw}, ${dec} decimals).`,
+        { kind: 'total_supply', token: supplyAsk.token, token_symbol: sym, value: amountToDecimalString(raw, dec), value_raw: raw.toString() },
+      );
+    }
+
+    // 2c. A block's own header: gas used, gas limit, base fee, utilisation.
+    if (!contract && !txHash && block !== 'latest' && /\b(?:gas\s+(?:used|consumed)|gas\s+limit|base\s*fee|utili[sz]ation|block\s+header|timestamp)\b/i.test(text)) {
+      const b = await rawRpc(chain.segment, 'eth_getBlockByNumber', [`0x${BigInt(block).toString(16)}`, false]);
+      if (!b) return respondUnusableInput(res, `${blockLabel(block)} was not found on ${chain.label}; it may not have been produced yet.`);
+      const gasUsed = BigInt(b.gasUsed);
+      const gasLimit = BigInt(b.gasLimit);
+      const baseFee = b.baseFeePerGas != null ? BigInt(b.baseFeePerGas) : null;
+      const util = gasLimit > 0n ? Number((Number(gasUsed) / Number(gasLimit) * 100).toPrecision(4)) : null;
+      const when = new Date(Number(BigInt(b.timestamp)) * 1000).toISOString();
+      const fee = baseFee !== null ? `, base fee per gas ${amountToDecimalString(baseFee, 9)} gwei (${baseFee} wei)` : '';
+      return reply(
+        `${chain.label} ${blockLabel(block)}: gas used ${withCommas(gasUsed)} (${gasUsed}) of a ${withCommas(gasLimit)} gas limit, a utilisation of ${util}%${fee}, ${b.transactions?.length ?? 0} transactions, timestamp ${when}.`,
+        { kind: 'block_header', gas_used: gasUsed.toString(), gas_limit: gasLimit.toString(), base_fee_wei: baseFee?.toString() ?? null, utilisation_pct: util, timestamp: when, block_hash: b.hash },
+      );
     }
 
     // 3. Gas and logs of one transaction.
@@ -346,9 +402,15 @@ async function answer(req, res) {
     if (addresses.length && !/\b(?:event|logs?)\b/i.test(text)) {
       const target = addresses[0];
       const wei = BigInt(await run((b) => getBalanceAt(chain.segment, target, b)));
-      const gwei = /\bgwei\b/i.test(`${text} ${JSON.stringify(params)}`) ? ` (${amountToDecimalString(wei, 9)} gwei)` : '';
+      const wantsGwei = /\bgwei\b/i.test(`${text} ${JSON.stringify(params)}`);
+      const gwei = wantsGwei ? ` (${amountToDecimalString(wei, 9)} gwei)` : '';
+      // Asked in Gwei, the Gwei figure leads (found in scored questions
+      // 2026-11-21 to 11-23: "in Gwei" answered with ETH first).
+      const amount = wantsGwei
+        ? `${amountToDecimalString(wei, 9)} gwei (${amountToDecimalString(wei, 18)} ${chain.nativeSymbol})`
+        : `${amountToDecimalString(wei, 18)} ${chain.nativeSymbol}`;
       return reply(
-        `The ${chain.nativeSymbol} balance of ${target} on ${chain.label} at ${blockLabel(note.text ? 'latest' : block)} is ${amountToDecimalString(wei, 18)} ${chain.nativeSymbol}${gwei} (raw ${wei} wei).`,
+        `The ${chain.nativeSymbol} balance of ${target} on ${chain.label} at ${blockLabel(note.text ? 'latest' : block)} is ${amount} (raw ${wei} wei).`,
         { kind: 'native_balance', address: target, value: amountToDecimalString(wei, 18), value_wei: wei.toString(), ...(gwei ? { value_gwei: amountToDecimalString(wei, 9) } : {}) },
       );
     }
