@@ -10,7 +10,9 @@
 // incorporation, business address, former names, latest filing).
 
 import { Router } from 'express';
-import { lookupEntity, EntityRegistryUpstreamError, EntityRegistryLookupError } from '../lib/entityRegistry.js';
+import {
+  lookupEntity, lookupLei, EntityRegistryUpstreamError, EntityRegistryLookupError,
+} from '../lib/entityRegistry.js';
 import { firstUsableValue, freeTextParam } from '../lib/entityExtract.js';
 import { respondUnusableInput } from '../lib/unusableInput.js';
 import { findSecCompany, companyProfile } from '../lib/financialData.js';
@@ -22,10 +24,23 @@ const FOR_RE = /\b(?:for|of|on|about|[Ii]s|[Dd]oes|[Dd]id)\s+((?:[A-Z0-9][\w&.,'
 
 // Pulls the company name out of a whole question. A quoted name wins,
 // then a capitalised run after "for"/"of"/"about".
+// Phrasings seen in scored questions 2026-11-21 to 11-23 where the name sits
+// before "(LEI ...)", after "contract with", "say about" or "Look up".
+const NAME_PATTERNS = [
+  /\blegal entity\s+(.{2,120}?)\s*\(\s*LEI\b/i,
+  /\b(?:contract|deal|work|trade)\s+with\s+(.{2,120}?)(?=\s+(?:of|in|from)\s+[A-Z][a-z]|\?|$)/,
+  /\bsay\s+about\s+(.{2,120}?)\s*[?.]/i,
+  /\bLook\s+up\s+(?!the\b|an?\b|corporate\b|company\b|registry\b)(.{2,120}?)(?=\s+\(|\s+(?:in|at)\s+(?:the\s+)?[A-Z]|:|$)/,
+];
+
 export function companyFromText(text) {
   const t = String(text ?? '');
   const q = t.match(QUOTED_RE);
   if (q) return q[1].trim();
+  for (const re of NAME_PATTERNS) {
+    const m = t.match(re);
+    if (m && /[A-Z]/.test(m[1]) && m[1].split(/\s+/).length <= 10) return m[1].trim().replace(/[,.]$/, '');
+  }
   const f = t.match(FOR_RE);
   return f ? f[1].trim().replace(/[,.]$/, '') : null;
 }
@@ -65,7 +80,26 @@ const JURISDICTION_CODES = {
   florida: 'US-FL', illinois: 'US-IL', massachusetts: 'US-MA', 'new jersey': 'US-NJ', wyoming: 'US-WY',
   'united kingdom': 'GB', uk: 'GB', england: 'GB', germany: 'DE', france: 'FR', ireland: 'IE', netherlands: 'NL',
   canada: 'CA', japan: 'JP', india: 'IN', singapore: 'SG', switzerland: 'CH', australia: 'AU', nigeria: 'NG',
+  australian: 'AU', british: 'GB', german: 'DE', dutch: 'NL', french: 'FR', irish: 'IE', poland: 'PL', polish: 'PL',
+  malaysia: 'MY', italy: 'IT', spain: 'ES', sweden: 'SE', norway: 'NO', denmark: 'DK', finland: 'FI', belgium: 'BE',
+  austria: 'AT', luxembourg: 'LU', 'hong kong': 'HK', china: 'CN', korea: 'KR', brazil: 'BR', mexico: 'MX',
+  'south africa': 'ZA', 'new zealand': 'NZ', 'companies house': 'GB', scotland: 'GB',
 };
+
+// The record must actually be the company asked about. Found 2026-11-23:
+// "LEGENDARNIE FUNDACJA RODZINNA W ORGANIZACJI of Poland" was answered with
+// "Poland-Denmark ApS", an unrelated company that only shared a word.
+const LEGAL_FORMS = new Set(['inc', 'incorporated', 'ltd', 'limited', 'llc', 'plc', 'corp', 'corporation', 'co', 'company', 'gmbh', 'ag', 'se', 'sa', 'nv', 'bv', 'spa', 'srl', 'aps', 'as', 'ab', 'oy', 'berhad', 'bhd', 'the', 'holding', 'holdings', 'group']);
+function nameTokens(s) {
+  return String(s ?? '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').split(/[^a-z0-9]+/).filter((w) => w && !LEGAL_FORMS.has(w));
+}
+export function sameCompany(recordName, askedName) {
+  const want = nameTokens(askedName);
+  if (!want.length) return true;
+  const have = new Set(nameTokens(recordName));
+  const hit = want.filter((w) => have.has(w)).length;
+  return hit / want.length >= 0.6;
+}
 
 export function jurisdictionCode(text) {
   const t = String(text ?? '').toLowerCase();
@@ -137,6 +171,61 @@ function secAnswer(name, jurisdiction, code, p, checkedAt) {
   };
 }
 
+// "Also supply these requested response fields ...: active, incorporated,
+// jurisdiction, legal_name, registered_address, registration_id": each named
+// field gets its value, or says plainly that the register does not hold it.
+function requestedFields(rec, text) {
+  const m = String(text ?? '').match(/fields?[^:]*:\s*([a-z_,\s]+?)(?:\.|$)/i);
+  if (!m) return '';
+  const names = m[1].split(/[,\s]+/).map((s) => s.trim()).filter((s) => /^[a-z_]+$/.test(s));
+  if (!names.length) return '';
+  const value = {
+    active: rec.entity_status ? String(rec.entity_status === 'ACTIVE') : null,
+    status: rec.entity_status,
+    incorporated: rec.creation_date ? rec.creation_date.slice(0, 10) : null,
+    jurisdiction: rec.jurisdiction,
+    legal_name: rec.legal_name,
+    registered_address: rec.legal_address,
+    registration_id: rec.registered_as ? `${rec.registered_as}${rec.registered_at ? ` (registration authority ${rec.registered_at})` : ''}` : null,
+    lei: rec.lei,
+    headquarters: rec.headquarters_address,
+  };
+  const parts = names.map((n) => `${n}: ${value[n] ?? 'not held in the LEI record (unavailable evidence)'}`);
+  return ` Requested fields: ${parts.join('; ')}.`;
+}
+
+function leiAnswer(rec, text) {
+  const active = rec.entity_status === 'ACTIVE';
+  const asksActive = /\b(active|status|still|contract with|in good standing|dissolved)\b/i.test(text);
+  const lead = asksActive ? (active ? 'Yes, active. ' : `No, not active. `) : '';
+  const summary = `${lead}${rec.legal_name} (LEI ${rec.lei}) is ${active ? 'ACTIVE' : String(rec.entity_status ?? 'of unknown status').toUpperCase()} in the GLEIF LEI register, jurisdiction ${rec.jurisdiction ?? 'not stated'}, created on ${rec.creation_date ? rec.creation_date.slice(0, 10) : 'an unstated date'}. `
+    + `Registered legal address: ${rec.legal_address ?? 'not published'}.${rec.registered_as ? ` Registration number in the local business register: ${rec.registered_as}${rec.registered_at ? ` (registration authority ${rec.registered_at})` : ''}.` : ''} `
+    + `LEI registration status ${rec.registration_status ?? 'unknown'}, last updated ${String(rec.last_update_date ?? '').slice(0, 10) || 'on an unknown date'}.${requestedFields(rec, text)}`;
+  return {
+    status: 'ok',
+    answer: summary,
+    summary,
+    verdict: active ? 'active' : 'inactive',
+    confidence: 0.95,
+    canonical: ['corporate-registry', rec.lei].join(':'),
+    found: true,
+    status_active: active ? 1 : 0,
+    active,
+    legal_name: rec.legal_name,
+    lei: rec.lei,
+    entity_status: rec.entity_status,
+    registration_status: rec.registration_status,
+    jurisdiction: rec.jurisdiction,
+    legal_address: rec.legal_address,
+    headquarters_address: rec.headquarters_address,
+    registered_as: rec.registered_as,
+    registration_authority: rec.registered_at,
+    creation_date: rec.creation_date,
+    source: `GLEIF LEI register (api.gleif.org/api/v1/lei-records/${rec.lei})`,
+    checked_at: new Date().toISOString(),
+  };
+}
+
 async function handleCorporateRegistry(req, res) {
   const params = (req.method === 'GET' ? req.query : req.body) ?? {};
   const text = freeTextParam(params) ?? '';
@@ -145,6 +234,14 @@ async function handleCorporateRegistry(req, res) {
     ? String(direct).trim()
     : companyFromText(direct ?? text) ?? companyFromText(text);
   const jurisdiction = firstUsableValue(params.jurisdiction, params.state, params.country) ?? jurisdictionFromText(direct ?? text);
+
+  // A question that names exactly one LEI is answered from that LEI record.
+  const leis = [...new Set(`${direct ?? ''} ${text}`.toUpperCase().match(/\b[A-Z0-9]{18}\d{2}\b/g) ?? [])]
+    .filter((l) => /[A-Z]/.test(l) || /^\d{4}00/.test(l));
+  if (leis.length === 1) {
+    const rec = await lookupLei(leis[0]).catch(() => null);
+    if (rec) return res.json(leiAnswer(rec, `${direct ?? ''} ${text}`));
+  }
 
   if (!name) {
     return respondUnusableInput(res, 'I cannot look up a company because no company name was supplied. Pass the legal name as the name parameter.');
@@ -184,6 +281,29 @@ async function handleCorporateRegistry(req, res) {
     });
   }
 
+  // Keep only records that are the company asked about; if the legal-name
+  // search found none, try the full-text search before saying not found.
+  let similar = found.matches.filter((m) => sameCompany(m.legal_name, legalName));
+  if (!similar.length) {
+    const ft = await lookupEntity(legalName, { fulltext: true }).catch(() => ({ matches: [] }));
+    similar = ft.matches.filter((m) => sameCompany(m.legal_name, legalName));
+  }
+  if (!similar.length) {
+    const where = jurisdiction ? ` in ${jurisdiction}` : '';
+    return res.json({
+      status: 'ok',
+      summary: `No company named "${name}"${where} is registered in the GLEIF global Legal Entity Identifier register as of ${checkedAt.slice(0, 10)}; the nearest names it holds (${found.matches.slice(0, 2).map((m) => m.legal_name).join('; ')}) are different companies. Its status and registered address cannot be confirmed from this register. ${DIRECTORS_NOTE}`,
+      confidence: 0.6,
+      name,
+      jurisdiction_asked: jurisdiction ?? null,
+      found: false,
+      status_active: 0,
+      source: 'GLEIF LEI register (api.gleif.org)',
+      checked_at: checkedAt,
+    });
+  }
+  found = { ...found, matches: similar };
+
   const r = pickRecord(found.matches, legalName, code);
   const active = r.entity_status === 'ACTIVE';
   const address = r.legal_address ?? r.headquarters_address;
@@ -191,7 +311,7 @@ async function handleCorporateRegistry(req, res) {
   const elsewhere = code && !String(r.jurisdiction ?? '').startsWith(code) ? ` No matching record is registered in ${jurisdiction}; this is the closest match.` : '';
   const others = found.matches.length > 1 ? ` ${found.matches.length - 1} other record(s) matched the name.` : '';
   const summary = `${r.legal_name} is ${active ? 'an active' : `an ${String(r.entity_status ?? 'unknown').toLowerCase()}`} company in the GLEIF register (LEI ${r.lei}), registered in ${r.jurisdiction ?? 'an unstated jurisdiction'}${r.creation_date ? ` and created on ${r.creation_date.slice(0, 10)}` : ''}. `
-    + `Its registered legal address is ${address ?? 'not published'}.${hq} LEI registration status is ${r.registration_status ?? 'unknown'}, last updated ${String(r.last_update_date ?? '').slice(0, 10) || 'on an unknown date'}.${elsewhere}${others} ${DIRECTORS_NOTE}`;
+    + `Its registered legal address is ${address ?? 'not published'}.${r.registered_as ? ` Its registration number in the local business register is ${r.registered_as}.` : ''}${hq} LEI registration status is ${r.registration_status ?? 'unknown'}, last updated ${String(r.last_update_date ?? '').slice(0, 10) || 'on an unknown date'}.${elsewhere}${others} ${DIRECTORS_NOTE}`;
 
   res.json({
     status: 'ok',

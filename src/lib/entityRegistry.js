@@ -121,3 +121,47 @@ export async function lookupEntity(name, { fulltext = false } = {}) {
   lookupCache.set(cacheKey, result, CACHE_TTL_MS);
   return result;
 }
+
+// One LEI record read by its LEI, for a question that already names it ("Is
+// the legal entity Apple Inc. (LEI HWUPKR0MPOU8FGXBT394) active?"). Returns
+// null when GLEIF has no such LEI. Found in scored rounds 2026-11-21 to 11-23:
+// these questions fell through to a web search and scored 0.
+export async function lookupLei(lei) {
+  const id = String(lei ?? '').trim().toUpperCase();
+  if (!/^[A-Z0-9]{18}\d{2}$/.test(id)) throw new EntityRegistryLookupError(`'${lei}' is not a 20-character LEI`);
+  const cacheKey = `lei:${id}`;
+  const cached = lookupCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+  const res = await fetchWithTimeout(`${GLEIF_URL}/${id}`);
+  if (res.status === 404) {
+    lookupCache.set(cacheKey, null, CACHE_TTL_MS);
+    return null;
+  }
+  if (!res.ok) throw new EntityRegistryUpstreamError(`GLEIF returned HTTP ${res.status}`);
+  const body = await res.json().catch(() => null);
+  const r = body?.data;
+  if (!r) return null;
+  const e = r.attributes?.entity ?? {};
+  const g = r.attributes?.registration ?? {};
+  const record = {
+    lei: r.id ?? id,
+    legal_name: e.legalName?.name ?? null,
+    other_names: (e.otherNames ?? []).map((n) => n.name).filter(Boolean),
+    jurisdiction: e.jurisdiction ?? null,
+    legal_form: e.legalForm?.id ?? null,
+    registration_status: g.status ?? null,
+    entity_status: e.status ?? null,
+    legal_address: formatAddress(e.legalAddress),
+    legal_city: e.legalAddress?.city ?? null,
+    headquarters_address: formatAddress(e.headquartersAddress),
+    registered_as: e.registeredAs ?? null,
+    registered_at: e.registeredAt?.id ?? null,
+    creation_date: e.creationDate ?? null,
+    initial_registration_date: g.initialRegistrationDate ?? null,
+    last_update_date: g.lastUpdateDate ?? null,
+    next_renewal_date: g.nextRenewalDate ?? null,
+    managing_lou: g.managingLou ?? null,
+  };
+  lookupCache.set(cacheKey, record, CACHE_TTL_MS);
+  return record;
+}
