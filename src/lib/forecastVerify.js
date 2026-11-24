@@ -45,9 +45,31 @@ export function targetDate(text) {
   return all.length ? all.sort().at(-1) : null;
 }
 
+// Big US airports by ICAO code and name, mapped to their NOAA GHCN-Daily
+// station (each id checked against NOAA on 2026-11-24). Found 2026-11-23:
+// "the actual weather at John F. Kennedy International Airport" was geocoded
+// to a town in Utah.
+const AIRPORT_STATIONS = [
+  ['KJFK', /\b(?:JFK|John F\.? Kennedy)\b/i, 'USW00094789'], ['KLGA', /\bLa\s?Guardia\b/i, 'USW00014732'],
+  ['KEWR', /\bNewark\b.*\bairport\b|\bairport\b.*\bNewark\b/i, 'USW00014734'], ['KORD', /\bO'?Hare\b/i, 'USW00094846'],
+  ['KLAX', /\bLos Angeles International\b|\bLAX\b/, 'USW00023174'], ['KSFO', /\bSan Francisco International\b|\bSFO\b/, 'USW00023234'],
+  ['KATL', /\bHartsfield\b/i, 'USW00013874'], ['KDFW', /\bDFW\b|\bDallas[/ -]Fort Worth\b.*\bairport\b/i, 'USW00003927'],
+  ['KDEN', /\bDenver International\b/i, 'USW00003017'], ['KSEA', /\bSea-?Tac\b|\bSeattle[- ]Tacoma\b/i, 'USW00024233'],
+  ['KBOS', /\bLogan\b.*\bairport\b|\bBoston Logan\b/i, 'USW00014739'], ['KMIA', /\bMiami International\b/i, 'USW00012839'],
+  ['KPHX', /\bSky Harbor\b/i, 'USW00023183'], ['KIAH', /\bBush Intercontinental\b|\bHouston Intercontinental\b/i, 'USW00012960'],
+  ['KDCA', /\bReagan National\b/i, 'USW00013743'], ['KBWI', /\bBWI\b|\bBaltimore[- ]Washington\b/i, 'USW00093721'],
+  ['KMSP', /\bMinneapolis[- ]St\.? Paul International\b/i, 'USW00014922'], ['KDTW', /\bDetroit Metro/i, 'USW00094847'],
+  ['KSAN', /\bSan Diego International\b|\bLindbergh Field\b/i, 'USW00023188'], ['KPDX', /\bPortland International\b|\bPORTLAND INTL\b/i, 'USW00024229'],
+];
+
 export function ghcnStation(text) {
-  const m = String(text ?? '').match(/\b([A-Z]{2}[A-Z0-9]\d{8})\b/);
-  return m ? m[1] : null;
+  const s = String(text ?? '');
+  const m = s.match(/\b([A-Z]{2}[A-Z0-9]\d{8})\b/);
+  if (m) return m[1];
+  for (const [icao, re, id] of AIRPORT_STATIONS) {
+    if (new RegExp(`\\b${icao}\\b`).test(s) || re.test(s)) return id;
+  }
+  return null;
 }
 
 const STOP = new Set(['site-by-site', 'claims', 'our', 'did', 'verify', 'the', 'a', 'an', 'on', 'check', 'before', 'how', 'what', 'count',
