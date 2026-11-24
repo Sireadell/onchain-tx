@@ -110,9 +110,42 @@ function unquote(text) {
 
 // Reads {text, target} out of a whole instruction. Returns nulls for the
 // parts it could not find, so the caller can fall back to explicit params.
+// Prefix-then-colon requests the scorer sends: "I need this in German,
+// natural and accurate: <text>" or "I need an English translation of this
+// French statutory passage: <text>. Return a JSON object ...". The target is
+// the language that sits after in/into/to or right before "translation"; the
+// text is everything after the first colon, minus a trailing output-format
+// instruction.
+const FORMAT_TAIL_RE = /\s*\b(?:Return|Respond|Reply|Give|Output|Format)\b[^.]*\b(?:JSON|object|fields?|keys?)\b[^.]*\.?\s*$/i;
+function parseColonRequest(raw) {
+  const colon = raw.indexOf(':');
+  if (colon < 6 || colon > 200) return null;
+  const prefix = raw.slice(0, colon);
+  if (!/\b(translat\w*|in|into|to|version|rendering)\b/i.test(prefix)) return null;
+  const named = prefix.match(new RegExp(`\\b(?:in|into|to)\\s+${LANG_GROUP}`, 'i'))
+    ?? prefix.match(new RegExp(`\\b${LANG_GROUP}\\s+(?:translation|version|rendering)\\b`, 'i'));
+  if (!named) return null;
+  const target = normaliseLanguage(named[1]);
+  let text = raw.slice(colon + 1).replace(FORMAT_TAIL_RE, '').trim();
+  text = unquote(text);
+  if (!target || text.length < 2) return null;
+  const others = [...prefix.matchAll(new RegExp(`\\b(${LANGUAGE_ALT})\\b`, 'gi'))]
+    .map((m) => normaliseLanguage(m[1])).filter((l) => l && l !== target);
+  return others[0] ? { text, target, source: others[0] } : { text, target };
+}
+
+// A question that wraps a quoted phrase: "How do you translate 'See you
+// later' into Chinese?" The quoted part is the text, never the question.
+function quotedSpan(raw) {
+  const m = raw.match(/["“‘«]([^"”’»]{1,400}?)["”’»]/) ?? raw.match(/(?:^|\s)'([^']{1,400}?)'(?=[\s.,?!:;]|$)/);
+  return m ? m[1].trim() : null;
+}
+
 export function parseInstruction(input) {
   const raw = String(input ?? '').trim();
   if (!raw) return { text: null, target: null };
+  const colonReq = parseColonRequest(raw);
+  if (colonReq) return colonReq;
   for (const { re, order } of INSTRUCTION_PATTERNS) {
     const m = raw.match(re);
     if (!m) continue;
@@ -125,7 +158,7 @@ export function parseInstruction(input) {
   // Arabic."). Take the language and leave the text as it is; the model is
   // told to translate the quoted part only.
   const tail = raw.match(new RegExp(`\\b(?:in|into|to)\\s+${LANG_GROUP}\\s*[.?!]*$`, 'i'));
-  if (tail) return { text: raw, target: normaliseLanguage(tail[1]) };
+  if (tail) return { text: quotedSpan(raw) ?? raw, target: normaliseLanguage(tail[1]) };
   // "Can you translate the following phrase into German for me: 'The quick
   // brown fox ...'?", found refused live 2026-11-16: the language sits mid
   // sentence. Take it, and the quoted part as the text when there is one.
@@ -214,10 +247,20 @@ async function handleLanguageTranslation(req, res) {
   }
 
   const translation = unquote(result.text);
+  // When the question asks for a JSON object, the graded answer is that
+  // object, with the field names the question used.
+  const wantsJson = /\bJSON\b/i.test(capped.text);
+  const sourceLanguage = parsed.source ?? null;
+  const answer = wantsJson
+    ? JSON.stringify({ translation, source_language: sourceLanguage ?? 'auto-detected', target_language: target })
+    : undefined;
 
   res.json({
     text,
     target,
+    ...(sourceLanguage ? { source_language: sourceLanguage } : {}),
+    target_language: target,
+    ...(answer ? { answer } : {}),
     status: 'ok',
     summary: capped.truncated
       ? `${translation} (The text was longer than ${text.length} characters; only the first part was translated.)`

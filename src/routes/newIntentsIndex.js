@@ -1,6 +1,7 @@
 // One list of the added intents: URL path, canonical intent name, router, description.
 import * as n from './newIntents.js';
 import * as d from './newData.js';
+import { mediaForensicRouter, mediaAuthenticityFactsRouter } from './mediaForensicRoute.js';
 
 export const NEW_INTENTS = [
   ['/entity-extraction', 'ENTITY_EXTRACTION', n.entityExtractionRouter, 'Extracts people, organizations, places, dates, amounts and products named in a text. Params: text, or the whole request as query.'],
@@ -13,8 +14,8 @@ export const NEW_INTENTS = [
   ['/plagiarism-detection', 'PLAGIARISM_DETECTION', n.plagiarismRouter, 'Checks a text for plagiarism against an optional source and gives an overlap estimate. Params: text, source.'],
   ['/document-authenticity', 'DOCUMENT_AUTHENTICITY', n.documentAuthenticityRouter, 'Judges whether a document looks authentic or forged. Params: document, or query.'],
   ['/sla-compliance', 'SLA_COMPLIANCE', n.slaComplianceRouter, 'Checks measured service data against SLA terms and states whether each target was met. Params: sla, metrics, or query.'],
-  ['/media-forensic', 'MEDIA_FORENSIC_VERIFY', n.mediaForensicRouter, 'Judges whether an image, video or audio item was manipulated, from its description, metadata and context. Params: media, or query.'],
-  ['/media-authenticity', 'MEDIA_AUTHENTICITY_CHECK', n.mediaAuthenticityRouter, 'Checks whether media is original and correctly captioned. Params: media, claim, or query.'],
+  ['/media-forensic', 'MEDIA_FORENSIC_VERIFY', mediaForensicRouter, 'Judges whether an image, video or audio item was manipulated, from its description, metadata and context. Params: media, or query.'],
+  ['/media-authenticity', 'MEDIA_AUTHENTICITY_CHECK', mediaAuthenticityFactsRouter, 'Checks whether media is original and correctly captioned. Params: media, claim, or query.'],
   ['/image-verification', 'IMAGE_VERIFICATION', n.imageVerificationRouter, 'Verifies the claim made about an image. Params: image, claim, or query.'],
   ['/video-verification', 'VIDEO_VERIFICATION', n.videoVerificationRouter, 'Verifies the claim made about a video. Params: video, claim, or query.'],
   ['/deepfake-detection', 'DEEPFAKE_DETECTION', n.deepfakeRouter, 'Rates the likelihood that media is a deepfake from its source and description. Params: media, or query.'],
