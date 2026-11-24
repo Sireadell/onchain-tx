@@ -7,6 +7,7 @@ import { RpcBudgetExceededError } from './ankrRpc.js';
 import { respondUnusableInput } from './unusableInput.js';
 import { freeTextParam, firstUsableValue } from './entityExtract.js';
 import { getCoinPrice } from './defiLlamaApi.js';
+import { fetchSolanaHolderCount } from './solanaHolders.js';
 import {
   extractSolanaAddresses,
   extractSolanaSignature,
@@ -234,10 +235,32 @@ export async function answerSolanaHolders(params, res) {
   }
   try {
     const supply = await solanaGetTokenSupply(mint);
-    let top = null;
-    try { top = await solanaGetTokenLargest(mint); } catch { top = null; }
     const symbol = known?.symbol ?? null;
     const label = symbol ?? mint;
+    const counted = await fetchSolanaHolderCount(mint);
+    if (counted) {
+      const n = counted.count;
+      const summary = `${label} (${mint}) has ${numberWithCommas(String(n))} holders on ${LABEL}, according to the ${counted.source}.`;
+      return res.json({
+        chain: CHAIN,
+        token: mint,
+        status: 'ok',
+        verdict: 'found',
+        found: true,
+        summary,
+        answer: summary,
+        confidence: 1.0,
+        canonical: [CHAIN, mint, n].join(':'),
+        holders_count: n,
+        holders_source: counted.source,
+        token_symbol: symbol,
+        decimals: supply.decimals,
+        total_supply: supply.uiAmountString ?? formatTokenAmount(supply.amount, supply.decimals),
+        as_of,
+      });
+    }
+    let top = null;
+    try { top = await solanaGetTokenLargest(mint); } catch { top = null; }
     let concentration = null;
     let concentrationText = '';
     if (Array.isArray(top) && top.length && BigInt(supply.amount) > 0n) {

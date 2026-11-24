@@ -2,6 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildApp } from '../app.js';
 import { resetSolanaCache } from '../lib/solanaRpc.js';
+import { resetHolderCache } from '../lib/solanaHolders.js';
+
+// What the mocked token index returns: null = no match, 'down' = unreachable, or a row list.
+let holderMock = null;
 
 const WALLET = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
 const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
@@ -18,6 +22,7 @@ function startServer(t) {
 // handlers: { method: (params) => result | { error } }
 function mockSolana(t, handlers) {
   resetSolanaCache();
+  resetHolderCache();
   const prev = process.env.SOLANA_RPC_URL;
   process.env.SOLANA_RPC_URL = MOCK_URL;
   const original = globalThis.fetch;
@@ -32,6 +37,10 @@ function mockSolana(t, handlers) {
       return { ok: true, status: 200, text: async () => JSON.stringify(body) };
     }
     if (typeof url === 'string' && url.includes('coins.llama.fi')) throw new Error('no price in tests');
+    if (typeof url === 'string' && url.includes('lite-api.jup.ag')) {
+      if (holderMock === 'down') throw new Error('jupiter down in tests');
+      return { ok: true, status: 200, json: async () => holderMock ?? [] };
+    }
     return original(url, init);
   };
   t.after(() => {
@@ -142,6 +151,40 @@ test('solana holders: never states a count, says why, adds concentration', async
   assert.match(body.summary, /not a holder count/);
   assert.equal(body.top_accounts.share_of_supply_percent, 50);
   assert.equal(body.canonical, `solana:${WSOL}:-`);
+});
+
+test('solana holders: states the count when the token index has one for this mint', async (t) => {
+  holderMock = [{ id: 'OtherMint', holderCount: 5 }, { id: WSOL, holderCount: 3820662 }];
+  t.after(() => { holderMock = null; });
+  mockSolana(t, { getTokenSupply: () => ({ value: { amount: '1000000000000', decimals: 9, uiAmountString: '1000' } }) });
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/token-holders?question=${encodeURIComponent(`How many holders does ${WSOL} have on Solana?`)}`)).json();
+  assert.equal(body.holders_count, 3820662);
+  assert.equal(body.found, true);
+  assert.equal(body.verdict, 'found');
+  assert.equal(body.canonical, `solana:${WSOL}:3820662`);
+  assert.match(body.summary, /3,820,662 holders on Solana/);
+  assert.equal(body.holders_source, 'Jupiter token index');
+});
+
+test('solana holders: ignores a row for a different mint and a zero count', async (t) => {
+  holderMock = [{ id: 'OtherMint', holderCount: 9 }, { id: WSOL, holderCount: 0 }];
+  t.after(() => { holderMock = null; });
+  mockSolana(t, { getTokenSupply: () => ({ value: { amount: '1000000000000', decimals: 9, uiAmountString: '1000' } }) });
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/token-holders?token=${WSOL}&chain=solana`)).json();
+  assert.equal(body.holders_count, null);
+  assert.equal(body.verdict, 'unavailable');
+});
+
+test('solana holders: falls back to the plain answer when the token index is down', async (t) => {
+  holderMock = 'down';
+  t.after(() => { holderMock = null; });
+  mockSolana(t, { getTokenSupply: () => ({ value: { amount: '1000000000000', decimals: 9, uiAmountString: '1000' } }) });
+  const base = startServer(t);
+  const body = await (await fetch(`${base}/token-holders?token=${WSOL}&chain=solana`)).json();
+  assert.equal(body.holders_count, null);
+  assert.equal(body.verdict, 'unavailable');
 });
 
 test('solana holders: not a mint', async (t) => {
