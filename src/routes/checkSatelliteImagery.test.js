@@ -77,3 +77,14 @@ test('satellite: an NDVI question is answered from MODIS end to end', async (t) 
   assert.equal(body.ndvi_year_ago, 0.5);
   assert.match(body.summary, /is 0.60/);
 });
+
+test('scene window reads the dates a question compares', async () => {
+  const { sceneWindow, datesIn } = await import('./checkSatelliteImagery.js');
+  assert.equal(datesIn('captured on or after October 26, 2023').length, 1);
+  const w = sceneWindow('Sentinel-2 imagery captured on or after October 26, 2023, compared to the previous month');
+  assert.equal(new Date(w.after).toISOString().slice(0, 10), '2023-10-26');
+  assert.equal(new Date(w.compareTo).toISOString().slice(0, 10), '2023-09-26');
+  const s = sceneWindow('changes in urban development since January 1st, 2023');
+  assert.equal(new Date(s.compareTo).toISOString().slice(0, 10), '2023-01-01');
+  assert.equal(s.after, null);
+});

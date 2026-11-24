@@ -10,6 +10,8 @@
 import { Router } from 'express';
 import { firstUsableValue, freeTextParam } from '../lib/entityExtract.js';
 import { getJson, upstreamDown, paramsOf } from '../lib/liveJson.js';
+import { lookupShip, shipNameIn, identitySentence } from '../lib/shipRegistry.js';
+import { aisEnabled, startAis, trackShip, shipByMmsi, shipByName } from '../lib/aisLive.js';
 
 const router = Router();
 const BASE = 'https://meri.digitraffic.fi/api/ais/v1';
@@ -155,24 +157,118 @@ function respondNotFound(res, mmsi, imo, reason) {
   });
 }
 
+// A ship known from the open register but not heard on any AIS feed read
+// here: it is named and identified, and the missing position is said plainly.
+function respondRegistryOnly(res, reg, note) {
+  const tracking = aisEnabled() && reg.mmsi ? ' The worldwide AIS feed is now following it by MMSI, so a position is given once a shore receiver hears it.' : '';
+  const summary = `${identitySentence(reg)}. No live AIS position is available: ${note}${tracking} Its current position, speed and destination are therefore not given rather than guessed.`;
+  return res.json({
+    summary,
+    status: 'ok',
+    found: true,
+    confidence: 0.7,
+    canonical: `vessel-telemetry:${reg.mmsi ?? reg.imo ?? reg.name}`,
+    mmsi: reg.mmsi ? Number(reg.mmsi) : null,
+    name: reg.name,
+    imo: reg.imo ? Number(reg.imo) : null,
+    call_sign: null,
+    ship_type: reg.ship_type,
+    flag: reg.flag,
+    operator: reg.operator,
+    length_m: reg.length_m,
+    gross_tonnage: reg.gross_tonnage,
+    draught_m: null,
+    destination: null,
+    eta: null,
+    ...NO_POSITION,
+    position_available: false,
+    source: `Wikidata ship register (${reg.wikidata_id}); AIS: ${aisEnabled() ? 'aisstream.io and ' : ''}Digitraffic (Fintraffic)`,
+    checked_at: new Date().toISOString(),
+  });
+}
+
+function respondAisLive(res, s, reg) {
+  const seen = new Date(s.t).toISOString();
+  const navStatus = navigationalStatus(s.nav);
+  const ageMin = Math.round((Date.now() - s.t) / 60000);
+  const name = s.name ?? reg?.name ?? null;
+  const summary = `${name ?? `Vessel ${s.mmsi}`} (MMSI ${s.mmsi}${s.imo ?? reg?.imo ? `, IMO ${s.imo ?? reg.imo}` : ''}) was at ${s.lat.toFixed(4)}, ${s.lon.toFixed(4)} at ${seen.slice(0, 16).replace('T', ' ')} UTC (${ageMin} min ago${ageMin > 360 ? ', stale' : ''}), speed ${s.sog ?? 'n/a'} knots, course ${s.cog ?? 'n/a'} degrees${s.heading != null ? `, heading ${s.heading}` : ''}${navStatus ? `, ${navStatus}` : ''}${s.draught ? `, draught ${s.draught} m` : ''}${s.destination ? `, destination ${s.destination}` : ''}${s.eta ? `, ETA ${s.eta} UTC` : ''}. Source: live terrestrial AIS (aisstream.io).`;
+  return res.json({
+    summary,
+    status: 'ok',
+    found: true,
+    confidence: ageMin > 360 ? 0.6 : 0.9,
+    canonical: `vessel-telemetry:${s.mmsi}`,
+    mmsi: Number(s.mmsi),
+    name,
+    imo: s.imo ? Number(s.imo) : reg?.imo ? Number(reg.imo) : null,
+    ship_type: s.shipType != null ? shipTypeName(s.shipType) : reg?.ship_type ?? null,
+    flag: reg?.flag ?? null,
+    draught_m: s.draught ?? null,
+    destination: s.destination ?? null,
+    eta: s.eta ?? null,
+    latitude: s.lat,
+    longitude: s.lon,
+    speed_knots: s.sog,
+    course_deg: s.cog,
+    heading_deg: s.heading,
+    navigational_status: navStatus,
+    position_time: seen,
+    observed_at: seen,
+    position_available: true,
+    stale: ageMin > 360,
+    source: 'aisstream.io live AIS',
+    checked_at: new Date().toISOString(),
+  });
+}
+
 async function handle(req, res) {
+  startAis();
   const params = paramsOf(req);
   const raw = firstUsableValue(params.mmsi, params.vessel, params.ship, params.id, params.imo);
   const text = freeTextParam(params);
   let mmsi = parseMmsi(raw, text);
   let imo = null;
+  let reg = null;
   if (!mmsi) {
     imo = parseImo(raw, text);
     if (!imo) {
-      return respondNotFound(res, null, null, `No ship can be identified from ${raw != null ? `"${String(raw).slice(0, 60)}"` : 'this request'}: a ship is named by its 9 digit MMSI (for example 230629000) or its 7 digit IMO number. Coverage is the AIS network around Finland and the Baltic, so no details are given rather than guessed.`);
+      const name = shipNameIn(text) ?? (raw != null && !/^\d+$/.test(String(raw)) ? String(raw).trim() : null);
+      if (!name) {
+        return respondNotFound(res, null, null, `No ship can be identified from ${raw != null ? `"${String(raw).slice(0, 60)}"` : 'this request'}: name the ship, or give its 9 digit MMSI (for example 230629000) or 7 digit IMO number. No details are given rather than guessed.`);
+      }
+      const heard = aisEnabled() ? shipByName(name) : null;
+      let registryDown = false;
+      reg = await lookupShip({ name }).catch(() => { registryDown = true; return null; });
+      if (heard?.t) return respondAisLive(res, heard, reg);
+      if (!reg || !(reg.mmsi || reg.imo)) {
+        const why = registryDown ? 'the open ship register (Wikidata) did not respond in time, and the AIS feeds read here have not heard it' : 'it could not be matched to a ship in the open ship register (Wikidata) or the AIS feeds read here';
+        return respondNotFound(res, null, null, `"${name.slice(0, 60)}": ${why}, so no position or details are given rather than guessed. Give its 9 digit MMSI or 7 digit IMO number for a direct lookup.`);
+      }
+      mmsi = reg.mmsi;
+      imo = reg.imo;
     }
+  }
+  if (mmsi && aisEnabled()) {
+    trackShip(mmsi);
+    const heard = shipByMmsi(mmsi);
+    if (heard?.t) return respondAisLive(res, heard, reg);
+  }
+  if (!mmsi) {
     try {
       mmsi = await imoToMmsi(imo);
     } catch {
-      return respondNotFound(res, null, imo, `IMO ${imo} could not be matched to a ship because the vessel register for Finland and the Baltic did not respond. No details are given rather than guessed.`);
+      mmsi = null;
     }
     if (!mmsi) {
-      return respondNotFound(res, null, imo, `IMO ${imo} is not in the Finland and Baltic AIS vessel register, so there is no name, position, draught or destination to report. That does not mean the ship does not exist elsewhere.`);
+      reg = reg ?? await lookupShip({ imo }).catch(() => null);
+      const named = shipNameIn(text);
+      if (!reg && named) reg = await lookupShip({ name: named }).catch(() => null);
+      if (reg) {
+        if (reg.mmsi && aisEnabled()) trackShip(reg.mmsi);
+        return respondRegistryOnly(res, reg, 'it is not in the Finland and Baltic AIS register, the only open live AIS feed read here.');
+      }
+      return respondNotFound(res, null, imo, `IMO ${imo} is not in the Finland and Baltic AIS vessel register or the open ship register (Wikidata), so there is no name, position, draught or destination to report. That does not mean the ship does not exist elsewhere.`);
     }
   }
 
@@ -188,6 +284,7 @@ async function handle(req, res) {
   const f = loc?.features?.[0];
 
   if (!f) {
+    if (reg && !(m.name || m.call_sign)) return respondRegistryOnly(res, reg, 'the open live AIS feed read here (Finland and the Baltic, Digitraffic) has not heard it.');
     if (!(m.name || m.imo || m.call_sign)) {
       return respondNotFound(res, mmsi, imo, `Vessel ${mmsi} is not in the AIS network I can read (Finland and the Baltic), so there is no position or registered detail to report. That does not mean it is not at sea elsewhere.`);
     }

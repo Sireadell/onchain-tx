@@ -7,6 +7,7 @@
 import { Router } from 'express';
 import { firstUsableValue, freeTextParam } from '../lib/entityExtract.js';
 import { getJson, upstreamDown, paramsOf } from '../lib/liveJson.js';
+import { aisEnabled, aisStatus, startAis, findAisPort, portCongestion } from '../lib/aisLive.js';
 
 const router = Router();
 
@@ -59,16 +60,59 @@ export function congestionLevel(inPort, expected) {
   return load < 10 ? 'low' : load < 25 ? 'moderate' : 'high';
 }
 
+// Live AIS counts around a major port (only when the worldwide feed is on).
+function respondAisPort(res, p) {
+  const c = portCongestion(p);
+  const st = aisStatus();
+  const thin = c.in_area < 5;
+  const level = thin ? 'unknown' : c.waiting_at_anchor >= Math.max(10, c.moored) ? 'high' : c.waiting_at_anchor >= Math.max(4, c.moored / 2) ? 'moderate' : 'low';
+  const waitText = c.avg_wait_hours_so_far != null ? ` Ships now at anchor have waited ${c.avg_wait_hours_so_far} h on average so far (longest ${c.longest_wait_hours_so_far} h; capped by ${c.observed_hours} h of continuous observation).` : '';
+  const summary = thin
+    ? `${p.port} (${p.unlocode}): only ${c.in_area} seagoing cargo ships and tankers heard within ${p.km} km in the last 2 hours, too few for a reliable congestion figure (shore AIS coverage is thin there). No queue or berth figures are given rather than estimated.`
+    : `${p.port} (${p.unlocode}) right now: ${c.waiting_at_anchor} seagoing cargo ships and tankers waiting at anchor, ${c.moored} moored at berth and ${c.underway} under way, out of ${c.in_area} heard within ${p.km} km in the last 2 hours.${waitText} Moored share of ships at berth or anchor (a berth occupancy proxy): ${Math.round((c.berth_occupancy_proxy ?? 0) * 100)}%. Congestion is ${level}. Source: live terrestrial AIS (aisstream.io), AIS types 70 to 89, 80 m or longer when size is known.`;
+  return res.json({
+    summary,
+    status: thin ? 'not_found' : 'ok',
+    found: !thin,
+    confidence: thin ? 0.5 : 0.8,
+    canonical: `port-congestion:${p.unlocode}`,
+    port: p.port,
+    unlocode: p.unlocode,
+    vessels_waiting: thin ? null : c.waiting_at_anchor,
+    waiting_at_anchor: thin ? null : c.waiting_at_anchor,
+    vessels_moored: thin ? null : c.moored,
+    vessels_in_area: c.in_area,
+    wait_hours: thin ? null : c.avg_wait_hours_so_far,
+    berth_occupancy_proxy: thin ? null : c.berth_occupancy_proxy,
+    congestion_level: level,
+    as_of: new Date().toISOString(),
+    observed_hours: c.observed_hours,
+    feed_messages: st.messages,
+    source: 'aisstream.io live AIS',
+    checked_at: new Date().toISOString(),
+  });
+}
+
 async function handle(req, res) {
+  startAis();
   const params = paramsOf(req);
   const raw = firstUsableValue(params.port, params.locode, params.port_name, params.harbor);
   const code = resolvePort(raw, freeTextParam(params));
+  const major = !code ? findAisPort(`${raw ?? ''} ${freeTextParam(params) ?? ''}`) : null;
+  if (major && aisEnabled() && aisStatus().messages > 0) return respondAisPort(res, major);
   if (!code) {
     const text = freeTextParam(params);
     const named = text?.match(/(?:\b[Pp]ort of|\b(?:at|in|for))\s+(?:the\s+)?(?:[Pp]ort of\s+)?([A-Z][A-Za-z'-]+(?:\s+[A-Z][A-Za-z'-]+)?)/)?.[1];
-    const asked = String(raw ?? named ?? 'That port').trim().slice(0, 80) || 'That port';
+    const asked = String(major?.port ?? raw ?? named ?? 'That port').trim().slice(0, 80) || 'That port';
+    const why = major
+      ? `${asked}${major ? ` (${major.unlocode})` : ''} needs a worldwide live AIS feed to count ships waiting at anchor and at berth, and that feed is not connected right now; the open port-call register read here covers Finnish ports only`
+      : `${asked} is outside the open port-call register this service reads, which covers Finnish ports only (Helsinki, Turku, Hamina-Kotka, Rauma, Pori, Kokkola, Oulu, Kemi, Kaskinen, Vaasa, Naantali, Porvoo)`;
     return res.json({
-      summary: `${asked} is outside the open port-call register this service reads, which covers Finnish ports only (Helsinki, Turku, Hamina-Kotka, Rauma, Pori, Kokkola, Oulu, Kemi, Kaskinen, Vaasa, Naantali, Porvoo), so no berth or queue figures are given rather than estimated.`,
+      summary: `${why}, so no vessels-waiting, waiting-time or berth-occupancy figures are given rather than estimated.`,
+      vessels_waiting: null,
+      wait_hours: null,
+      berth_occupancy_proxy: null,
+      unlocode: major?.unlocode ?? null,
       status: 'not_found',
       found: false,
       confidence: 0.6,

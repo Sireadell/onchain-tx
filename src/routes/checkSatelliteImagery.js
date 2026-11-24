@@ -12,6 +12,7 @@ import { getJson, upstreamDown, paramsOf } from '../lib/liveJson.js';
 import { resolveLocation, osmLookup } from '../lib/weatherForecast.js';
 import { parseCoordinates } from '../lib/questionParse.js';
 import { landCover, ndvi, MODIS_SOURCE } from '../lib/modisLand.js';
+import { sceneReport, S2_SOURCE } from '../lib/sentinel2.js';
 
 const router = Router();
 
@@ -27,7 +28,7 @@ export function readPoint(params, text) {
 // The place a question is about: "around the Hoover Dam", "of the downtown
 // Seattle area", "Tesla Gigafactory in Austin, Texas". Most specific first,
 // then the part after " in " ("Austin, Texas") as a broader fallback.
-const PLACE_RE = /\b(?:around|of|at|near|over|for|in)\s+(?:the\s+)?(?:new\s+|recent\s+|downtown\s+)?([A-Z][\w.'-]*(?:[\s,]+(?:of\s+|de\s+)?[A-Z][\w.'-]*)*)/g;
+const PLACE_RE = /\b(?:around|of|at|near|over|for|in|surrounding|covering|across)\s+(?:the\s+)?(?:new\s+|recent\s+|downtown\s+)?([A-Z][\w.'-]*(?:[\s,]+(?:of\s+|de\s+)?[A-Z][\w.'-]*)*)/g;
 
 export function placePhrases(text) {
   const out = [];
@@ -43,10 +44,14 @@ export function placePhrases(text) {
   for (const m of src.matchAll(PLACE_RE)) {
     // "Tesla Gigafactory in Austin, Texas": the name alone matched the
     // Berlin plant, so the "in <place>" that follows comes first.
-    const after = src.slice(m.index + m[0].length).match(/^\s+in\s+([A-Z][\w.'-]*(?:,?\s+[A-Z][\w.'-]*)*)/);
+    // Also "the new Amazon fulfillment center in Goodyear, Arizona" and
+    // "Elm Street and Maple Avenue in Springfield, Illinois": "Amazon" alone
+    // geocoded to Minnesota (2026-11-22), so the town after "in" leads.
+    const after = src.slice(m.index + m[0].length).match(/^[^.?;]{0,45}?\s+in\s+([A-Z][\w.'-]*(?:,?\s+[A-Z][\w.'-]*)*)/);
     if (after) {
       // "Tesla Gigafactory Berlin" geocodes to the plant; the comma form
       // found nothing and fell back to the city centre (2026-11-19).
+      if (after[1].includes(',')) push(`${m[1]}, ${after[1]}`);
       push(`${m[1]} ${after[1].split(',')[0]}`);
       push(`${m[1]}, ${after[1]}`);
       push(after[1]);
@@ -123,6 +128,63 @@ async function cachedModis(key, fn) {
 }
 
 const SENSOR_RE = /\b(Sentinel-?\d[A-C]?|Landsat\s*\d+|Planet(?: Labs)?|Maxar|WorldView-?\d|SPOT\s*\d)\b/i;
+const EVENT_RE = /\b(?:flood|flooding|wildfire|fire|storm|cyclone|hurricane|typhoon|volcan|eruption|landslide|severe weather|drought|dust)\w*/i;
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+// Dates named in the question, in order: "October 26, 2023", "January 1st,
+// 2024", "January 2023", "2025-09-26".
+export function datesIn(text) {
+  const t = String(text ?? '');
+  const out = [];
+  const re = /\b(20\d{2})-(\d{2})-(\d{2})\b|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(?:(\d{1,2})(?:st|nd|rd|th)?,?\s+)?(20\d{2})\b/gi;
+  for (const m of t.matchAll(re)) {
+    const d = m[1] ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : Date.UTC(+m[6], MONTHS.indexOf(m[4].toLowerCase().slice(0, 3)), m[5] ? +m[5] : 1);
+    out.push({ at: d, index: m.index });
+  }
+  return out;
+}
+
+// Which scene to read and what to compare it with.
+export function sceneWindow(text, now = Date.now()) {
+  const t = String(text ?? '');
+  const ds = datesIn(t);
+  const day = 86400e3;
+  let after = null;
+  let compareTo = null;
+  let label = 'the same season a year earlier';
+  if (/\bbetween\b/i.test(t) && ds.length >= 2) {
+    after = ds[ds.length - 1].at; compareTo = ds[0].at; label = `the scene nearest ${new Date(compareTo).toISOString().slice(0, 10)}`;
+  } else if (/on or after|captured (?:on|after)|after\b/i.test(t) && ds.length) {
+    after = ds[0].at;
+    if (/previous month|month before/i.test(t)) { compareTo = after - 30 * day; label = 'the month before'; }
+  } else if (/\bsince\b/i.test(t) && ds.length) {
+    compareTo = ds[0].at; label = `the scene nearest ${new Date(compareTo).toISOString().slice(0, 10)}`;
+  } else if (/previous month|last month|a month ago/i.test(t)) { compareTo = now - 30 * day; label = 'about a month earlier'; }
+  else if (/(?:six|6) months/i.test(t)) { compareTo = now - 182 * day; label = 'about six months earlier'; }
+  else if (/(?:three|3) months/i.test(t)) { compareTo = now - 91 * day; label = 'about three months earlier'; }
+  else if (/last week|past week|this week/i.test(t)) { compareTo = now - 14 * day; label = 'about two weeks earlier (Sentinel-2 passes every 5 days)'; }
+  else if (ds.length) { after = ds[0].at; }
+  return { after, compareTo, label };
+}
+
+const idx = (i) => (i ? `NDVI ${i.ndvi?.mean ?? 'n/a'}, built-up index (NDBI) ${i.ndbi?.mean ?? 'n/a'}, water index (NDWI) ${i.ndwi?.mean ?? 'n/a'}` : 'indexes not available');
+
+export function sceneSummary(point, rep, text, label) {
+  const L = rep.latest;
+  const parts = [`Sentinel-2 scene ${L.id} (${String(L.platform ?? '').toUpperCase() || 'Sentinel-2'}, tile ${L.tile ?? 'n/a'}) captured ${L.datetime.slice(0, 16).replace('T', ' ')} UTC with ${L.cloud_cover}% cloud covers ${placeLabel(point)}. Over a ${rep.box_km} km square around the point (10 m pixels): ${idx(L.indexes)}.`];
+  if (rep.baseline) {
+    const B = rep.baseline;
+    parts.push(`Compared with ${label}, scene ${B.id} from ${B.datetime.slice(0, 10)} (${B.cloud_cover}% cloud): ${idx(B.indexes)}.`);
+    const mDiff = Math.abs(new Date(L.datetime).getUTCMonth() - new Date(B.datetime).getUTCMonth());
+    if (Math.min(mDiff, 12 - mDiff) >= 3) parts.push('The two scenes are from different seasons, so part of any vegetation change is seasonal.');
+    if (rep.change) parts.push(`Change: NDVI ${rep.change.ndvi_change >= 0 ? '+' : ''}${rep.change.ndvi_change}, NDBI ${rep.change.ndbi_change >= 0 ? '+' : ''}${rep.change.ndbi_change}, NDWI ${rep.change.ndwi_change >= 0 ? '+' : ''}${rep.change.ndwi_change}, so ${rep.change.text}.`);
+  } else {
+    parts.push('No clear comparison scene was found for the period asked, so no change is claimed.');
+  }
+  if (/construction|structure|building|earthmov|new development/i.test(text)) parts.push('This measures surfaces, not objects: at 10 m it shows clearing and new hard surfaces, but cannot outline or count individual buildings.');
+  parts.push('Index guide: NDVI above 0.6 is dense vegetation and below 0.2 is bare ground, water or pavement; NDBI above 0 points to built-up or bare surfaces; NDWI above 0 is open water.');
+  return parts.join(' ');
+}
 const placeLabel = (point) => (point.place ? `${point.place} (${point.lat}, ${point.lon})` : `${point.lat}, ${point.lon}`);
 const pct = (n) => `${Number.isInteger(n) ? n : n.toFixed(1)}%`;
 const pts = (n) => `${n > 0 ? '+' : ''}${n} points`;
@@ -176,6 +238,37 @@ async function handle(req, res) {
   if (!point) return respondUnusableInput(res, 'Send lat and lon (for example lat=34.05 lon=-118.24) to analyse satellite-visible events near a point.');
   // NDVI and land cover questions get measured MODIS values for the point.
   const kind = questionKind(text);
+  // Scene, construction and change questions, and anything naming
+  // Sentinel-2, get a real Sentinel-2 scene with measured indexes.
+  const sentinel = /sentinel|copernicus|esa\b/i.test(text ?? '');
+  const useS2 = (kind === 'ndvi' && sentinel) || (kind === 'land' && (sentinel || /\bmonths?\b|\bweeks?\b/i.test(text))) || (!kind && !EVENT_RE.test(text ?? ''));
+  if (useS2) {
+    const asked = Number(firstUsableValue(params.radius_km, params.radius)) || radiusKmOf(text);
+    const km = asked ? Math.min(Math.max(asked * 2, 1), 6) : (/construction|structure|building|site\b/i.test(text) ? 1 : 2);
+    const w = sceneWindow(text);
+    try {
+      const rep = await cachedModis(`s2:${point.lat},${point.lon},${km},${w.after},${w.compareTo}`, () => sceneReport(point.lat, point.lon, { km, after: w.after, compareTo: w.compareTo }));
+      if (rep?.latest?.indexes?.ndvi) {
+        let summary = sceneSummary(point, rep, text, w.label);
+        if (kind === 'land') {
+          const lc = await cachedModis(`lc:${point.lat},${point.lon},5,null,null`, () => landCover(point.lat, point.lon, { km: 5 })).catch(() => null);
+          if (lc) summary += ` Land cover context: ${landSummary(point, lc, '').replace(/^Land cover/, 'land cover')}`;
+        }
+        return res.json({
+          status: 'ok', summary, answer: summary, confidence: 0.85,
+          canonical: `satellite-imagery:s2:${rep.latest.id}`,
+          latitude: point.lat, longitude: point.lon, place: point.place ?? null,
+          scene_id: rep.latest.id, scene_datetime: rep.latest.datetime, cloud_cover_percent: rep.latest.cloud_cover,
+          ndvi: rep.latest.indexes.ndvi?.mean ?? null, ndbi: rep.latest.indexes.ndbi?.mean ?? null, ndwi: rep.latest.indexes.ndwi?.mean ?? null,
+          baseline_scene_id: rep.baseline?.id ?? null, baseline_datetime: rep.baseline?.datetime ?? null,
+          change: rep.change, box_km: rep.box_km,
+          product: 'Sentinel-2 L2A', source: S2_SOURCE, checked_at: new Date().toISOString(),
+        });
+      }
+    } catch {
+      // Planetary Computer down or slow: fall through to MODIS or the event answer.
+    }
+  }
   if (kind) {
     const askedKm = Number(firstUsableValue(params.radius_km, params.radius)) || radiusKmOf(text);
     try {
@@ -216,16 +309,24 @@ async function handle(req, res) {
 
   const radius = Math.min(Math.max(Number(firstUsableValue(params.radius_km, params.radius)) || 300, 10), 2000);
   let events;
+  // A dated event question ("around 2025-09-26") searches that window,
+  // closed events included, instead of only what is open today.
+  const asked = datesIn(text)[0]?.at ?? null;
+  const fmtDay = (ms) => new Date(ms).toISOString().slice(0, 10);
+  const eonetUrl = asked
+    ? `https://eonet.gsfc.nasa.gov/api/v3/events?status=all&start=${fmtDay(asked - 15 * 86400e3)}&end=${fmtDay(asked + 15 * 86400e3)}&limit=500`
+    : 'https://eonet.gsfc.nasa.gov/api/v3/events?status=open&days=30&limit=200';
   try {
-    events = (await getJson('https://eonet.gsfc.nasa.gov/api/v3/events?status=open&days=30&limit=200', { timeoutMs: 15000 })).events ?? [];
+    events = (await getJson(eonetUrl, { timeoutMs: 15000 })).events ?? [];
   } catch (err) {
     return upstreamDown(res, 'The NASA event source', err);
   }
   const near = nearbyEvents(events, point, radius);
   const imageDate = new Date(Date.now() - 86400e3).toISOString().slice(0, 10);
+  const windowText = asked ? `between ${fmtDay(asked - 15 * 86400e3)} and ${fmtDay(asked + 15 * 86400e3)}` : 'in the last 30 days';
   const lead = near.length
-    ? `${near.length} open natural event${near.length > 1 ? 's' : ''} within ${radius} km: ${near.slice(0, 3).map((e) => `${e.title} (${e.category}, ${e.distance_km} km)`).join('; ')}.`
-    : `No open NASA-tracked natural events (wildfire, storm, flood, volcano) within ${radius} km in the last 30 days.`;
+    ? `${near.length} NASA-tracked natural event${near.length > 1 ? 's' : ''} within ${radius} km ${windowText}: ${near.slice(0, 3).map((e) => `${e.title} (${e.category}, ${e.distance_km} km, last seen ${String(e.last_seen).slice(0, 10)})`).join('; ')}.`
+    : `No NASA-tracked natural events (wildfire, storm, flood, volcano) within ${radius} km ${windowText}. NASA EONET lists larger events only, so a local flood can still have happened without an entry.`;
   res.json({
     status: 'ok',
     summary: `Near ${point.place ? `${point.place} (${point.lat}, ${point.lon})` : `${point.lat}, ${point.lon}`}: ${lead} Latest NASA GIBS true-colour imagery is dated ${imageDate}. No image classification was run.`,
