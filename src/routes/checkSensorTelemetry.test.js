@@ -51,13 +51,13 @@ test('sensor: an in-range question answers Within range', async (t) => {
   assert.equal(body.reading, 22);
 });
 
-test('sensor: garbage value and timestamp (N/A) still get an Insufficient information answer', async (t) => {
+test('sensor: garbage value and timestamp (N/A) get a plain Not verified answer', async (t) => {
   const base = startServer(t);
   const body = await get(base, { sensor_id: 'LAX_TEMP', value: 'N/A', timestamp: 'N/A', secret: 'N/A', signature: 'N/A' });
   assert.equal(body.status, 'ok');
   assert.notEqual(body.status, 'invalid_input');
-  assert.equal(body.verdict, 'Insufficient information');
-  assert.match(body.summary, /^Insufficient information\./);
+  assert.equal(body.verdict, 'Not verified');
+  assert.match(body.summary, /^Not verified\./);
   assert.ok(body.checks.not_performed.length >= 2);
 });
 
@@ -65,14 +65,14 @@ test('sensor: unknown value and timestamp words are answered, not refused', asyn
   const base = startServer(t);
   const body = await get(base, { sensor_id: 'rooftop_unit_123_main_st_temp', value: 'unknown', timestamp: 'unknown' });
   assert.equal(body.status, 'ok');
-  assert.equal(body.verdict, 'Insufficient information');
+  assert.equal(body.verdict, 'Not verified');
 });
 
 test('sensor: a text label as the value with limits and a nanosecond timestamp is still answered', async (t) => {
   const base = startServer(t);
   const body = await get(base, { sensor_id: 'home/livingroom/temperature', value: 'weatherstation-12b', timestamp: '1794420244719649590', min: '-10', max: '50' });
   assert.equal(body.status, 'ok');
-  assert.equal(body.verdict, 'Insufficient information');
+  assert.equal(body.verdict, 'Not verified');
   assert.ok('heartbeat_fresh' in body.checks.performed);
   assert.ok(body.checks.not_performed.some((c) => c.startsWith('within_calibration_bounds')));
 });

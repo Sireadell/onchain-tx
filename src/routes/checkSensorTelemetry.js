@@ -15,6 +15,7 @@ import crypto from 'node:crypto';
 import { Router } from 'express';
 import { firstUsableValue, freeTextParam } from '../lib/entityExtract.js';
 import { paramsOf } from '../lib/liveJson.js';
+import { findPublicSensor, readPublicSensor, freshnessWindowSeconds } from '../lib/publicSensors.js';
 
 const router = Router();
 
@@ -41,7 +42,7 @@ export function safeEqualHex(a, b) {
 }
 
 const NUM = String.raw`[-+\u2212]?\d+(?:[.,]\d+)?`;
-const UNIT = String.raw`(?:\u00b0\s?[CF]|\s?degrees?(?:\s+(?:celsius|fahrenheit|[CF]))?|\s?celsius|\s?fahrenheit|\s?[CF](?![A-Za-z])|\s?%|\s?ppm|\s?ppb|\s?psi|\s?kpa|\s?hpa|\s?mbar|\s?bar|\s?volts?|\s?mv|\s?v(?![A-Za-z])|\s?ma(?![A-Za-z])|\s?amps?|\s?kw|\s?w(?![A-Za-z])|\s?lux|\s?db|\s?rpm|\s?m\/s|\s?km\/h|\s?mph|\s?hz|\s?\u00b5g\/m3|\s?ug\/m3|\s?mm(?![A-Za-z])|\s?cm(?![A-Za-z]))`;
+const UNIT = String.raw`(?:\s?(?:meters?|metres?|feet|ft)(?![A-Za-z])|\s?m(?![A-Za-z\/])|\u00b0\s?[CF]|\s?degrees?(?:\s+(?:celsius|fahrenheit|[CF]))?|\s?celsius|\s?fahrenheit|\s?[CF](?![A-Za-z])|\s?%|\s?ppm|\s?ppb|\s?psi|\s?kpa|\s?hpa|\s?mbar|\s?bar|\s?volts?|\s?mv|\s?v(?![A-Za-z])|\s?ma(?![A-Za-z])|\s?amps?|\s?kw|\s?w(?![A-Za-z])|\s?lux|\s?db|\s?rpm|\s?m\/s|\s?km\/h|\s?mph|\s?hz|\s?\u00b5g\/m3|\s?ug\/m3|\s?mm(?![A-Za-z])|\s?cm(?![A-Za-z]))`;
 
 function toNum(s) {
   return Number(String(s).replace('\u2212', '-').replace(',', '.'));
@@ -58,12 +59,28 @@ function cleanUnit(u) {
 
 // Pulls the reading, unit and any limits out of a sentence such as
 // "Sensor zone-3 reads 31.5 C, expected -5 to 30" or "pressure 12 psi, max 10".
+// Removes numbers that are ids, addresses, dates or time windows, so
+// "192.168.1.100", "UUID 70101020" or "within the last 24 hours" are never
+// read as the sensor value.
+export function stripNonReadings(text) {
+  return String(text)
+    .replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, ' ')
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, ' ')
+    .replace(/\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?/gi, ' ')
+    .replace(/\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{4}\b/gi, ' ')
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2})?\b/g, ' ')
+    .replace(/\b(?:uuid|id|site|station|sensor|device|node|feed|gauge|gage|no\.?|number|#)\s*[:#]?\s*[`'"(]?[A-Za-z_-]*\d[\w-]*/gi, ' ')
+    .replace(/\b(?:last|past|within|older than|less than|under|every)\s+(?:the\s+)?(?:last\s+)?\d+\s*(?:seconds?|secs?|s|minutes?|mins?|hours?|hrs?|h|days?)\b/gi, ' ')
+    .replace(/\b\d+\s*(?:seconds?|minutes?|hours?|days?)\s+old\b/gi, ' ')
+    .replace(/\b[A-Za-z]+[-_]\d[\w-]*/g, ' ');
+}
+
 export function readQuestion(text) {
   const out = { reading: null, unit: null, min: null, max: null };
   if (typeof text !== 'string' || !text.trim()) return out;
-  let rest = text;
+  let rest = stripNonReadings(text);
 
-  const rangeRe = new RegExp(String.raw`\b(?:between|from|range(?:\s+of)?|expected|normal|within|allowed|acceptable|safe|operating|should be)\s*:?\s*(${NUM})\s*(${UNIT})?\s*(?:to|and|through|\u2013|\u2014|-)\s*(${NUM})\s*(${UNIT})?`, 'i');
+  const rangeRe = new RegExp(String.raw`\b(?:between|from|range(?:\s+of)?|plausible range|calibration range|expected|normal|within|allowed|acceptable|safe|operating|should be)\s*:?\s*(?:(?:the|its|an?|expected|range of|of)\s+)*(${NUM})\s*(${UNIT})?\s*(?:to|and|through|\u2013|\u2014|-)\s*(${NUM})\s*(${UNIT})?`, 'i');
   const range = rest.match(rangeRe);
   if (range) {
     const a = toNum(range[1]);
@@ -104,6 +121,108 @@ function implausible(reading, unit) {
 const fmt = (n) => (Number.isInteger(n) ? String(n) : String(Number(n.toFixed(3))));
 const withUnitText = (n, unit) => `${fmt(n)}${unit ? (unit === '%' ? '%' : ` ${unit}`) : ''}`;
 
+function sensorLabel(question, sensorId) {
+  if (sensorId != null) return String(sensorId);
+  const q = String(question ?? '');
+  const m = q.match(/Requested sensor:\s*\\?"?([^"\\.]+)/i)
+    || q.match(/sensor\s+(?:ID\s*:?\s*)?['"`]([^'"`]+)['"`]/i)
+    || q.match(/['"`]([^'"`]{2,60})['"`]\s+sensor/i)
+    || q.match(/\(ID:\s*([^)]+)\)/i)
+    || q.match(/sensor\s+(?:ID\s+)?([A-Z][\w-]*\d[\w-]*)/);
+  return m ? m[1].trim() : 'the sensor';
+}
+
+// No live public reading and none supplied: say so plainly as a verdict, not
+// as a request for more input.
+function notVerified(sensorId, question, live, found, limits = {}) {
+  const label = sensorLabel(question, sensorId);
+  const q = String(question ?? '');
+  const privateFeed = /mqtt|192\.168\.|\b10\.\d+\.\d+\.\d+|localhost|raspberry|home\/|building\/|topic/i.test(q);
+  let where;
+  if (found?.kind === 'usgs') where = `USGS site ${found.id} returned no current value${live?.error ? ` (${live.error})` : ''}`;
+  else if (found?.kind === 'pegel') where = `no PEGELONLINE gauge matches ${[...(found.ids ?? []), ...(found.names ?? [])].join(', ') || 'the request'}`;
+  else if (found?.kind === 'nws') where = `NWS station ${found.id} returned no current observation${live?.error ? ` (${live.error})` : ''}`;
+  else if (privateFeed) where = 'it is a private feed (an MQTT topic or local device) that is not published on any public network';
+  else where = 'it is not on any public sensor network this service reads (USGS, PEGELONLINE, NWS, Sensor.Community)';
+  const range = limits.min != null || limits.max != null
+    ? ` The expected range (${limits.min ?? '-'} to ${limits.max ?? '-'}${limits.unit ? ` ${limits.unit}` : ''}) cannot be checked without a reading.`
+    : '';
+  return {
+    summary: `Not verified. No live reading for ${label} could be obtained: ${where}. So it cannot be confirmed that the sensor is reporting, the freshness of its data cannot be established (no observed_at), and no payload signature (HMAC) was supplied to verify.${range} Treat the sensor as unconfirmed until a timestamped, signed reading is available.`,
+    status: 'ok',
+    verdict: 'Not verified',
+    found: false,
+    confidence: 0.6,
+    canonical: `sensor-telemetry:${label}:not-verified`,
+    valid: false,
+    sensor_id: label,
+    reading: null,
+    observed_at: null,
+    reporting: null,
+    within_range: null,
+    signature_valid: null,
+    checks: { performed: {}, not_performed: ['live reading', 'heartbeat freshness', 'calibration bounds', 'payload signature'] },
+    source: live?.source ?? null,
+    checked_at: new Date().toISOString(),
+  };
+}
+
+const fmtN = (n) => (Number.isInteger(n) ? String(n) : String(Number(Number(n).toFixed(3))));
+
+function liveAnswer(live, question, min, max) {
+  const q = String(question ?? '');
+  let value = live.value;
+  let unit = live.unit;
+  if (unit === 'cm' && /\d\s*(?:m|meters?|metres?)\b/i.test(q)) { value = Number((value / 100).toFixed(3)); unit = 'm'; }
+  const obs = live.observed_at ? Date.parse(live.observed_at) : null;
+  const ageS = obs ? Math.round((Date.now() - obs) / 1000) : null;
+  const defaultWindow = /^(USGS|US National)/.test(live.source ?? '') ? 7200 : 3600;
+  const windowS = freshnessWindowSeconds(q) ?? defaultWindow;
+  const fresh = ageS != null && ageS <= windowS && ageS > -300;
+  const hasRange = min != null || max != null;
+  const inRange = hasRange ? (min == null || value >= min) && (max == null || value <= max) : null;
+  const ageText = ageS == null ? 'no observation time' : ageS < 120 ? `${ageS} s ago` : ageS < 7200 ? `${Math.round(ageS / 60)} min ago` : `${(ageS / 3600).toFixed(1)} h ago`;
+  const winText = windowS % 3600 === 0 ? `${windowS / 3600} h` : windowS % 60 === 0 ? `${windowS / 60} min` : `${windowS} s`;
+  let verdict = 'Live';
+  if (!fresh) verdict = 'Stale';
+  else if (inRange === false) verdict = 'Out of range';
+  else if (inRange === true) verdict = 'Within range';
+  const u = unit ? ` ${unit}` : '';
+  let rangeText = '';
+  if (hasRange && inRange) rangeText = ` That is inside the expected ${min ?? '-'} to ${max ?? '-'}${u}.`;
+  else if (hasRange) rangeText = ` That is ${max != null && value > max ? `above the upper limit ${max}${u} by ${fmtN(value - max)}` : `below the lower limit ${min}${u} by ${fmtN(min - value)}`} (expected ${min ?? '-'} to ${max ?? '-'}${u}).`;
+  else if (/calibrat/i.test(q)) rangeText = ' No numeric calibration range was given, so liveness and the value are reported.';
+  const metricNote = live.metric_matched === false ? ' (the metric asked for is not currently reported at this site, so its most recent live series is shown)' : '';
+  const state = live.state && live.state !== 'unknown' ? ` Gauge state: ${live.state}.` : '';
+  const others = (live.other_series ?? []).filter((o) => o.value != null).slice(0, 2).map((o) => `${o.metric} ${o.value}${o.unit ? ` ${o.unit}` : ''}`).join('; ');
+  const summary = `${verdict}. ${live.id}${live.site_name ? ` (${live.site_name})` : ''} is ${fresh ? 'reporting live' : 'not reporting fresh data'}: ${live.metric ?? 'reading'} ${fmtN(value)}${u} observed at ${live.observed_at ?? 'an unknown time'} (${ageText}, ${fresh ? 'inside' : 'outside'} the ${winText} freshness window)${metricNote}.${rangeText}${state}${others ? ` Other live values: ${others}.` : ''} Integrity: the value is read directly from the operator's HTTPS service; the public feed carries no HMAC, so a payload signature cannot be checked. Source: ${live.source}.`;
+  return {
+    summary,
+    status: 'ok',
+    verdict,
+    found: true,
+    confidence: 0.9,
+    canonical: `sensor-telemetry:${live.id}:${live.observed_at}`,
+    valid: fresh && inRange !== false,
+    sensor_id: live.id,
+    site_name: live.site_name ?? null,
+    metric: live.metric,
+    reading: value,
+    unit,
+    observed_at: live.observed_at,
+    age_seconds: ageS,
+    freshness_window_seconds: windowS,
+    reporting: fresh,
+    within_range: inRange,
+    min,
+    max,
+    signature_valid: null,
+    checks: { performed: { heartbeat_fresh: fresh, ...(hasRange ? { within_calibration_bounds: inRange } : {}) }, not_performed: ['signature_valid (public feed is not signed)'] },
+    source: live.source,
+    checked_at: new Date().toISOString(),
+  };
+}
+
 async function handle(req, res) {
   let p = paramsOf(req);
   const payload = firstUsableValue(p.payload);
@@ -125,6 +244,16 @@ async function handle(req, res) {
   const maxRaw = firstUsableValue(p.max, p.max_value);
   const min = minRaw != null && Number.isFinite(Number(minRaw)) ? Number(minRaw) : fromText.min;
   const max = maxRaw != null && Number.isFinite(Number(maxRaw)) ? Number(maxRaw) : fromText.max;
+
+  if (structuredReading == null && question) {
+    const found = findPublicSensor(question);
+    if (found) {
+      let live = null;
+      try { live = await readPublicSensor(found, question); } catch (err) { live = { found: false, error: String(err.message ?? err), source: found.kind }; }
+      if (live?.found && live.value != null) return res.json(liveAnswer(live, question, min, max));
+      if (found.kind !== 'pegel' || found.strong) return res.json(notVerified(sensorId, question, live, found, { min, max, unit }));
+    }
+  }
 
   const ts = toEpochSeconds(rawTs);
   const maxAge = Number(firstUsableValue(p.max_age_seconds, p.heartbeat_seconds) ?? 300);
@@ -174,7 +303,8 @@ async function handle(req, res) {
   } else if (reading != null) {
     sentence = `${name} reads ${readingText}, but no minimum, maximum or expected range was given, so I cannot say whether that is normal.`;
   } else {
-    sentence = `${name}: no numeric reading could be found in the request${value != null ? ` (value "${String(value).slice(0, 40)}" is not a number)` : ''}, so I cannot judge it. Send the reading with its unit and the expected range, for example "reads 31.5 C, expected -5 to 30".`;
+    verdict = 'Not verified';
+    sentence = notVerified(sensorId, question, null, null, { min, max, unit }).summary.replace(/^Not verified\. /, '');
   }
   if (performed.heartbeat_fresh === false) sentence += ` The reading timestamp is ${age}s old against a ${maxAge}s heartbeat window, so it is stale.`;
   else if (performed.heartbeat_fresh === true) sentence += ` The reading is fresh (${age}s old).`;
@@ -186,7 +316,7 @@ async function handle(req, res) {
     summary: `${verdict}. ${sentence}`,
     status: 'ok',
     verdict,
-    confidence: verdict === 'Insufficient information' ? 0.5 : 0.9,
+    confidence: verdict === 'Insufficient information' || verdict === 'Not verified' ? 0.6 : 0.9,
     canonical: `sensor-telemetry:${sensorId ?? 'unknown'}:${rawTs ?? ''}:${value ?? reading ?? ''}`,
     valid,
     checks: { performed, not_performed: notPerformed },
