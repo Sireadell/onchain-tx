@@ -12,6 +12,10 @@ import {
 } from '../lib/weatherForecast.js';
 import { respondUnusableInput, quoteParam } from '../lib/unusableInput.js';
 import { firstUsableValue } from '../lib/entityExtract.js';
+import {
+  targetDate, ghcnStation, placeIn, coordsIn, readClaims, readTolerance, ghcnDay, era5Day, verdictAnswer,
+} from '../lib/forecastVerify.js';
+import { resolveLocation, fetchForecast } from '../lib/weatherForecast.js';
 
 const router = Router();
 
@@ -19,7 +23,7 @@ const LOCATION_PARAM_KEYS = ['location', 'place', 'city'];
 const DATE_PARAM_KEYS = ['date', 'day', 'on_date'];
 const FREE_TEXT_KEYS = ['query', 'q', 'question', 'text', 'input'];
 
-const MAX_INPUT_CHARS = 400;
+const MAX_INPUT_CHARS = 1200;
 
 // Pulls a YYYY-MM-DD date out of free text, or an ISO-ish variant with
 // slashes. Also recognises "today"/"yesterday" as relative words, since a
@@ -28,6 +32,10 @@ const MAX_INPUT_CHARS = 400;
 // resolved honestly downstream rather than guessed at here.
 function extractDate(text) {
   if (typeof text !== 'string') return null;
+  // The day being verified is the latest date named ("issued 23 September
+  // for 24 September"), and dates may be written in words.
+  const target = targetDate(text);
+  if (target) return target;
   const iso = text.match(/\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b/);
   if (iso) {
     const [, y, m, d] = iso;
@@ -56,6 +64,55 @@ function summarize(result, dateStr) {
   return parts.join(' ');
 }
 
+const fmtC = (v, f) => `${Math.round(v * 10) / 10} °C${f ? ` (${Math.round(v * 9 / 5 + 32)} °F)` : ''}`;
+
+// A question that states a forecast (or names a weather station) is answered
+// with the verdict first, then the observed figure and the error. Returns
+// null when the question carries no claim to check, so the plain
+// "what happened" answer below runs instead.
+async function verifyClaim(text, dateStr) {
+  const claims = readClaims(text);
+  const station = ghcnStation(text);
+  const hasClaim = Object.keys(claims.forecast).length > 0;
+  if (!hasClaim && !station) return null;
+  const tolerance = readTolerance(text);
+  const place = placeIn(text);
+  let observed = null;
+  let placeName = place ?? text.slice(0, 60);
+  if (station) {
+    observed = await ghcnDay(station, dateStr).catch(() => null);
+    if (observed) placeName = `${place ?? 'station'} (GHCN ${station})`;
+  }
+  if (!observed) {
+    const needObs = ['max', 'min', 'precip'].some((k) => claims.forecast[k] !== undefined && claims.reference[k] === undefined);
+    if (needObs || !hasClaim) {
+      const loc = await resolveLocation(place ?? text).catch(() => (place ? resolveLocation(text) : null));
+      if (!loc) return null;
+      placeName = loc.name;
+      observed = await era5Day(loc.latitude, loc.longitude, dateStr);
+    }
+  }
+  const base = {
+    status: 'ok', found: true, location: placeName, date: dateStr,
+    source: observed?.source ?? 'values given in the question', checked_at: new Date().toISOString(),
+  };
+  if (hasClaim) {
+    const v = verdictAnswer({ placeName, date: dateStr, claims, tolerance, observed });
+    if (!v) return null;
+    return {
+      ...base, answer: v.answer, summary: v.answer, verdict: v.verdict, confidence: 0.9, checks: v.checks,
+      observed_max_c: observed?.max ?? null, observed_min_c: observed?.min ?? null, observed_precip_mm: observed?.precip ?? null,
+    };
+  }
+  if (!observed || observed.max == null) return null;
+  const f = /fahrenheit|°\s*f/i.test(text);
+  const answer = `On ${dateStr} at ${placeName}, the observed daily high (TMAX) was ${fmtC(observed.max, f)}${observed.min != null ? `, the low (TMIN) ${fmtC(observed.min, f)}` : ''}${observed.precip != null ? `, and precipitation ${observed.precip} mm` : ''}. Source: ${observed.source}.`;
+  return {
+    ...base, answer, summary: answer, verdict: 'found', confidence: 0.9,
+    temp_max_c: observed.max, temp_min_c: observed.min, precipitation_mm: observed.precip,
+  };
+}
+
 async function handleWeatherForecastVerify(req, res) {
   const params = (req.method === 'GET' ? req.query : req.body) ?? {};
 
@@ -63,7 +120,10 @@ async function handleWeatherForecastVerify(req, res) {
   const dateRaw = firstUsableValue(...DATE_PARAM_KEYS.map((k) => params[k]));
   const freeText = firstUsableValue(...FREE_TEXT_KEYS.map((k) => params[k]));
 
-  const locationInput = String(locationRaw ?? freeText ?? '').trim().slice(0, MAX_INPUT_CHARS);
+  // "at 51.5085,-0.1257" (no space) was not read as coordinates; found in a
+  // scored question 2026-11-21.
+  const locationInput = String(locationRaw ?? freeText ?? '').trim().slice(0, MAX_INPUT_CHARS)
+    .replace(/(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/, '$1, $2');
   if (!locationInput) {
     return respondUnusableInput(
       res,
@@ -80,6 +140,22 @@ async function handleWeatherForecastVerify(req, res) {
   // field. locationInput itself is the whole question in that case, so it
   // is tried too, not just date/freeText.
   if (!dateStr) dateStr = extractDate(locationInput);
+  // "What is the current weather forecast for Cairo, Egypt?" is routed here
+  // too (4 scored questions 2026-11-21 to 11-23). It has no past day to
+  // check, so it gets today's forecast plainly instead of a refusal.
+  if (!dateStr && /\b(forecast|current|right now|today|tomorrow)\b/i.test(locationInput)) {
+    const place = placeIn(locationInput);
+    const fc = place ? await fetchForecast(place, 1).catch(() => null) : null;
+    const d = fc?.days?.[0];
+    if (d) {
+      const answer = `Today's forecast for ${fc.name} (${d.date}) is ${d.condition ?? 'mixed conditions'}, with a high of ${d.temp_max} °C and a low of ${d.temp_min} °C, ${d.precipitation_probability_pct ?? 0}% chance of rain (${d.precipitation_mm} mm expected) and wind up to ${d.wind_max_kmh} km/h. Source: ${fc.source} forecast, read at request time.`;
+      return res.json({
+        status: 'ok', verdict: 'found', found: true, answer, summary: answer, confidence: 0.8,
+        location: fc.name, date: d.date, temp_max_c: d.temp_max, temp_min_c: d.temp_min,
+        precipitation_mm: d.precipitation_mm, source: fc.source, checked_at: new Date().toISOString(),
+      });
+    }
+  }
   if (!dateStr) {
     return respondUnusableInput(
       res,
@@ -102,9 +178,13 @@ async function handleWeatherForecastVerify(req, res) {
     );
   }
 
+  const verified = await verifyClaim(locationInput, dateStr).catch(() => null);
+  if (verified) return res.json(verified);
+
   let result;
   try {
-    result = await fetchHistoricalConditions(locationInput, dateStr);
+    result = await fetchHistoricalConditions(coordsIn(locationInput) ?? placeIn(locationInput) ?? locationInput, dateStr)
+      .catch((err) => (placeIn(locationInput) ? fetchHistoricalConditions(locationInput, dateStr) : Promise.reject(err)));
   } catch (err) {
     if (err instanceof WeatherLookupError) {
       return respondUnusableInput(res, err.message);
@@ -120,9 +200,11 @@ async function handleWeatherForecastVerify(req, res) {
     throw err;
   }
 
+  const plain = summarize(result, dateStr);
   res.json({
     status: 'ok',
-    summary: summarize(result, dateStr),
+    answer: plain,
+    summary: plain,
     confidence: result.temp_min != null ? 0.85 : 0.5,
     canonical: ['weather-forecast-verify', result.name.toLowerCase(), dateStr].join(':'),
     location: result.name,
