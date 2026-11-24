@@ -128,6 +128,16 @@ async function humanTokenUnits(chain, contract, calls, fields) {
 
 const MAX_LOG_RANGE = 2000n;
 
+// Aave v3 Pool on Ethereum and the reserves people ask about by name.
+const AAVE_V3_ETH_POOL = '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2';
+const AAVE_V3_ETH_ASSETS = {
+  WETH: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+  USDC: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+  USDT: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+  DAI: '0x6B175474E89094C44Da98b954EedeAC495271d0F',
+  WBTC: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',
+};
+
 async function answer(req, res) {
   const params = (req.method === 'GET' ? req.query : req.body) ?? {};
   const text = freeTextParam(params) ?? '';
@@ -198,6 +208,27 @@ async function answer(req, res) {
   };
 
   try {
+    // 0. Aave v3 reserve state ("supply index, variable borrow index and
+    // current liquidity rate of Aave's WETH market at block 19,000,000"),
+    // asked twice in scored rounds 2026-11-22 and 11-23 with no address.
+    const aaveAsset = chain.key === 'eth' && /\baave\b/i.test(text)
+      && /\b(?:liquidity|supply|borrow)\s+(?:index|rate)\b|\breserve\s+data\b/i.test(text)
+      ? Object.entries(AAVE_V3_ETH_ASSETS).find(([sym]) => new RegExp(`\\b${sym}\\b`, 'i').test(text)) ?? null
+      : null;
+    if (aaveAsset) {
+      const [sym, asset] = aaveAsset;
+      const data = `0x35ea6a75${asset.slice(2).toLowerCase().padStart(64, '0')}`;
+      const hex = await run((b) => ethCall(chain.segment, AAVE_V3_ETH_POOL, data, b));
+      const word = (i) => BigInt(`0x${hex.slice(2 + i * 64, 2 + (i + 1) * 64)}`);
+      const RAY = 27;
+      const li = word(1); const lr = word(2); const vbi = word(3); const vbr = word(4); const ts = Number(word(6));
+      const pct = (r) => (Number(r) / 1e25).toFixed(4);
+      return reply(
+        `Aave v3 ${sym} reserve on Ethereum at ${blockLabel(note.text ? 'latest' : block)}: liquidity (supply) index ${amountToDecimalString(li, RAY)} (raw ${li}), variable borrow index ${amountToDecimalString(vbi, RAY)} (raw ${vbi}), current liquidity rate ${pct(lr)}% a year (raw ${lr} ray), current variable borrow rate ${pct(vbr)}% a year (raw ${vbr} ray), last updated ${new Date(ts * 1000).toISOString()}. Read with getReserveData(${asset}) on the Aave v3 Pool ${AAVE_V3_ETH_POOL}.`,
+        { kind: 'aave_reserve', asset, liquidity_index: li.toString(), variable_borrow_index: vbi.toString(), current_liquidity_rate: lr.toString(), current_variable_borrow_rate: vbr.toString(), last_update_timestamp: ts },
+      );
+    }
+
     // 1. A raw storage slot.
     if (slot && contract) {
       const word = await run((b) => getStorageAt(chain.segment, contract, slot, b));
