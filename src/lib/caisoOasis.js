@@ -72,9 +72,36 @@ export function parseOasisCsv(text) {
   return [...byInterval.values()].sort((a, b) => a.start.localeCompare(b.start));
 }
 
+// OASIS allows about one request every 5 seconds, and the scorer often asks
+// the same question several times in a few minutes. So answers are cached
+// (past intervals for a day, recent ones for 5 minutes) and calls are spaced.
+const cache = new Map();
+let nextSlot = 0;
+async function spaced() {
+  const now = Date.now();
+  const wait = Math.max(0, nextSlot - now);
+  // Past about 20 s of queue the answer would miss Telegraph's 30 s cut.
+  if (wait > 20000) throw new Error('CAISO OASIS is busy with earlier requests');
+  nextSlot = Math.max(now, nextSlot) + 5200;
+  if (wait) await new Promise((r) => setTimeout(r, wait));
+}
+
+export async function fetchCaisoLmp(opts) {
+  const key = `${opts.market}|${opts.node}|${opts.start.toISOString()}|${opts.end.toISOString()}`;
+  const hit = cache.get(key);
+  if (hit && Date.now() < hit.until) return hit.value;
+  const value = await fetchCaisoLmpUncached(opts);
+  const settled = opts.end.getTime() < Date.now() - 2 * 3600e3;
+  if (value.intervals.length) {
+    if (cache.size > 300) cache.delete(cache.keys().next().value);
+    cache.set(key, { value, until: Date.now() + (settled ? 24 * 3600e3 : 5 * 60e3) });
+  }
+  return value;
+}
+
 // market 'DAM' (hourly) or 'RTM' (5-minute). Returns intervals with LMP and
 // its parts: MCE energy, MCC congestion, MCL losses, MGHG greenhouse gas.
-export async function fetchCaisoLmp({ market, node, start, end, fetchImpl = fetch, timeoutMs = 20000 }) {
+async function fetchCaisoLmpUncached({ market, node, start, end, fetchImpl = fetch, timeoutMs = 12000 }) {
   const q = market === 'RTM'
     ? { queryname: 'PRC_INTVL_LMP', version: '3', market_run_id: 'RTM' }
     : { queryname: 'PRC_LMP', version: '12', market_run_id: 'DAM' };
@@ -82,6 +109,7 @@ export async function fetchCaisoLmp({ market, node, start, end, fetchImpl = fetc
   let lastErr;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
+      await spaced();
       const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs), redirect: 'follow' });
       if (res.status === 429 || res.status === 302) throw new Error(`OASIS busy (${res.status})`);
       if (!res.ok) throw new Error(`OASIS HTTP ${res.status}`);
@@ -95,7 +123,6 @@ export async function fetchCaisoLmp({ market, node, start, end, fetchImpl = fetc
       return { intervals: parseOasisCsv(file.text), url };
     } catch (err) {
       lastErr = err;
-      if (attempt === 0) await new Promise((r) => setTimeout(r, 5500));
     }
   }
   throw lastErr;
